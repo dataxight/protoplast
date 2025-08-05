@@ -5,6 +5,7 @@ Tests for reading h5ad files.
 import pathlib
 
 import anndata as ad
+import h5py
 import numpy as np
 import pandas as pd
 import pytest
@@ -127,3 +128,71 @@ def test_count_data(test_h5ad_file: str):
     df = read_h5ad(test_h5ad_file, batch_size=2)
     count = df.count().to_pandas()["count"][0]
     assert count == 4
+
+
+@pytest.fixture(scope="function")
+def test_h5ad_file_custom_var_dataset(tmpdir: pathlib.Path) -> str:
+    """Create an h5ad file with variable names stored in a custom location"""
+    # Create a small AnnData object with sparse data
+    n_obs = 4
+    n_vars = 5
+
+    indptr = np.array([0, 2, 2, 4, 5])
+    indices = np.array([0, 2, 1, 3, 0])
+    data = np.array([1, 2, 3, 4, 5], dtype=np.float32)
+
+    X = csr_matrix((data, indices, indptr), shape=(n_obs, n_vars))
+
+    obs = pd.DataFrame(index=[f"cell_{i}" for i in range(n_obs)])
+    var = pd.DataFrame(index=[f"custom_gene_{i}" for i in range(n_vars)])
+    adata = ad.AnnData(X=X, obs=obs, var=var)
+
+    filepath = tmpdir / "test_custom_var.h5ad"
+    adata.write_h5ad(filepath)
+    
+    # Now modify the h5ad file to store variable names in a custom location
+    with h5py.File(filepath, "r+") as f:
+        # Copy the original variable names to a custom location
+        original_var_names = f["var/_index"][:]
+        
+        # Create a custom group and dataset
+        if "custom_var" not in f:
+            custom_group = f.create_group("custom_var")
+        else:
+            custom_group = f["custom_var"]
+            
+        if "gene_names" in custom_group:
+            del custom_group["gene_names"]
+            
+        custom_group.create_dataset("gene_names", data=original_var_names)
+    
+    return str(filepath)
+
+
+def test_read_h5ad_custom_var_dataset(test_h5ad_file_custom_var_dataset: str):
+    """Tests reading h5ad file with custom var dataset location"""
+    # Read using the custom var dataset location
+    df = read_h5ad(test_h5ad_file_custom_var_dataset, var_h5dataset="custom_var/gene_names")
+    assert isinstance(df, DataFrame)
+
+    pd_df = df.to_pandas()
+    assert len(pd_df) == 4
+    assert list(pd_df.columns) == [f"custom_gene_{i}" for i in range(5)]
+
+    expected_data = {
+        "custom_gene_0": [1.0, 0.0, 0.0, 5.0],
+        "custom_gene_1": [0.0, 0.0, 3.0, 0.0],
+        "custom_gene_2": [2.0, 0.0, 0.0, 0.0],
+        "custom_gene_3": [0.0, 0.0, 4.0, 0.0],
+        "custom_gene_4": [0.0, 0.0, 0.0, 0.0],
+    }
+    expected_df = pd.DataFrame(expected_data).astype(np.float32)
+    pd.testing.assert_frame_equal(pd_df, expected_df)
+
+
+def test_read_h5ad_invalid_var_dataset(test_h5ad_file: str):
+    """Tests that reading with an invalid var dataset raises an appropriate error"""
+    with pytest.raises(KeyError):
+        df = read_h5ad(test_h5ad_file, var_h5dataset="nonexistent/dataset")
+        # Try to access the data to trigger the error
+        df.to_pandas()

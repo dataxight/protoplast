@@ -30,19 +30,21 @@ class H5ADReader:
         MetadataReader: A MetadataReader object.
     """
 
-    def __init__(self, filename: str):
+    def __init__(self, filename: str, var_h5dataset: str = "var/_index"):
         self.filename = filename
         self._gene_name_cache = None
         self._gene_index_map = None
         self._matrix_info = None
         self._n_cells = None
+        self.var_h5dataset: str = var_h5dataset
+
 
     @property
     def gene_names(self) -> np.ndarray:
         """Cached gene names - only read once"""
         if self._gene_name_cache is None:
             with h5py.File(self.filename, "r") as f:
-                gene_names = f["var/_index"][:]
+                gene_names = f[self.var_h5dataset][:]
                 gene_names = [gene.decode("utf-8") for gene in gene_names]
                 self._gene_name_cache = gene_names
         return self._gene_name_cache
@@ -152,6 +154,7 @@ class H5ADReader:
 
 def _h5ad_data__factory_function(
     file_path: str,
+    var_h5dataset: str,
     start_idx: int,
     end_idx: int,
     schema: Schema,
@@ -160,17 +163,18 @@ def _h5ad_data__factory_function(
     """A factory function that reads a single CSV file into pyarrow,
     and returns an iterator of Daft RecordBatches."""
 
-    reader = H5ADReader(file_path)
+    reader = H5ADReader(file_path, var_h5dataset)
     return reader.read_cells_data_to_record_batch2(start_idx, end_idx, schema, arrow_filters)
 
 
 class H5ADScanOperator(ScanOperator):
-    def __init__(self, path: str, batch_size: int = 1000000):
+    def __init__(self, path: str, batch_size: int = 10000, var_h5dataset: str = "var/_index"):
         super().__init__()
         self._path = path
-        self._reader = H5ADReader(path)
+        self._reader = H5ADReader(path, var_h5dataset)
         self._schema = self._reader.create_schema_from_genes()
         self._batch_size = batch_size
+        self._var_h5dataset = var_h5dataset
 
     def name(self) -> str:
         return "H5ADScanOperator"
@@ -235,7 +239,7 @@ class H5ADScanOperator(ScanOperator):
             yield ScanTask.python_factory_func_scan_task(
                 module=_h5ad_data__factory_function.__module__,
                 func_name=_h5ad_data__factory_function.__name__,
-                func_args=(self._path, start_idx, end_idx, push_down_schema, arrow_filters),
+                func_args=(self._path, self._var_h5dataset, start_idx, end_idx, push_down_schema, arrow_filters),
                 schema=after_scan_schema._schema,
                 num_rows=None,
                 size_bytes=None,
