@@ -1,7 +1,6 @@
 # ruff: noqa: I002
 # isort: dont-add-import: from __future__ import annotations
 
-from daft.api_annotations import PublicAPI
 from daft.daft import ScanOperatorHandle
 from daft.dataframe import DataFrame
 from daft.logical.builder import LogicalPlanBuilder
@@ -9,7 +8,6 @@ from daft.logical.builder import LogicalPlanBuilder
 from .scan import H5ADScanOperator
 
 
-@PublicAPI
 def read_h5ad(
     path: str,
     batch_size: int = 1000,

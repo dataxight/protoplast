@@ -15,7 +15,7 @@ def read_vcf(
     samples: list[str] | None = None,
     genotype_fields: list[str] | None = None,
     regions: list[str] | None = None,
-    batch_size: int = 131072,
+    batch_size: int = 10000,
 ) -> DataFrame:
     """Create a DataFrame from a VCF (Variant Call Format) file.
 
