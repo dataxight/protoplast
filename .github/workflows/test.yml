@@ -38,6 +38,7 @@ jobs:
     - name: Install project
       run: |
         pip install .
+        pip install .[test]
     - name: Run tests
       run: |
         pytest
