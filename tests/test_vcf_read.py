@@ -4,7 +4,7 @@ import pytest
 from daft.dataframe import DataFrame
 from daft.expressions import col
 
-from protocell.genomics.vcf import read_vcf
+from protoplast.genomics.vcf import read_vcf
 
 
 def test_read_vcf_basic():

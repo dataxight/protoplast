@@ -1,5 +1,5 @@
 [project]
-name = "protocell"
+name = "protoplast"
 version = "0.1.0"
 description = "A collection of drivers for Protoform, the data engineering framework from DataXight"
 readme = "README.md"
@@ -12,7 +12,7 @@ maintainers = [
 classifiers = [
 
 ]
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 dependencies = [
   "typer",
   "anndata",
@@ -31,12 +31,12 @@ test = [
 ]
 
 [project.urls]
-bugs = "https://github.com/ptdtan/protocell/issues"
-changelog = "https://github.com/ptdtan/protocell/blob/master/changelog.md"
-homepage = "https://github.com/ptdtan/protocell"
+bugs = "https://github.com/ptdtan/protoplast/issues"
+changelog = "https://github.com/ptdtan/protoplast/blob/master/changelog.md"
+homepage = "https://github.com/ptdtan/protoplast"
 
 [project.scripts]
-protocell = "protocell.cli:app"
+protoplast = "protoplast.cli:app"
 
 [tool.ty]
 # All rules are enabled as "error" by default; no need to specify unless overriding.

@@ -13,7 +13,7 @@ from daft.dataframe import DataFrame
 from daft.expressions import col
 from scipy.sparse import csr_matrix
 
-from protocell.genomics.anndata import read_h5ad
+from protoplast.genomics.anndata import read_h5ad
 
 
 @pytest.fixture(scope="function")

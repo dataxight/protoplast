@@ -2,37 +2,37 @@
 
 ## Stable release
 
-To install protocell, run this command in your terminal:
+To install protoplast, run this command in your terminal:
 
 ```sh
-uv add protocell
+uv add protoplast
 ```
 
 Or if you prefer to use `pip`:
 
 ```sh
-pip install protocell
+pip install protoplast
 ```
 
 ## From source
 
-The source files for protocell can be downloaded from the [Github repo](https://github.com/ptdtan/protocell).
+The source files for protoplast can be downloaded from the [Github repo](https://github.com/ptdtan/protoplast).
 
 You can either clone the public repository:
 
 ```sh
-git clone git://github.com/ptdtan/protocell
+git clone git://github.com/ptdtan/protoplast
 ```
 
-Or download the [tarball](https://github.com/ptdtan/protocell/tarball/master):
+Or download the [tarball](https://github.com/ptdtan/protoplast/tarball/master):
 
 ```sh
-curl -OJL https://github.com/ptdtan/protocell/tarball/master
+curl -OJL https://github.com/ptdtan/protoplast/tarball/master
 ```
 
 Once you have a copy of the source, you can install it with:
 
 ```sh
-cd protocell
+cd protoplast
 uv pip install .
 ```

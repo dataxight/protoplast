@@ -8,7 +8,7 @@ You can contribute in many ways:
 
 ### Report Bugs
 
-Report bugs at https://github.com/ptdtan/protocell/issues.
+Report bugs at https://github.com/dataxight/protoplast/issues.
 
 If you are reporting a bug, please include:
 
@@ -26,11 +26,11 @@ Look through the GitHub issues for features. Anything tagged with "enhancement" 
 
 ### Write Documentation
 
-protocell could always use more documentation, whether as part of the official docs, in docstrings, or even on the web in blog posts, articles, and such.
+protoplast could always use more documentation, whether as part of the official docs, in docstrings, or even on the web in blog posts, articles, and such.
 
 ### Submit Feedback
 
-The best way to send feedback is to file an issue at https://github.com/ptdtan/protocell/issues.
+The best way to send feedback is to file an issue at https://github.com/dataxight/protoplast/issues.
 
 If you are proposing a feature:
 
@@ -40,20 +40,20 @@ If you are proposing a feature:
 
 ## Get Started!
 
-Ready to contribute? Here's how to set up `protocell` for local development.
+Ready to contribute? Here's how to set up `protoplast` for local development.
 
-1. Fork the `protocell` repo on GitHub.
+1. Fork the `protoplast` repo on GitHub.
 2. Clone your fork locally:
 
    ```sh
-   git clone git@github.com:your_name_here/protocell.git
+   git clone git@github.com:your_name_here/protoplast.git
    ```
 
 3. Install your local copy into a virtualenv. Assuming you have virtualenvwrapper installed, this is how you set up your fork for local development:
 
    ```sh
-   mkvirtualenv protocell
-   cd protocell/
+   mkvirtualenv protoplast
+   cd protoplast/
    python setup.py develop
    ```
 
@@ -99,7 +99,7 @@ Before you submit a pull request, check that it meets these guidelines:
 To run a subset of tests:
 
 ```sh
-pytest tests.test_protocell
+pytest tests.test_protoplast
 ```
 
 ## Deploying
