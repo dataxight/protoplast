@@ -1,22 +1,38 @@
 import logging
+import sys
 from collections.abc import Iterator
-
+import time
 import h5py
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute
 import pyarrow.compute as pc
 from daft import Expression
-from daft.daft import PyPartitionField, PyPushdowns, PyRecordBatch, ScanTask
+from daft.daft import PyPartitionField, PyPushdowns, PyRecordBatch, ScanTask, PyField, PyDataType
 from daft.io.scan import ScanOperator
 from daft.logical.schema import Schema
 from daft.recordbatch import RecordBatch
 from pyarrow import RecordBatch as pa_RecordBatch
 
 logger = logging.getLogger(__name__)
-# log to file
+# log to file, with timestamp formatted as YYYY-MM-DD HH:MM:SS, and log to console
 logger.setLevel(logging.DEBUG)
-logger.addHandler(logging.FileHandler("anndata_scan.log"))
+
+# Create formatter with timestamp and function line information
+formatter = logging.Formatter(
+    fmt='%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+# Create and configure file handler
+file_handler = logging.FileHandler("anndata_scan.log", mode="a")
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
+# Create and configure console handler
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
 
 class H5ADReader:
@@ -43,7 +59,7 @@ class H5ADReader:
     def gene_names(self) -> np.ndarray:
         """Cached gene names - only read once"""
         if self._gene_name_cache is None:
-            with h5py.File(self.filename, "r") as f:
+            with h5py.File(self.filename, "r", locking=False) as f:
                 gene_names = f[self.var_h5dataset][:]
                 gene_names = [gene.decode("utf-8") for gene in gene_names]
                 self._gene_name_cache = gene_names
@@ -67,13 +83,14 @@ class H5ADReader:
             gene_names = self.gene_names
 
         # TODO: have to use int if the data is count data
-        return Schema.from_pyarrow_schema(pa.schema([pa.field(gene_name, pa.float32()) for gene_name in gene_names]))
+        pyarrow_schema = pa.schema([pa.field(gene_name, pa.float32()) for gene_name in gene_names] + [pa.field("__cell_id", pa.int32())])
+        return Schema.from_pyarrow_schema(pyarrow_schema)
 
     @property
     def matrix_info(self) -> dict:
         """Cache matrix metadata to avoid repeated file access"""
         if self._matrix_info is None:
-            with h5py.File(self.filename, "r") as f:
+            with h5py.File(self.filename, "r", locking=False) as f:
                 X_group = f["X"]
                 if isinstance(X_group, h5py.Group):
                     self._matrix_info = {
@@ -112,16 +129,18 @@ class H5ADReader:
         Read a batch of cells into memory
         """
         # TODO: use the correct dtype. Should use int32 for count data, float32 for other data
+        start_time = time.time()
         batch_data = {field.name: np.zeros(end_idx - start_idx, dtype=np.float32) for field in schema}
-
+        batch_data["__cell_id"] = pa.array(np.arange(start_idx, end_idx, dtype=np.int32))
         # TODO: as we can provide the file-like object, consider using fsspec so we can read it remotely
-        with h5py.File(self.filename, "r") as f:
+        with h5py.File(self.filename, "r", locking=False) as f:
             cells = f["X"]["indptr"][start_idx : end_idx + 1]  # +1 because we want to include where the last cell ends
             read_start = cells[0]
             read_end = cells[-1]
             z = pa.array(f["X"]["data"][read_start:read_end])
             y = pa.array(f["X"]["indices"][read_start:read_end], type=pa.int32())
             x = np.zeros(read_end - read_start, dtype=np.int32)
+            logger.debug(f"Reading cells {start_idx} to {end_idx} in {time.time() - start_time} seconds")
 
             # iterate the cells and read the data
             for i, cell_start in enumerate(cells[:-1]):  # -1 because the last value is not a cell start
@@ -149,6 +168,7 @@ class H5ADReader:
         batch = pa_RecordBatch.from_pydict(batch_data)
         if pyarrow_filters is not None:
             batch = batch.filter(pyarrow_filters)
+        logger.debug(f"End reading cells {start_idx} to {end_idx} in {time.time() - start_time} seconds")
         yield RecordBatch.from_arrow_record_batches([batch], batch.schema)._recordbatch
 
 
@@ -186,7 +206,7 @@ class H5ADScanOperator(ScanOperator):
         return self._schema
 
     def partitioning_keys(self) -> list[PyPartitionField]:
-        return []
+        return [PyPartitionField(PyField.create("__cell_id", PyDataType.int32()))]
 
     def can_absorb_filter(self) -> bool:
         return True
@@ -235,7 +255,8 @@ class H5ADScanOperator(ScanOperator):
         if filter is not None:
             arrow_filters = Expression._from_pyexpr(filter).to_arrow_expr()
 
-        for start_idx, end_idx in self._reader.generate_cell_batches(self._batch_size):
+        batches = [(start_idx, end_idx) for start_idx, end_idx in self._reader.generate_cell_batches(self._batch_size)]
+        for start_idx, end_idx in batches:
             yield ScanTask.python_factory_func_scan_task(
                 module=_h5ad_data__factory_function.__module__,
                 func_name=_h5ad_data__factory_function.__name__,

@@ -50,7 +50,7 @@ def test_read_h5ad_single_file(test_h5ad_file: str):
     # H5ADScanOperator in scan.py hardcodes schema to first 10 genes
     pd_df = df.to_pandas()
     assert len(pd_df) == 4
-    assert list(pd_df.columns) == [f"gene_{i}" for i in range(5)]
+    assert list(pd_df.columns) == [f"gene_{i}" for i in range(5)] + ["__cell_id"]
 
     expected_data = {
         "gene_0": [1.0, 0.0, 0.0, 5.0],
@@ -58,8 +58,13 @@ def test_read_h5ad_single_file(test_h5ad_file: str):
         "gene_2": [2.0, 0.0, 0.0, 0.0],
         "gene_3": [0.0, 0.0, 4.0, 0.0],
         "gene_4": [0.0, 0.0, 0.0, 0.0],
+        "__cell_id": [0, 1, 2, 3],  # Cell indices
     }
-    expected_df = pd.DataFrame(expected_data).astype(np.float32)
+    expected_df = pd.DataFrame(expected_data)
+    # Convert gene columns to float32, keep __cell_id as int32
+    for gene_col in [f"gene_{i}" for i in range(5)]:
+        expected_df[gene_col] = expected_df[gene_col].astype(np.float32)
+    expected_df["__cell_id"] = expected_df["__cell_id"].astype(np.int32)
     pd.testing.assert_frame_equal(pd_df, expected_df)
 
 
@@ -92,8 +97,13 @@ def test_read_h5ad_with_limit(test_h5ad_file: str):
         "gene_2": [2.0, 0.0],
         "gene_3": [0.0, 0.0],
         "gene_4": [0.0, 0.0],
+        "__cell_id": [0, 1],
     }
-    expected_df = pd.DataFrame(expected_data).astype(np.float32)
+    expected_df = pd.DataFrame(expected_data)
+    # Convert gene columns to float32, keep __cell_id as int32
+    for gene_col in [f"gene_{i}" for i in range(5)]:
+        expected_df[gene_col] = expected_df[gene_col].astype(np.float32)
+    expected_df["__cell_id"] = expected_df["__cell_id"].astype(np.int32)
     pd.testing.assert_frame_equal(pd_df, expected_df)
 
 
@@ -110,9 +120,15 @@ def test_read_h5ad_with_filter_only(test_h5ad_file: str):
         "gene_2": [0.0],
         "gene_3": [4.0],
         "gene_4": [0.0],
+        "__cell_id": [2],  # This is cell index 2 which has gene_1 = 3.0
     }
+    expected_df = pd.DataFrame(expected_data)
+    # Convert gene columns to float32, keep __cell_id as int32
+    for gene_col in [f"gene_{i}" for i in range(5)]:
+        expected_df[gene_col] = expected_df[gene_col].astype(np.float32)
+    expected_df["__cell_id"] = expected_df["__cell_id"].astype(np.int32)
     # Resetting index because .where() can lead to a filtered index
-    pd.testing.assert_frame_equal(pd_df.reset_index(drop=True), pd.DataFrame(expected_data).astype(np.float32))
+    pd.testing.assert_frame_equal(pd_df.reset_index(drop=True), expected_df.reset_index(drop=True))
 
 
 def test_read_h5ad_with_filter_and_select(test_h5ad_file: str):
@@ -177,7 +193,7 @@ def test_read_h5ad_custom_var_dataset(test_h5ad_file_custom_var_dataset: str):
 
     pd_df = df.to_pandas()
     assert len(pd_df) == 4
-    assert list(pd_df.columns) == [f"custom_gene_{i}" for i in range(5)]
+    assert list(pd_df.columns) == [f"custom_gene_{i}" for i in range(5)] + ["__cell_id"]
 
     expected_data = {
         "custom_gene_0": [1.0, 0.0, 0.0, 5.0],
@@ -185,8 +201,13 @@ def test_read_h5ad_custom_var_dataset(test_h5ad_file_custom_var_dataset: str):
         "custom_gene_2": [2.0, 0.0, 0.0, 0.0],
         "custom_gene_3": [0.0, 0.0, 4.0, 0.0],
         "custom_gene_4": [0.0, 0.0, 0.0, 0.0],
+        "__cell_id": [0, 1, 2, 3],  # Cell indices
     }
-    expected_df = pd.DataFrame(expected_data).astype(np.float32)
+    expected_df = pd.DataFrame(expected_data)
+    # Convert gene columns to float32, keep __cell_id as int32
+    for gene_col in [f"custom_gene_{i}" for i in range(5)]:
+        expected_df[gene_col] = expected_df[gene_col].astype(np.float32)
+    expected_df["__cell_id"] = expected_df["__cell_id"].astype(np.int32)
     pd.testing.assert_frame_equal(pd_df, expected_df)
 
 
