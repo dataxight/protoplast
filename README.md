@@ -1,11 +1,11 @@
-# protocell
+# protoplast
 
-![PyPI version](https://img.shields.io/pypi/v/protocell.svg)
-[![Documentation Status](https://readthedocs.org/projects/protocell/badge/?version=latest)](https://protocell.readthedocs.io/en/latest/?version=latest)
+![PyPI version](https://img.shields.io/pypi/v/protoplast.svg)
+[![Documentation Status](https://readthedocs.org/projects/protoplast/badge/?version=latest)](https://protoplast.readthedocs.io/en/latest/?version=latest)
 
 A collection of drivers for Protoform, the data engineering framework from DataXight
 
--   PyPI package: https://pypi.org/project/protocell/
+-   PyPI package: https://pypi.org/project/protoplast/
 
 ## Features
 
@@ -26,7 +26,7 @@ A collection of drivers for Protoform, the data engineering framework from DataX
 ### VCF Files
 
 ```python
-from protocell.genomics.vcf import read_vcf
+from protoplast.genomics.vcf import read_vcf
 from daft.expressions import col
 
 # Read a VCF file
@@ -52,7 +52,7 @@ df_info = read_vcf("variants.vcf", info_fields=["DP", "AF"])
 ### AnnData/h5ad Files
 
 ```python
-from protocell.genomics.anndata import read_h5ad
+from protoplast.genomics.anndata import read_h5ad
 from daft.expressions import col
 
 # Read h5ad file with batch processing

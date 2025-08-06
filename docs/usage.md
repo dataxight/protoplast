@@ -1,7 +1,7 @@
 # Usage
 
-To use protocell in a project:
+To use protoplast in a project:
 
 ```python
-import protocell
+import protoplast
 ```

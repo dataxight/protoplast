@@ -1,1 +1,1 @@
-"""Unit test package for protocell."""
+"""Unit test package for protoplast."""

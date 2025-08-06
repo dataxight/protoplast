@@ -1,4 +1,4 @@
-# Welcome to protocell's documentation!
+# Welcome to protoplast's documentation!
 
 ## Contents
 
