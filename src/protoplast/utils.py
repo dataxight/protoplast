@@ -12,7 +12,7 @@ class ExpressionVisitorWithRequiredColumns(ExpressionVisitor[None]):
     def get_required_columns(self, expr: Expression | None) -> list[str]:
         if expr is None:
             return []
-        
+
         self.visit(expr)
         required_columns = list(self.required_columns)
         self.required_columns.clear()

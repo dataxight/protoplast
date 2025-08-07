@@ -7,13 +7,13 @@ Usage:
     # Option 1: Import this module first
     import protoplast.patches.auto_patch
     import daft
-    
+
     # Option 2: Use the context manager
     from protoplast.patches.auto_patch import patched_daft
     with patched_daft():
         import daft
         # Your daft code here
-        
+
     # Option 3: Manual control
     from protoplast.patches.daft_flotilla import apply_flotilla_patches
     import daft
@@ -21,14 +21,14 @@ Usage:
 """
 
 import sys
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator
 
 
 def auto_patch_on_import():
     """
     Automatically apply patches when daft modules are imported.
-    
+
     This sets up import hooks to patch daft modules as they're loaded.
     """
     if 'daft' in sys.modules:
@@ -55,11 +55,11 @@ def _setup_import_hooks():
     pass
 
 
-@contextmanager 
+@contextmanager
 def patched_daft() -> Generator[None, None, None]:
     """
     Context manager that ensures daft patches are applied.
-    
+
     Usage:
         with patched_daft():
             import daft

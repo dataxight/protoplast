@@ -121,7 +121,13 @@ class H5ADReader:
             yield start_row, end_row
 
     def read_cells_data_to_micropartition(
-        self, start_idx: int, end_idx: int, schema: Schema, after_scan_schema: Schema, pyarrow_filters: pc.Expression | None = None
+        self,
+        start_idx: int,
+        end_idx: int,
+        schema: Schema,
+        after_scan_schema: Schema,
+        pyarrow_filters: pc.Expression | None = None,
+        dtype: np.dtype = np.float32
     ) -> MicroPartition:
         """
         Read a batch of cells into memory and return a MicroPartition
@@ -207,16 +213,16 @@ class H5ADSource(DataSource):
         to_read_columns: list[str] | None
         after_scan_columns: list[str] = []
         visitor = ExpressionVisitorWithRequiredColumns()
-        
+
         if pushdowns is not None:
             if pushdowns.filters is not None:
                 filter_required_column_names = visitor.get_required_columns(pushdowns.filters)
             else:
                 filter_required_column_names = []
-            
+
             if pushdowns.columns is not None:
                 after_scan_columns = pushdowns.columns
-            
+
             # if no columns are specified, read up to 20 genes
             if not after_scan_columns:
                 n_genes = min(20, len(self._reader.gene_names))
@@ -267,7 +273,7 @@ class H5ADSourceTask(DataSourceTask):
         micropartition = reader.read_cells_data_to_micropartition(
             self._start_idx, self._end_idx, self._push_down_schema, self._after_scan_schema, self._arrow_filters
         )
-        
+
         yield micropartition
 
     def get_micro_partitions(self) -> Iterator[MicroPartition]:

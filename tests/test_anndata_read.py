@@ -149,23 +149,23 @@ def test_h5ad_file_custom_var_dataset(tmpdir: pathlib.Path) -> str:
 
     filepath = tmpdir / "test_custom_var.h5ad"
     adata.write_h5ad(filepath)
-    
+
     # Now modify the h5ad file to store variable names in a custom location
     with h5py.File(filepath, "r+") as f:
         # Copy the original variable names to a custom location
         original_var_names = f["var/_index"][:]
-        
+
         # Create a custom group and dataset
         if "custom_var" not in f:
             custom_group = f.create_group("custom_var")
         else:
             custom_group = f["custom_var"]
-            
+
         if "gene_names" in custom_group:
             del custom_group["gene_names"]
-            
+
         custom_group.create_dataset("gene_names", data=original_var_names)
-    
+
     return str(filepath)
 
 
