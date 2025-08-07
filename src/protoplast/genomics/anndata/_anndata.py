@@ -1,19 +1,40 @@
 # ruff: noqa: I002
 # isort: dont-add-import: from __future__ import annotations
 
-from daft.daft import ScanOperatorHandle
-from daft.dataframe import DataFrame
-from daft.logical.builder import LogicalPlanBuilder
+from __future__ import annotations
 
-from .scan import H5ADScanOperator
+from typing import TYPE_CHECKING
+
+from daft.api_annotations import PublicAPI
+
+from .scan import H5ADSource
+
+if TYPE_CHECKING:
+    from daft import DataFrame
+    from daft.io import IOConfig
 
 
+@PublicAPI
 def read_h5ad(
     path: str,
     batch_size: int = 1000,
     var_h5dataset: str = "var/_index",
+    io_config: IOConfig | None = None,
 ) -> DataFrame:
-    h5ad_operator = H5ADScanOperator(path, batch_size, var_h5dataset)
-    handle = ScanOperatorHandle.from_python_scan_operator(h5ad_operator)
-    builder = LogicalPlanBuilder.from_tabular_scan(scan_operator=handle)
-    return DataFrame(builder)
+    """Read h5ad file.
+
+    Args:
+        path: h5ad file path
+        batch_size: Number of cells to read in each batch.
+        var_h5dataset: The h5 dataset path for variable names.
+        io_config: IOConfig for the file system.
+
+    Returns:
+        DataFrame: DataFrame with the schema converted from the specified h5ad file.
+    """
+    return H5ADSource(
+        file_path=path,
+        batch_size=batch_size,
+        var_h5dataset=var_h5dataset,
+        io_config=io_config,
+    ).read()

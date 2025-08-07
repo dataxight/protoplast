@@ -35,8 +35,6 @@ bugs = "https://github.com/ptdtan/protoplast/issues"
 changelog = "https://github.com/ptdtan/protoplast/blob/master/changelog.md"
 homepage = "https://github.com/ptdtan/protoplast"
 
-[project.scripts]
-protoplast = "protoplast.cli:app"
 
 [tool.ty]
 # All rules are enabled as "error" by default; no need to specify unless overriding.
