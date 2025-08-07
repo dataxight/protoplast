@@ -1,23 +1,38 @@
+from __future__ import annotations
+
 import logging
 from collections.abc import Iterator
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import h5py
 import numpy as np
 import pyarrow as pa
-import pyarrow.compute
 import pyarrow.compute as pc
-from daft import Expression
-from daft.daft import PyPartitionField, PyPushdowns, PyRecordBatch, ScanTask
-from daft.io.scan import ScanOperator
+from daft.io.source import DataSource, DataSourceTask
 from daft.logical.schema import Schema
-from daft.recordbatch import RecordBatch
-from pyarrow import RecordBatch as pa_RecordBatch
+from daft.recordbatch.micropartition import MicroPartition
+
+from protoplast.utils import ExpressionVisitorWithRequiredColumns
+
+if TYPE_CHECKING:
+    from daft.io import IOConfig
+    from daft.io.pushdowns import Pushdowns
+
 
 logger = logging.getLogger(__name__)
 # log to file
 logger.setLevel(logging.DEBUG)
-logger.addHandler(logging.FileHandler("anndata_scan.log"))
+# format the logger handler to include the timestamp
+handler = logging.FileHandler("anndata_scan.log")
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
+# add a console handler to the logger
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
 class H5ADReader:
     """
@@ -105,13 +120,14 @@ class H5ADReader:
             end_row = min(i + max_batch_size, n)
             yield start_row, end_row
 
-    def read_cells_data_to_record_batch2(
-        self, start_idx: int, end_idx: int, schema: Schema, pyarrow_filters: pyarrow.compute.Expression | None = None
-    ) -> Iterator[PyRecordBatch]:
+    def read_cells_data_to_micropartition(
+        self, start_idx: int, end_idx: int, schema: Schema, after_scan_schema: Schema, pyarrow_filters: pc.Expression | None = None
+    ) -> MicroPartition:
         """
-        Read a batch of cells into memory
+        Read a batch of cells into memory and return a MicroPartition
         """
         # TODO: use the correct dtype. Should use int32 for count data, float32 for other data
+        logger.info(f"Reading cells from {start_idx} to {end_idx}")
         batch_data = {field.name: np.zeros(end_idx - start_idx, dtype=np.float32) for field in schema}
 
         # TODO: as we can provide the file-like object, consider using fsspec so we can read it remotely
@@ -146,103 +162,117 @@ class H5ADReader:
                 ].to_numpy()
 
         # convert the batch data to a pyarrow record batch, zero-copy
-        batch = pa_RecordBatch.from_pydict(batch_data)
+        batch_data = {field.name: batch_data[field.name] for field in after_scan_schema}
+        batch = pa.RecordBatch.from_pydict(batch_data)
         if pyarrow_filters is not None:
             batch = batch.filter(pyarrow_filters)
-        yield RecordBatch.from_arrow_record_batches([batch], batch.schema)._recordbatch
+        return MicroPartition.from_arrow_record_batches([batch], arrow_schema=after_scan_schema.to_pyarrow_schema())
 
 
-def _h5ad_data__factory_function(
-    file_path: str,
-    var_h5dataset: str,
-    start_idx: int,
-    end_idx: int,
-    schema: Schema,
-    arrow_filters: pyarrow.compute.Expression | None = None,
-) -> Iterator[PyRecordBatch]:
-    """A factory function that reads a single CSV file into pyarrow,
-    and returns an iterator of Daft RecordBatches."""
-
-    reader = H5ADReader(file_path, var_h5dataset)
-    return reader.read_cells_data_to_record_batch2(start_idx, end_idx, schema, arrow_filters)
-
-
-class H5ADScanOperator(ScanOperator):
-    def __init__(self, path: str, batch_size: int = 10000, var_h5dataset: str = "var/_index"):
-        super().__init__()
-        self._path = path
-        self._reader = H5ADReader(path, var_h5dataset)
-        self._schema = self._reader.create_schema_from_genes()
+class H5ADSource(DataSource):
+    def __init__(
+        self,
+        file_path: str,
+        batch_size: int = 10000,
+        var_h5dataset: str = "var/_index",
+        io_config: IOConfig | None = None,
+    ):
+        self._file_path = file_path
         self._batch_size = batch_size
         self._var_h5dataset = var_h5dataset
+        self._io_config = io_config
+        self._reader = H5ADReader(file_path, var_h5dataset)
+        self._schema = self._reader.create_schema_from_genes()
 
+    @property
     def name(self) -> str:
-        return "H5ADScanOperator"
+        return "H5ADSource"
 
-    def display_name(self) -> str:
-        return f"H5ADScanOperator({self._path})"
-
+    @property
     def schema(self) -> Schema:
         return self._schema
 
-    def partitioning_keys(self) -> list[PyPartitionField]:
-        return []
-
-    def can_absorb_filter(self) -> bool:
-        return True
-
-    def can_absorb_limit(self) -> bool:
-        return True
-
-    def can_absorb_select(self) -> bool:
-        return True
+    def display_name(self) -> str:
+        return f"H5ADSource({self._file_path})"
 
     def multiline_display(self) -> list[str]:
         return [
             self.display_name(),
-            f"Schema = {self.schema()}",
+            f"Schema = {self._schema}",
             f"Num cells = {self._reader.n_cells}",
         ]
 
-    def to_scan_tasks(self, pushdowns: PyPushdowns) -> Iterator[ScanTask]:
+    def get_tasks(self, pushdowns: Pushdowns | None = None) -> Iterator[H5ADSourceTask]:
         # The maximum possible columns we need to read is the projection columns + the filter columns
         to_read_columns: list[str] | None
-        filter_required_column_names = pushdowns.filter_required_column_names()
-
-        if pushdowns.columns is None:
-            after_scan_columns = []
-        else:
-            after_scan_columns = pushdowns.columns
-
-        # if no columns are specified, read up to 20 genes
-        if not after_scan_columns:
+        after_scan_columns: list[str] = []
+        visitor = ExpressionVisitorWithRequiredColumns()
+        
+        if pushdowns is not None:
+            if pushdowns.filters is not None:
+                filter_required_column_names = visitor.get_required_columns(pushdowns.filters)
+            else:
+                filter_required_column_names = []
+            
+            if pushdowns.columns is not None:
+                after_scan_columns = pushdowns.columns
+            
             # if no columns are specified, read up to 20 genes
+            if not after_scan_columns:
+                n_genes = min(20, len(self._reader.gene_names))
+                after_scan_columns = self._reader.gene_names[:n_genes]
+
+            # include the filter required columns (if any)to the required columns
+            to_read_columns = list(set(after_scan_columns + filter_required_column_names))
+        else:
+            # Default case when no pushdowns
             n_genes = min(20, len(self._reader.gene_names))
             after_scan_columns = self._reader.gene_names[:n_genes]
-
-        # include the filter required columns to the required columns
-        if filter_required_column_names is not None:
-            to_read_columns = [c for c in set(after_scan_columns + filter_required_column_names)]
-        else:
             to_read_columns = after_scan_columns
 
         # create the schema for the pushdown
         push_down_schema = self._reader.create_schema_from_genes(to_read_columns)
         after_scan_schema = self._reader.create_schema_from_genes(after_scan_columns)
 
-        filter = pushdowns.filters
         arrow_filters = None
-        if filter is not None:
-            arrow_filters = Expression._from_pyexpr(filter).to_arrow_expr()
+        if pushdowns is not None and pushdowns.filters is not None:
+            arrow_filters = pushdowns.filters.to_arrow_expr()
 
         for start_idx, end_idx in self._reader.generate_cell_batches(self._batch_size):
-            yield ScanTask.python_factory_func_scan_task(
-                module=_h5ad_data__factory_function.__module__,
-                func_name=_h5ad_data__factory_function.__name__,
-                func_args=(self._path, self._var_h5dataset, start_idx, end_idx, push_down_schema, arrow_filters),
-                schema=after_scan_schema._schema,
-                num_rows=None,
-                size_bytes=None,
-                pushdowns=pushdowns,
-                stats=None,
+            yield H5ADSourceTask(
+                _file_path=self._file_path,
+                _var_h5dataset=self._var_h5dataset,
+                _start_idx=start_idx,
+                _end_idx=end_idx,
+                _push_down_schema=push_down_schema,
+                _after_scan_schema=after_scan_schema,
+                _arrow_filters=arrow_filters,
+                _io_config=self._io_config,
             )
+
+
+@dataclass
+class H5ADSourceTask(DataSourceTask):
+    _file_path: str
+    _var_h5dataset: str
+    _start_idx: int
+    _end_idx: int
+    _push_down_schema: Schema
+    _after_scan_schema: Schema
+    _arrow_filters: pc.Expression | None = None
+    _io_config: IOConfig | None = None
+
+    def execute(self) -> Iterator[MicroPartition]:
+        reader = H5ADReader(self._file_path, self._var_h5dataset)
+        micropartition = reader.read_cells_data_to_micropartition(
+            self._start_idx, self._end_idx, self._push_down_schema, self._after_scan_schema, self._arrow_filters
+        )
+        
+        yield micropartition
+
+    def get_micro_partitions(self) -> Iterator[MicroPartition]:
+        yield from self.execute()
+
+    @property
+    def schema(self) -> Schema:
+        return self._after_scan_schema
