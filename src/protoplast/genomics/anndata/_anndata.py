@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 def read_h5ad(
     path: str,
     batch_size: int = 1000,
+    preview_size: int = 20,
     var_h5dataset: str = "var/_index",
     io_config: IOConfig | None = None,
 ) -> DataFrame:
@@ -35,6 +36,7 @@ def read_h5ad(
     return H5ADSource(
         file_path=path,
         batch_size=batch_size,
+        preview_size=preview_size,
         var_h5dataset=var_h5dataset,
         io_config=io_config,
     ).read()

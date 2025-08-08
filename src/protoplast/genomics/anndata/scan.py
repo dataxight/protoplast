@@ -180,15 +180,21 @@ class H5ADSource(DataSource):
         self,
         file_path: str,
         batch_size: int = 10000,
+        preview_size: int = 20,
         var_h5dataset: str = "var/_index",
-        io_config: IOConfig | None = None,
+        io_config: IOConfig | None = None
     ):
         self._file_path = file_path
         self._batch_size = batch_size
         self._var_h5dataset = var_h5dataset
         self._io_config = io_config
         self._reader = H5ADReader(file_path, var_h5dataset)
-        self._schema = self._reader.create_schema_from_genes()
+        if preview_size == 0:
+            self._schema = self._reader.create_schema_from_genes()
+            self._n_genes = len(self._reader.gene_names)
+        else:
+            self._schema = self._reader.create_schema_from_genes(self._reader.gene_names[:preview_size])
+            self._n_genes = preview_size
 
     @property
     def name(self) -> str:
@@ -225,15 +231,13 @@ class H5ADSource(DataSource):
 
             # if no columns are specified, read up to 20 genes
             if not after_scan_columns:
-                n_genes = min(20, len(self._reader.gene_names))
-                after_scan_columns = self._reader.gene_names[:n_genes]
+                after_scan_columns = self._reader.gene_names[:self._n_genes]
 
             # include the filter required columns (if any)to the required columns
             to_read_columns = list(set(after_scan_columns + filter_required_column_names))
         else:
             # Default case when no pushdowns
-            n_genes = min(20, len(self._reader.gene_names))
-            after_scan_columns = self._reader.gene_names[:n_genes]
+            after_scan_columns = self._reader.gene_names[:self._n_genes]
             to_read_columns = after_scan_columns
 
         # create the schema for the pushdown
