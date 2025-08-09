@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -9,6 +11,10 @@ import h5py
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
+import anndata
+import fsspec
+import uritools
+
 from daft.io.source import DataSource, DataSourceTask
 from daft.logical.schema import Schema
 from daft.recordbatch.micropartition import MicroPartition
@@ -119,6 +125,36 @@ class H5ADReader:
             start_row = i
             end_row = min(i + max_batch_size, n)
             yield start_row, end_row
+
+    def read_cells_data_to_micropartition2(
+        self,
+        start_idx: int,
+        end_idx: int,
+        schema: Schema,
+        after_scan_schema: Schema,
+        pyarrow_filters: pc.Expression | None = None,
+        dtype: np.dtype = np.float32
+    ) -> MicroPartition:
+        """
+        Read a batch of cells into memory and return a MicroPartition
+        """
+        # TODO: use the correct dtype. Should use int32 for count data, float32 for other data
+        logger.info(f"Reading cells from {start_idx} to {end_idx}")
+
+        # TODO: as we can provide the file-like object, consider using fsspec so we can read it remotely
+        ad = anndata.read_h5ad(self.filename, backed='r')
+        # rows are cells, columns are genes
+        sparse_X = ad.X._to_backed()
+        gene_indices = [self.gene_index_map[gene] for gene in after_scan_schema.column_names()]
+        dense_X = sparse_X[start_idx:end_idx, gene_indices].toarray()
+        dense_T = dense_X.T
+        batch_data = {}
+        for i, field in enumerate(after_scan_schema):
+            batch_data[field.name] = pa.array(dense_T[i])
+        batch = pa.RecordBatch.from_pydict(batch_data)
+        if pyarrow_filters is not None:
+            batch = batch.filter(pyarrow_filters)
+        return MicroPartition.from_arrow_record_batches([batch], arrow_schema=after_scan_schema.to_pyarrow_schema())
 
     def read_cells_data_to_micropartition(
         self,
@@ -274,7 +310,7 @@ class H5ADSourceTask(DataSourceTask):
 
     def execute(self) -> Iterator[MicroPartition]:
         reader = H5ADReader(self._file_path, self._var_h5dataset)
-        micropartition = reader.read_cells_data_to_micropartition(
+        micropartition = reader.read_cells_data_to_micropartition2(
             self._start_idx, self._end_idx, self._push_down_schema, self._after_scan_schema, self._arrow_filters
         )
 
