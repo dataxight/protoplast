@@ -8,18 +8,20 @@ from protoplast.genomics.anndata import AnnDataSink
 # Apply daft patches for per-CPU workers
 from protoplast.patches.daft_flotilla import apply_flotilla_patches
 import os
+import pyarrow as pa
 
-#os.environ["MAX_WORKERS"] = "2"
+os.environ["MAX_WORKERS"] = "2"
 apply_flotilla_patches()
+daft.context.set_runner_ray()
+#daft.context.set_runner_native(1)
+daft.context.set_execution_config(native_parquet_writer=False)
+file_path = "/Users/tanphan/Downloads/pbmc_seurat_v4.h5ad"
 
-def main():
-    daft.context.set_runner_ray()
-    #daft.context.set_execution_config(scan_tasks_min_size_bytes=100000, min_cpu_per_task=1)
-    df = read_h5ad("/Users/tanphan/Downloads/pbmc_seurat_v4.h5ad", batch_size=5000, preview_size=0)
+def test_read_h5ad():
+    df = read_h5ad(file_path, batch_size=25000, preview_size=0)
     start = time.time()
-    sink = AnnDataSink("pbmc-sink-w10-b5000")
-    df.write_sink(sink)
+    df.write_parquet("pbmc-full-b25000-w10-pa_debug")
     print(f"Time took: {time.time() - start}")
 
 if __name__ == "__main__":
-    main()
+    test_read_h5ad()
