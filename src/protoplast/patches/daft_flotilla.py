@@ -6,6 +6,7 @@ one worker per CPU core instead of one worker per node for better parallelizatio
 """
 
 from typing import TYPE_CHECKING
+import os
 
 if TYPE_CHECKING:
     from daft.daft import RaySwordfishWorker
@@ -33,6 +34,10 @@ def start_ray_workers_per_cpu(existing_worker_ids: list[str]) -> list["RaySwordf
     from daft.daft import RaySwordfishWorker
     from daft.runners.flotilla import RaySwordfishActor, RaySwordfishActorHandle
 
+    max_workers = int(os.environ.get("MAX_WORKERS", 0))
+    if max_workers == 0:
+        max_workers = float("inf")
+
     handles = []
     for node in ray.nodes():
         if (
@@ -48,7 +53,7 @@ def start_ray_workers_per_cpu(existing_worker_ids: list[str]) -> list["RaySwordf
             total_memory = int(node["Resources"]["memory"])
 
             # Create one worker per CPU core
-            for cpu_idx in range(num_cpus):
+            for cpu_idx in range(min(num_cpus, max_workers)):
                 worker_id = f"{node['NodeID']}_cpu_{cpu_idx}"
 
                 # Skip if this specific worker already exists
