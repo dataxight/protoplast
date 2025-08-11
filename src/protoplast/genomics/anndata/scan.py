@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 # log to file
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 # format the logger handler to include the timestamp
 handler = logging.FileHandler("anndata_scan.log")
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -55,19 +55,16 @@ class H5ADReader:
         self.filename = filename
         self._gene_name_cache = None
         self._gene_index_map = None
-        self._matrix_info = None
         self._n_cells = None
         self.var_h5dataset: str = var_h5dataset
+        self._ad = anndata.read_h5ad(filename, backed="r")
 
 
     @property
     def gene_names(self) -> np.ndarray:
         """Cached gene names - only read once"""
         if self._gene_name_cache is None:
-            with h5py.File(self.filename, "r") as f:
-                gene_names = f[self.var_h5dataset][:]
-                gene_names = [gene.decode("utf-8") for gene in gene_names]
-                self._gene_name_cache = gene_names
+            self._gene_name_cache = self._ad.var_names.to_list()
         return self._gene_name_cache
 
     @property
@@ -90,28 +87,12 @@ class H5ADReader:
         # TODO: have to use int if the data is count data
         return Schema.from_pyarrow_schema(pa.schema([pa.field(gene_name, pa.float32()) for gene_name in gene_names]))
 
-    @property
-    def matrix_info(self) -> dict:
-        """Cache matrix metadata to avoid repeated file access"""
-        if self._matrix_info is None:
-            with h5py.File(self.filename, "r") as f:
-                X_group = f["X"]
-                if isinstance(X_group, h5py.Group):
-                    self._matrix_info = {
-                        "format": "sparse",
-                        "shape": tuple(X_group.attrs["shape"]),
-                        "nnz": len(X_group["data"]),
-                        "dtype": X_group["data"].dtype,
-                    }
-                else:
-                    self._matrix_info = {"format": "dense", "shape": X_group.shape, "dtype": X_group.dtype}
-        return self._matrix_info
 
     @property
     def n_cells(self) -> int:
         """Cached number of cells - only read once"""
         if self._n_cells is None:
-            self._n_cells = self.matrix_info["shape"][0]
+            self._n_cells = self._ad.X.shape[0]
         return self._n_cells
 
     def generate_cell_batches(self, batch_size: int) -> Iterator[tuple[int, int]]:
@@ -138,20 +119,21 @@ class H5ADReader:
         """
         Read a batch of cells into memory and return a MicroPartition
         """
-        # TODO: use the correct dtype. Should use int32 for count data, float32 for other data
-        logger.info(f"Reading cells from {start_idx} to {end_idx}")
+        logger.debug(f"Reading cells from {start_idx} to {end_idx}")
 
-        # TODO: as we can provide the file-like object, consider using fsspec so we can read it remotely
         ad = anndata.read_h5ad(self.filename, backed='r')
         # rows are cells, columns are genes
         sparse_X = ad.X._to_backed()
         logger.debug(f"reading sparse_X: {start_idx} to {end_idx}")
+        logger.debug(f"dtype: {ad.X.dtype}")
         gene_indices = [self.gene_index_map[gene] for gene in after_scan_schema.column_names()]
+        # NOTE: somehow the dtype loaded by anndata is float64 in case of float data
         dense_X = sparse_X[start_idx:end_idx, gene_indices].toarray()
         logger.debug(f"Densified. {start_idx} to {end_idx} {dense_X.shape}")
         dense_T = dense_X.T
         logger.debug(f"Transposed. {start_idx} to {end_idx} {dense_T.shape}")
-        batch_data = [pa.array(row_t) for row_t in dense_T]
+        # TODO: use the correct dtype. Should use int32 for count data, float32 for other data
+        batch_data = [pa.array(row_t, type=pa.float32()) for row_t in dense_T]
         logger.debug(f"Batch data. {start_idx} to {end_idx}")
         batch = pa.RecordBatch.from_arrays(batch_data, names=[gene for gene in after_scan_schema.column_names()])
         logger.debug(f"Batch. {start_idx} to {end_idx} {batch.num_rows}")

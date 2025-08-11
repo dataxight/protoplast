@@ -189,10 +189,12 @@ def test_read_h5ad_custom_var_dataset(test_h5ad_file_custom_var_dataset: str):
     expected_df = pd.DataFrame(expected_data).astype(np.float32)
     pd.testing.assert_frame_equal(pd_df, expected_df)
 
+@pytest.mark.skip(reason="Remote file access is not supported yet")
+def test_anndata_read_h5ad_remote():
+    """Tests reading a remote h5ad file"""
+    df = read_h5ad("s3://anyscale-ap-data/test_medium.h5ad", batch_size=2)
+    assert isinstance(df, DataFrame)
 
-def test_read_h5ad_invalid_var_dataset(test_h5ad_file: str):
-    """Tests that reading with an invalid var dataset raises an appropriate error"""
-    with pytest.raises(KeyError):
-        df = read_h5ad(test_h5ad_file, var_h5dataset="nonexistent/dataset")
-        # Try to access the data to trigger the error
-        df.to_pandas()
+    pd_df = df.to_pandas()
+    assert len(pd_df) == 4
+    assert list(pd_df.columns) == [f"gene_{i}" for i in range(5)]

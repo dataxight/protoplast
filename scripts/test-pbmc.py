@@ -2,25 +2,29 @@ import time
 
 import daft
 
-from protoplast.genomics.anndata import read_h5ad
 from protoplast.genomics.anndata import AnnDataSink
 
 # Apply daft patches for per-CPU workers
+import anndata
 from protoplast.patches.daft_flotilla import apply_flotilla_patches
+from protoplast.patches.anndata_remote import apply_file_backing_patch
+from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
 import os
 import pyarrow as pa
 
 os.environ["MAX_WORKERS"] = "2"
 apply_flotilla_patches()
-daft.context.set_runner_ray()
-#daft.context.set_runner_native(1)
+apply_file_backing_patch()
+apply_read_h5ad_backed_patch()
+
 daft.context.set_execution_config(native_parquet_writer=False)
-file_path = "/Users/tanphan/Downloads/pbmc_seurat_v4.h5ad"
+file_path = "s3://anyscale-ap-data/test_medium.h5ad"
 
 def test_read_h5ad():
-    df = read_h5ad(file_path, batch_size=25000, preview_size=0)
     start = time.time()
-    df.write_parquet("pbmc-full-b25000-w10-pa_debug")
+    ad = anndata.read_h5ad(file_path, backed="r")
+    print(ad.X.shape)
+    print(ad.X[1,:])
     print(f"Time took: {time.time() - start}")
 
 if __name__ == "__main__":

@@ -4,17 +4,19 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-
-from daft.api_annotations import PublicAPI
-
 from .scan import H5ADSource
 
 if TYPE_CHECKING:
     from daft import DataFrame
     from daft.io import IOConfig
 
+# NOTE: apply the patches to the anndata module
+from protoplast.patches.anndata_remote import apply_file_backing_patch
+from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
+apply_file_backing_patch()
+apply_read_h5ad_backed_patch()
 
-@PublicAPI
+
 def read_h5ad(
     path: str,
     batch_size: int = 1000,
