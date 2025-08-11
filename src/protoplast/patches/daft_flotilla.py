@@ -5,6 +5,7 @@ This module provides a patched version of start_ray_workers that creates
 one worker per CPU core instead of one worker per node for better parallelization.
 """
 
+import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
 try:
     import ray
 except ImportError:
-    raise ImportError("Ray is required for flotilla patches") # noqa: B904
+    raise ImportError("Ray is required for flotilla patches")  # noqa: B904
 
 
 def start_ray_workers_per_cpu(existing_worker_ids: list[str]) -> list["RaySwordfishWorker"]:
@@ -33,6 +34,10 @@ def start_ray_workers_per_cpu(existing_worker_ids: list[str]) -> list["RaySwordf
     from daft.daft import RaySwordfishWorker
     from daft.runners.flotilla import RaySwordfishActor, RaySwordfishActorHandle
 
+    max_workers = int(os.environ.get("MAX_WORKERS", 0))
+    if max_workers == 0:
+        max_workers = float("inf")
+
     handles = []
     for node in ray.nodes():
         if (
@@ -48,7 +53,7 @@ def start_ray_workers_per_cpu(existing_worker_ids: list[str]) -> list["RaySwordf
             total_memory = int(node["Resources"]["memory"])
 
             # Create one worker per CPU core
-            for cpu_idx in range(num_cpus):
+            for cpu_idx in range(min(num_cpus, max_workers)):
                 worker_id = f"{node['NodeID']}_cpu_{cpu_idx}"
 
                 # Skip if this specific worker already exists
@@ -90,7 +95,7 @@ def apply_flotilla_patches():
         import daft.runners.flotilla as flotilla_module
 
         # Store original function for potential rollback
-        if not hasattr(flotilla_module, '_original_start_ray_workers'):
+        if not hasattr(flotilla_module, "_original_start_ray_workers"):
             flotilla_module._original_start_ray_workers = flotilla_module.start_ray_workers
 
         # Apply the patch
@@ -101,6 +106,7 @@ def apply_flotilla_patches():
     except ImportError:
         print("⚠ daft.runners.flotilla not available for patching")
 
+
 def rollback_flotilla_patches():
     """
     Rollback flotilla patches to original daft implementation.
@@ -108,9 +114,9 @@ def rollback_flotilla_patches():
     try:
         import daft.runners.flotilla as flotilla_module
 
-        if hasattr(flotilla_module, '_original_start_ray_workers'):
+        if hasattr(flotilla_module, "_original_start_ray_workers"):
             flotilla_module.start_ray_workers = flotilla_module._original_start_ray_workers
-            delattr(flotilla_module, '_original_start_ray_workers')
+            delattr(flotilla_module, "_original_start_ray_workers")
             print("✓ Rolled back daft flotilla patches")
         else:
             print("⚠ No patches to rollback")

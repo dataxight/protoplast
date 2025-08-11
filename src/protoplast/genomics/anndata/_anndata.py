@@ -5,19 +5,24 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from daft.api_annotations import PublicAPI
-
 from .scan import H5ADSource
 
 if TYPE_CHECKING:
     from daft import DataFrame
     from daft.io import IOConfig
 
+# NOTE: apply the patches to the anndata module
+from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
+from protoplast.patches.anndata_remote import apply_file_backing_patch
 
-@PublicAPI
+apply_file_backing_patch()
+apply_read_h5ad_backed_patch()
+
+
 def read_h5ad(
     path: str,
     batch_size: int = 1000,
+    preview_size: int = 20,
     var_h5dataset: str = "var/_index",
     io_config: IOConfig | None = None,
 ) -> DataFrame:
@@ -35,6 +40,7 @@ def read_h5ad(
     return H5ADSource(
         file_path=path,
         batch_size=batch_size,
+        preview_size=preview_size,
         var_h5dataset=var_h5dataset,
         io_config=io_config,
     ).read()

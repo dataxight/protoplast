@@ -13,11 +13,15 @@ classifiers = [
 
 ]
 license = {text = "Apache-2.0"}
+
+# TODO: add s3fs as an extra
 dependencies = [
   "typer",
   "anndata",
   "oxbow",
-  "daft"
+  "daft",
+  "uritools",
+  "fsspec"
 ]
 requires-python = ">= 3.10"
 

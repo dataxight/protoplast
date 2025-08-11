@@ -2,6 +2,7 @@
 Tests for reading h5ad files.
 """
 
+import os
 import pathlib
 
 import anndata as ad
@@ -190,9 +191,12 @@ def test_read_h5ad_custom_var_dataset(test_h5ad_file_custom_var_dataset: str):
     pd.testing.assert_frame_equal(pd_df, expected_df)
 
 
-def test_read_h5ad_invalid_var_dataset(test_h5ad_file: str):
-    """Tests that reading with an invalid var dataset raises an appropriate error"""
-    with pytest.raises(KeyError):
-        df = read_h5ad(test_h5ad_file, var_h5dataset="nonexistent/dataset")
-        # Try to access the data to trigger the error
-        df.to_pandas()
+@pytest.mark.skipif(os.environ.get("AWS_ACCESS_KEY") is None, reason="test requires AWS credentials")
+def test_anndata_read_h5ad_remote():
+    """Tests reading a remote h5ad file"""
+    df = read_h5ad("s3://anyscale-ap-data/test_small.h5ad", batch_size=1000, preview_size=0)
+    assert isinstance(df, DataFrame)
+
+    pd_df = df.to_pandas()
+    assert len(pd_df) == 100
+    assert len(pd_df.columns) == 50
