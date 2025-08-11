@@ -189,10 +189,10 @@ def test_read_h5ad_custom_var_dataset(test_h5ad_file_custom_var_dataset: str):
     expected_df = pd.DataFrame(expected_data).astype(np.float32)
     pd.testing.assert_frame_equal(pd_df, expected_df)
 
-@pytest.mark.skip(reason="Remote file access is not supported yet")
+@pytest.mark.skipif(os.environ.get("AWS_ACCESS_KEY_ID") is None, reason="test requires AWS credentials")
 def test_anndata_read_h5ad_remote():
     """Tests reading a remote h5ad file"""
-    df = read_h5ad("s3://anyscale-ap-data/test_medium.h5ad", batch_size=2)
+    df = read_h5ad("s3://anyscale-ap-data/test_medium.h5ad", batch_size=100)
     assert isinstance(df, DataFrame)
 
     pd_df = df.to_pandas()
