@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-import h5py
-import fsspec
-import uritools
-from typing import Literal
 from os import PathLike
+from pathlib import Path
+from typing import Literal
 
+import fsspec
+import h5py
 from anndata._core.file_backing import AnnDataFileManager as OriginalAnnDataFileManager
+
 
 def is_local_file(path: str) -> bool:
     fs, _, paths = fsspec.get_fs_token_paths(path)
     return fs.protocol in ("file", None)
+
 
 class PatchedAnnDataFileManager(OriginalAnnDataFileManager):
     """Backing file manager for AnnData."""
@@ -31,7 +33,6 @@ class PatchedAnnDataFileManager(OriginalAnnDataFileManager):
             self._filename = None
             return
         self._filename = Path(filename) if is_local_file(filename) else filename
-
 
     def open(
         self,
@@ -68,20 +69,24 @@ class PatchedAnnDataFileManager(OriginalAnnDataFileManager):
         self._file = None
         self._filename = None
 
+
 def apply_file_backing_patch():
     try:
-        import anndata._core.file_backing as file_backing_module
         import anndata._core.anndata as anndata_module
+        import anndata._core.file_backing as file_backing_module
+
         # patch the module where it is defined
-        file_backing_module.AnnDataFileManager = PatchedAnnDataFileManager 
+        file_backing_module.AnnDataFileManager = PatchedAnnDataFileManager
         # patch the module where it is used
         anndata_module.AnnDataFileManager = PatchedAnnDataFileManager
         print("✓ Applied AnnDataFileManager patch")
     except ImportError:
         print("⚠ AnnDataFileManager not available for patching")
 
+
 def rollback_file_backing_patch():
-    import anndata._core.file_backing as file_backing_module
     import anndata._core.anndata as anndata_module
+    import anndata._core.file_backing as file_backing_module
+
     file_backing_module.AnnDataFileManager = OriginalAnnDataFileManager
     anndata_module.AnnDataFileManager = OriginalAnnDataFileManager

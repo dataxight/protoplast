@@ -2,8 +2,8 @@
 Tests for reading h5ad files.
 """
 
-import pathlib
 import os
+import pathlib
 
 import anndata as ad
 import h5py
@@ -189,6 +189,7 @@ def test_read_h5ad_custom_var_dataset(test_h5ad_file_custom_var_dataset: str):
     }
     expected_df = pd.DataFrame(expected_data).astype(np.float32)
     pd.testing.assert_frame_equal(pd_df, expected_df)
+
 
 @pytest.mark.skipif(os.environ.get("AWS_ACCESS_KEY") is None, reason="test requires AWS credentials")
 def test_anndata_read_h5ad_remote():

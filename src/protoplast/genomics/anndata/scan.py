@@ -1,20 +1,15 @@
 from __future__ import annotations
 
 import logging
-from contextlib import contextmanager
-
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import anndata
 import h5py
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
-import anndata
-import fsspec
-import uritools
-
 from daft.io.source import DataSource, DataSourceTask
 from daft.logical.schema import Schema
 from daft.recordbatch.micropartition import MicroPartition
@@ -31,7 +26,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 # format the logger handler to include the timestamp
 handler = logging.FileHandler("anndata_scan.log")
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
@@ -39,6 +34,7 @@ logger.addHandler(handler)
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
+
 
 class H5ADReader:
     """
@@ -58,7 +54,6 @@ class H5ADReader:
         self._n_cells = None
         self.var_h5dataset: str = var_h5dataset
         self._ad = anndata.read_h5ad(filename, backed="r")
-
 
     @property
     def gene_names(self) -> np.ndarray:
@@ -87,7 +82,6 @@ class H5ADReader:
         # TODO: have to use int if the data is count data
         return Schema.from_pyarrow_schema(pa.schema([pa.field(gene_name, pa.float32()) for gene_name in gene_names]))
 
-
     @property
     def n_cells(self) -> int:
         """Cached number of cells - only read once"""
@@ -114,14 +108,14 @@ class H5ADReader:
         schema: Schema,
         after_scan_schema: Schema,
         pyarrow_filters: pc.Expression | None = None,
-        dtype: np.dtype = np.float32
+        dtype: np.dtype = np.float32,
     ) -> MicroPartition:
         """
         Read a batch of cells into memory and return a MicroPartition
         """
         logger.debug(f"Reading cells from {start_idx} to {end_idx}")
 
-        ad = anndata.read_h5ad(self.filename, backed='r')
+        ad = anndata.read_h5ad(self.filename, backed="r")
         # rows are cells, columns are genes
         sparse_X = ad.X._to_backed()
         logger.debug(f"reading sparse_X: {start_idx} to {end_idx}")
@@ -149,7 +143,7 @@ class H5ADReader:
         schema: Schema,
         after_scan_schema: Schema,
         pyarrow_filters: pc.Expression | None = None,
-        dtype: np.dtype = np.float32
+        dtype: np.dtype = np.float32,
     ) -> MicroPartition:
         """
         Read a batch of cells into memory and return a MicroPartition
@@ -210,7 +204,7 @@ class H5ADSource(DataSource):
         batch_size: int = 10000,
         preview_size: int = 20,
         var_h5dataset: str = "var/_index",
-        io_config: IOConfig | None = None
+        io_config: IOConfig | None = None,
     ):
         self._file_path = file_path
         self._batch_size = batch_size
@@ -259,13 +253,13 @@ class H5ADSource(DataSource):
 
             # if no columns are specified, read up to 20 genes
             if not after_scan_columns:
-                after_scan_columns = self._reader.gene_names[:self._n_genes]
+                after_scan_columns = self._reader.gene_names[: self._n_genes]
 
             # include the filter required columns (if any)to the required columns
             to_read_columns = list(set(after_scan_columns + filter_required_column_names))
         else:
             # Default case when no pushdowns
-            after_scan_columns = self._reader.gene_names[:self._n_genes]
+            after_scan_columns = self._reader.gene_names[: self._n_genes]
             to_read_columns = after_scan_columns
 
         # create the schema for the pushdown

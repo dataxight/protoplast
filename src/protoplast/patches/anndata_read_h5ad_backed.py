@@ -1,21 +1,18 @@
 from __future__ import annotations
 
-import h5py
-import fsspec
-import uritools
-from typing import Literal
 from os import PathLike
+from typing import Literal
 
-from anndata._io.h5ad import read_dataframe, read_elem, _clean_uns, _read_raw
+import fsspec
+import h5py
 from anndata._core.anndata import AnnData
+from anndata._io.h5ad import _clean_uns, _read_raw, read_dataframe, read_elem
 
 
-def read_h5ad_backed(
-    filename: str | PathLike[str], mode: Literal["r", "r+"]
-) -> "AnnData":
+def read_h5ad_backed(filename: str | PathLike[str], mode: Literal["r", "r+"]) -> AnnData:
     # NOTE: I renamed from d to _d to avoid name conflict with a reserved word in pdb, used for debugging
     _d = dict(filename=filename, filemode=mode)
-    f = h5py.File(fsspec.open(filename, mode="rb").open(), 'r')
+    f = h5py.File(fsspec.open(filename, mode="rb").open(), "r")
 
     attributes = ["obsm", "varm", "obsp", "varp", "uns", "layers"]
     df_attributes = ["obs", "var"]
@@ -38,10 +35,14 @@ def read_h5ad_backed(
 
     return adata
 
+
 def apply_read_h5ad_backed_patch():
     import anndata._io.h5ad as h5ad_module
+
     h5ad_module.read_h5ad_backed = read_h5ad_backed
+
 
 def rollback_read_h5ad_backed_patch():
     import anndata._io.h5ad as h5ad_module
+
     h5ad_module.read_h5ad_backed = h5ad_module.read_h5ad_backed
