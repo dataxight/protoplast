@@ -8,10 +8,7 @@ import fsspec
 import h5py
 from anndata._core.file_backing import AnnDataFileManager as OriginalAnnDataFileManager
 
-
-def is_local_file(path: str) -> bool:
-    fs, _, paths = fsspec.get_fs_token_paths(path)
-    return fs.protocol in ("file", None)
+from protoplast.utils import REMOTE_FILE_DRIVER, get_remote_file_object, is_local_file
 
 
 class PatchedAnnDataFileManager(OriginalAnnDataFileManager):
@@ -50,8 +47,8 @@ class PatchedAnnDataFileManager(OriginalAnnDataFileManager):
         if is_local_file(self.filename):
             self._file = h5py.File(self.filename, "r")
         else:
-            self._fsspec_file = fsspec.open(self.filename, mode="rb")
-            self._file = h5py.File(self._fsspec_file.open(), "r")
+            self._fsspec_file = get_remote_file_object(self.filename, driver=REMOTE_FILE_DRIVER)
+            self._file = h5py.File(self._fsspec_file, "r")
 
     def close(self):
         """Close the backing file, remember filename, do *not* change to memory mode."""

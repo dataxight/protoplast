@@ -7,12 +7,14 @@ import fsspec
 import h5py
 from anndata._core.anndata import AnnData
 from anndata._io.h5ad import _clean_uns, _read_raw, read_dataframe, read_elem
+from protoplast.utils import REMOTE_FILE_DRIVER, get_remote_file_object
 
 
 def read_h5ad_backed(filename: str | PathLike[str], mode: Literal["r", "r+"]) -> AnnData:
     # NOTE: I renamed from d to _d to avoid name conflict with a reserved word in pdb, used for debugging
     _d = dict(filename=filename, filemode=mode)
-    f = h5py.File(fsspec.open(filename, mode="rb").open(), "r")
+    open_file = get_remote_file_object(filename, driver=REMOTE_FILE_DRIVER)
+    f = h5py.File(open_file, "r")
 
     attributes = ["obsm", "varm", "obsp", "varp", "uns", "layers"]
     df_attributes = ["obs", "var"]
