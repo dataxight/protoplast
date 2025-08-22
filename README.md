@@ -52,7 +52,7 @@ df_info = read_vcf("variants.vcf", info_fields=["DP", "AF"])
 ### AnnData/h5ad Files
 
 ```python
-from protoplast.genomics.anndata import read_h5ad
+from protoplast.scrna.anndata import read_h5ad
 from daft.expressions import col
 
 # Read h5ad file with batch processing
