@@ -33,7 +33,6 @@ if __name__ == "__main__":
     # however we can set a warning if batch size is too large for GPU or CPU
     parser.add_argument("--batch_size",  type=int, help="Dataloader batch size")
     parser.add_argument("--test_size", default=None, type=float, help="How big is the test data as a fraction of the whole data per plate or offsets")
-    parser.add_argument("--share_path", required=True, type=str, help="Share path where all node have access to this will store the supporting files required for each worker")
     args = parser.parse_args()
     ray.init()
     use_gpu = False
