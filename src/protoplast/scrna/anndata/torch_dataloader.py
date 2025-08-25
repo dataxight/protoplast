@@ -1,18 +1,19 @@
-import torch
-from typing import Optional, Callable, List
-import anndata
 import random
-from torch.utils.data import get_worker_info
-import torch.distributed as td
-import numpy as np
+from collections.abc import Callable
 
+import numpy as np
+import torch
+import torch.distributed as td
+from torch.utils.data import get_worker_info
+
+import anndata
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
 from protoplast.patches.anndata_remote import apply_file_backing_patch
 
 apply_file_backing_patch()
 apply_read_h5ad_backed_patch()
 
-def ann_split_data(file_paths: List[str], batch_size: int, test_size: Optional[float] = None, random_seed: Optional[int] = 42, metadata_cb: Optional[Callable[[anndata.AnnData, dict], None]] = None):
+def ann_split_data(file_paths: list[str], batch_size: int, test_size: float | None = None, random_seed: int | None = 42, metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None):
     def to_batches(n):
         return [(i, i+batch_size) for i in range(0, n, batch_size)]
     rng = random.Random()
@@ -68,7 +69,7 @@ def cell_line_metadata_cb(ad: anndata.AnnData, metadata: dict):
     metadata["cell_lines"] = ad.obs['cell_line'].cat.categories.to_list()
     metadata["num_genes"] = ad.var.shape[0]
     metadata["num_classes"] = len(metadata["cell_lines"])
-        
+
 
 class DistributedAnnDataset(torch.utils.data.IterableDataset):
 
@@ -116,7 +117,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             ikey = "test_indices"
         return cls(indices["files"], indices[ikey], indices["metadata"], is_test=is_test)
 
-    
+
     def process_X(self, start: int, end: int) -> torch.Tensor:
         sparse = self.sparse[start:end]
         sparse_torch = torch.sparse_csr_tensor(
@@ -126,7 +127,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             sparse.shape
         )
         return sparse_torch
-    
+
     def transform(self, ad: anndata.AnnData, start: int, end: int):
         X = self.process_X(start, end)
         return X

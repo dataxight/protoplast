@@ -1,14 +1,16 @@
-import ray
-from torch.utils.data import DataLoader
 import os
-from .lightning_models import BaseAnnDataLightningModule
-from .torch_dataloader import DistributedAnnDataset
+
 import lightning.pytorch as pl
-from typing import Optional
+import ray
 import ray.train
 import ray.train.lightning
+from torch.utils.data import DataLoader
 
-def new_trainer(Model: BaseAnnDataLightningModule, Ds: DistributedAnnDataset, model_keys: Optional[list[str]] = None, **kwargs):
+from .lightning_models import BaseAnnDataLightningModule
+from .torch_dataloader import DistributedAnnDataset
+
+
+def new_trainer(Model: BaseAnnDataLightningModule, Ds: DistributedAnnDataset, model_keys: list[str] | None = None, **kwargs):
     def anndata_train_func(config):
         ctx = ray.train.get_context()
         if ctx:
@@ -37,7 +39,7 @@ def new_trainer(Model: BaseAnnDataLightningModule, Ds: DistributedAnnDataset, mo
                 plugins=[ray.train.lightning.RayLightningEnvironment()],
                 callbacks=[ray.train.lightning.RayTrainReportCallback()],
                 enable_checkpointing=False,
-                
+
         )
         trainer = ray.train.lightning.prepare_trainer(trainer)
         trainer.fit(model, train_dataloaders=train_dl, val_dataloaders=test_dl)

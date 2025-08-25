@@ -1792,7 +1792,7 @@ requires-dist = [
     { name = "lightning", specifier = ">=2.5.3" },
     { name = "oxbow" },
     { name = "pytest", marker = "extra == 'test'" },
-    { name = "ray", extras = ["train"], specifier = ">=2.48.0" },
+    { name = "ray", extras = ["train"], specifier = ">=2.40.0" },
     { name = "ruff", marker = "extra == 'test'" },
     { name = "torch", specifier = ">=2.8.0" },
     { name = "ty", marker = "extra == 'test'" },
