@@ -43,13 +43,7 @@ if __name__ == "__main__":
         use_gpu = True
     else:
         raise Exception("Only support with GPU is available only")
-    train_indices, test_indices, metadata = ann_split_data(args.file_paths, args.batch_size, args.test_size, metadata_cb=cell_line_metadata_cb)
-    indices = dict(
-        files=args.file_paths,
-        train_indices=train_indices,
-        test_indices=test_indices,
-        metadata=metadata
-    )
+    indices = ann_split_data(args.file_paths, args.batch_size, args.test_size, metadata_cb=cell_line_metadata_cb)
     print("Finish spliting the data starting distributed training")
     train_config = {
             "batch_size": args.batch_size,

@@ -49,7 +49,12 @@ def ann_split_data(file_paths: List[str], batch_size: int, test_size: Optional[f
         validation_datas.append(val_split)  # grouped by file
         train_datas.append(train_split)     # grouped by file
 
-    return train_datas, validation_datas, metadata
+    return dict(
+        files=file_paths,
+        train_indices=train_datas,
+        test_indices=validation_datas,
+        metadata=metadata
+    )
 
 
 def cell_line_metadata_cb(ad: anndata.AnnData, metadata: dict):
