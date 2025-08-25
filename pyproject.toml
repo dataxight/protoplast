@@ -21,7 +21,8 @@ dependencies = [
   "oxbow",
   "daft",
   "uritools",
-  "fsspec"
+  "fsspec",
+  "torch>=2.8.0",
 ]
 requires-python = ">= 3.10"
 
