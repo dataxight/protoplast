@@ -5,6 +5,8 @@ from .lightning_models import BaseAnnDataLightningModule
 from .torch_dataloader import DistributedAnnDataset
 import lightning.pytorch as pl
 from typing import Optional
+import ray.train
+import ray.train.lightning
 
 def new_trainer(Model: BaseAnnDataLightningModule, Ds: DistributedAnnDataset, model_keys: Optional[list[str]] = None, **kwargs):
     def anndata_train_func(config):

@@ -3,6 +3,8 @@ import argparse
 from protoplast.scrna.anndata.torch_dataloader import DistrbutedCellLineAnnDataset as Dcl, ann_split_data, cell_line_metadata_cb
 from protoplast.scrna.anndata.trainer import new_trainer
 import ray
+import ray.train
+import ray.train.torch
 
 """
 Think of this as a template consult the documentation
@@ -31,7 +33,7 @@ if __name__ == "__main__":
     parser.add_argument("--thread_per_worker", required=True, type=int, help="Amount of thread per ray worker for data loading")
     # recommended to be around 1000-2000 for maximum speed this also depends on storage type need to experiment
     # however we can set a warning if batch size is too large for GPU or CPU
-    parser.add_argument("--batch_size",  type=int, help="Dataloader batch size")
+    parser.add_argument("--batch_size", default=1000, type=int, help="Dataloader batch size")
     parser.add_argument("--test_size", default=None, type=float, help="How big is the test data as a fraction of the whole data per plate or offsets")
     args = parser.parse_args()
     ray.init()
@@ -51,7 +53,6 @@ if __name__ == "__main__":
     print("Finish spliting the data starting distributed training")
     train_config = {
             "batch_size": args.batch_size,
-            "mode": args.mode,
             "test_size": args.test_size,
             "indices": indices,
     }

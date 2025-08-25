@@ -24,7 +24,7 @@ dependencies = [
   "fsspec",
   "torch>=2.8.0",
   "lightning>=2.5.3",
-  "ray>=2.48.0",
+  "ray[train]>=2.48.0",
 ]
 requires-python = ">= 3.10"
 

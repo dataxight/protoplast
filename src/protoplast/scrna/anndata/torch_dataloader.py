@@ -4,7 +4,6 @@ import anndata
 import random
 from torch.utils.data import get_worker_info
 import torch.distributed as td
-import json
 import numpy as np
 
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
