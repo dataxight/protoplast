@@ -1,53 +1,28 @@
 from protoplast.scrna.anndata.lightning_models import LinearClassifier
 import argparse
 from protoplast.scrna.anndata.torch_dataloader import DistrbutedCellLineAnnDataset as Dcl, ann_split_data, cell_line_metadata_cb
-import lightning.pytorch as pl
+from protoplast.scrna.anndata.trainer import new_trainer
 import ray
-import os
-from torch.utils.data import DataLoader
-import json
+
+"""
+Think of this as a template consult the documentation
+on how to modify this code for another model
+
+here you can write your own split data algorithm or use the default by looking at ann_split_data
+You can create your own model by extending BaseAnnDataLightningModule
+Create your own Dataset to feed the correct data to your model by extending
+DistributedAnnDataset
+
+This library is design to be very flexible consult the documentation for more details or how
+use it to fit your training situation
+
+"""
 
 def parse_list(s):
     if "," in s:
         return s.split(",")
     else:
         return [s]
-
-def anndata_train_func(config):
-    ctx = ray.train.get_context()
-    if ctx:
-        rank = ctx.get_world_rank()
-    else:
-        rank = 0
-    share_path = config.get("share_path")
-    indices_path = indices_path = os.path.join(share_path, "indices.json")
-    num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
-    print(f"=========Starting the training on {rank} with num threads: {num_threads}=========")
-    train_ds, test_ds = Dcl.create_distributed_ds(indices_path), Dcl.create_distributed_ds(indices_path, is_test=True)
-    loader_config = dict(
-        batch_size=None,
-        num_workers=num_threads,
-        prefetch_factor=4
-    )
-    train_dl, test_dl = DataLoader(train_ds,**loader_config), DataLoader(test_ds, **loader_config) 
-    model = LinearClassifier(num_genes=train_ds.num_genes, num_classes=train_ds.num_classes)
-    profile_path = os.path.join(share_path, "profiling", f"rank_{rank}")
-    os.makedirs(profile_path, exist_ok=True)
-    
-    trainer = pl.Trainer(
-            max_epochs=1,
-            devices="auto",
-            accelerator="auto",
-            strategy=ray.train.lightning.RayDDPStrategy(),
-            plugins=[ray.train.lightning.RayLightningEnvironment()],
-            callbacks=[ray.train.lightning.RayTrainReportCallback()],
-            enable_checkpointing=False,
-            # profiler=profiler
-            
-    )
-    trainer = ray.train.lightning.prepare_trainer(trainer)
-    trainer.fit(model, train_dataloaders=train_dl, val_dataloaders=test_dl)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a linear classifier on cell line data.")
@@ -74,19 +49,17 @@ if __name__ == "__main__":
         test_indices=test_indices,
         metadata=metadata
     )
-    indices_path = os.path.join(args.share_path, "indices.json")
-    with open(indices_path, 'w') as f:
-        json.dump(indices, f)
-    print("Finish spliting the data saving to: ", indices_path)
+    print("Finish spliting the data starting distributed training")
     train_config = {
             "batch_size": args.batch_size,
             "mode": args.mode,
             "test_size": args.test_size,
-            "share_path": args.share_path,
+            "indices": indices,
     }
     scaling_config = ray.train.ScalingConfig(num_workers=int(resources.get("GPU")), use_gpu=use_gpu, resources_per_worker={"CPU": args.thread_per_worker})
+    my_train_func = new_trainer(LinearClassifier, Dcl, ["num_genes", "num_classes"])
     par_trainer = ray.train.torch.TorchTrainer(
-        anndata_train_func,
+        my_train_func,
         scaling_config=scaling_config,
         train_loop_config=train_config
     )

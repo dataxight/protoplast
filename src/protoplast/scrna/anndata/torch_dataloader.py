@@ -74,6 +74,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         # map each gene to an index
         for k,v in metadata.items():
             setattr(self, k, v)
+        self.metadata = metadata
         worker_info = get_worker_info()
         if worker_info is None:
             self.wid = 0
@@ -91,10 +92,11 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             self.ray_size = 1
         self.batches = indices
 
+
     @classmethod
-    def create_distributed_ds(cls, path: str, is_test: bool = False):
-        # assume indices file save somewhere with the following format
+    def create_distributed_ds(cls, indices: dict, is_test: bool = False):
         """
+        indices is in the following format
         {
             "files": [path to anndata must correspond to indices],
             "train_indices": [[correspond to files[0]], [correspond to files[i]] ],
@@ -105,8 +107,6 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             }
         }
         """
-        with open(path, "r") as f:
-            indices = json.load(f)
         ikey = "train_indices"
         if is_test:
             ikey = "test_indices"
