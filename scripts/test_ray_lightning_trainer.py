@@ -23,21 +23,31 @@ use it to fit your training situation
 
 """
 
+
 def parse_list(s):
     if "," in s:
         return s.split(",")
     else:
         return [s]
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a linear classifier on cell line data.")
-    parser.add_argument("--file_paths", required=True, type=parse_list, help='Comma-separated list of integers')
-    # if reading from local disk without raid configuration should set to zero otherwise increase this number for faster processing need to do more experimentation
-    parser.add_argument("--thread_per_worker", required=True, type=int, help="Amount of thread per ray worker for data loading")
+    parser.add_argument("--file_paths", required=True, type=parse_list, help="Comma-separated list of integers")
+    # if reading from local disk without raid configuration should set to zero otherwise increase this
+    # number for faster processing need to do more experimentation
+    parser.add_argument(
+        "--thread_per_worker", required=True, type=int, help="Amount of thread per ray worker for data loading"
+    )
     # recommended to be around 1000-2000 for maximum speed this also depends on storage type need to experiment
     # however we can set a warning if batch size is too large for GPU or CPU
     parser.add_argument("--batch_size", default=1000, type=int, help="Dataloader batch size")
-    parser.add_argument("--test_size", default=None, type=float, help="How big is the test data as a fraction of the whole data per plate or offsets")
+    parser.add_argument(
+        "--test_size",
+        default=None,
+        type=float,
+        help="How big is the test data as a fraction of the whole data per plate or offsets",
+    )
     args = parser.parse_args()
     ray.init()
     use_gpu = False
@@ -49,16 +59,16 @@ if __name__ == "__main__":
     indices = ann_split_data(args.file_paths, args.batch_size, args.test_size, metadata_cb=cell_line_metadata_cb)
     print("Finish spliting the data starting distributed training")
     train_config = {
-            "batch_size": args.batch_size,
-            "test_size": args.test_size,
-            "indices": indices,
+        "batch_size": args.batch_size,
+        "test_size": args.test_size,
+        "indices": indices,
     }
-    scaling_config = ray.train.ScalingConfig(num_workers=int(resources.get("GPU")), use_gpu=use_gpu, resources_per_worker={"CPU": args.thread_per_worker})
+    scaling_config = ray.train.ScalingConfig(
+        num_workers=int(resources.get("GPU")), use_gpu=use_gpu, resources_per_worker={"CPU": args.thread_per_worker}
+    )
     my_train_func = new_trainer(LinearClassifier, Dcl, ["num_genes", "num_classes"])
     par_trainer = ray.train.torch.TorchTrainer(
-        my_train_func,
-        scaling_config=scaling_config,
-        train_loop_config=train_config
+        my_train_func, scaling_config=scaling_config, train_loop_config=train_config
     )
     print("Spawning Ray worker and initiating distributed training")
     result = par_trainer.fit()

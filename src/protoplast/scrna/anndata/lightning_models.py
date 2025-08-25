@@ -22,6 +22,7 @@ class LinearClassifier(BaseAnnDataLightningModule):
     it is highly recommend to extend from this class if you are using
     the DistributedAnnDataset as your loader
     """
+
     def __init__(self, num_genes, num_classes):
         super().__init__()
         self.model = nn.Linear(num_genes, num_classes)

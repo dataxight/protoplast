@@ -13,9 +13,17 @@ from protoplast.patches.anndata_remote import apply_file_backing_patch
 apply_file_backing_patch()
 apply_read_h5ad_backed_patch()
 
-def ann_split_data(file_paths: list[str], batch_size: int, test_size: float | None = None, random_seed: int | None = 42, metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None):
+
+def ann_split_data(
+    file_paths: list[str],
+    batch_size: int,
+    test_size: float | None = None,
+    random_seed: int | None = 42,
+    metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
+):
     def to_batches(n):
-        return [(i, i+batch_size) for i in range(0, n, batch_size)]
+        return [(i, i + batch_size) for i in range(0, n, batch_size)]
+
     rng = random.Random()
     if random_seed:
         rng = random.Random(random_seed)
@@ -48,36 +56,30 @@ def ann_split_data(file_paths: list[str], batch_size: int, test_size: float | No
         train_split = batches[val_n:]
 
         validation_datas.append(val_split)  # grouped by file
-        train_datas.append(train_split)     # grouped by file
+        train_datas.append(train_split)  # grouped by file
 
-    return dict(
-        files=file_paths,
-        train_indices=train_datas,
-        test_indices=validation_datas,
-        metadata=metadata
-    )
+    return dict(files=file_paths, train_indices=train_datas, test_indices=validation_datas, metadata=metadata)
 
 
 def cell_line_metadata_cb(ad: anndata.AnnData, metadata: dict):
     """
     Example callback for adding cell line metadata when you use this
     with DistributedAnnDataset it will automatically assign all of the key
-    and values to an instance variable 
+    and values to an instance variable
     for example metadata["cell_lines"] will be avaliable as self.cell_lines
     in DistributedAnnDataset where you can use it for transformation
     """
-    metadata["cell_lines"] = ad.obs['cell_line'].cat.categories.to_list()
+    metadata["cell_lines"] = ad.obs["cell_line"].cat.categories.to_list()
     metadata["num_genes"] = ad.var.shape[0]
     metadata["num_classes"] = len(metadata["cell_lines"])
 
 
 class DistributedAnnDataset(torch.utils.data.IterableDataset):
-
     def __init__(self, file_paths: list[str], indices: list[list[int]], metadata: dict, is_test: bool = False):
         # use first file as reference first
         self.files = file_paths
         # map each gene to an index
-        for k,v in metadata.items():
+        for k, v in metadata.items():
             setattr(self, k, v)
         self.metadata = metadata
         worker_info = get_worker_info()
@@ -96,7 +98,6 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             self.ray_rank = 0
             self.ray_size = 1
         self.batches = indices
-
 
     @classmethod
     def create_distributed_ds(cls, indices: dict, is_test: bool = False):
@@ -117,14 +118,13 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             ikey = "test_indices"
         return cls(indices["files"], indices[ikey], indices["metadata"], is_test=is_test)
 
-
     def process_X(self, start: int, end: int) -> torch.Tensor:
         sparse = self.sparse[start:end]
         sparse_torch = torch.sparse_csr_tensor(
             torch.from_numpy(sparse.indptr).long(),
             torch.from_numpy(sparse.indices).long(),
             torch.from_numpy(sparse.data).float(),
-            sparse.shape
+            sparse.shape,
         )
         return sparse_torch
 
@@ -132,13 +132,12 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         X = self.process_X(start, end)
         return X
 
-
     def __iter__(self):
         gidx = 0
         for fidx, f in enumerate(self.files):
             ad = anndata.read_h5ad(f, backed="r")
             self.sparse = ad.X
-            for (start, end) in self.batches[fidx]:
+            for start, end in self.batches[fidx]:
                 if gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid:
                     yield self.transform(ad, start, end)
                 gidx += 1
@@ -147,9 +146,10 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
 class DistrbutedCellLineAnnDataset(DistributedAnnDataset):
     """
     Example of how to extend DistributedAnnDataset to adapt it for cell line linear
-    classification model here self.cell_lines is available through writing the 
+    classification model here self.cell_lines is available through writing the
     metadata_cb correctly
     """
+
     def transform(self, ad: anndata.AnnData, start: int, end: int):
         X = super().transform(ad, start, end)
         line_ids = ad.obs["cell_line"].iloc[start:end]
