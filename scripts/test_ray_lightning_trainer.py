@@ -1,13 +1,9 @@
 import argparse
 
-import ray
-import ray.train
-import ray.train.torch
-
 from protoplast.scrna.anndata.lightning_models import LinearClassifier
 from protoplast.scrna.anndata.torch_dataloader import DistrbutedCellLineAnnDataset as Dcl
-from protoplast.scrna.anndata.torch_dataloader import ann_split_data, cell_line_metadata_cb
-from protoplast.scrna.anndata.trainer import new_trainer
+from protoplast.scrna.anndata.torch_dataloader import cell_line_metadata_cb
+from protoplast.scrna.anndata.trainer import RayTrainRunner
 
 """
 Think of this as a template consult the documentation
@@ -37,7 +33,7 @@ if __name__ == "__main__":
     # if reading from local disk without raid configuration should set to zero otherwise increase this
     # number for faster processing need to do more experimentation
     parser.add_argument(
-        "--thread_per_worker", required=True, type=int, help="Amount of thread per ray worker for data loading"
+        "--thread_per_worker", default=1, type=int, help="Amount of thread per ray worker for data loading"
     )
     # recommended to be around 1000-2000 for maximum speed this also depends on storage type need to experiment
     # however we can set a warning if batch size is too large for GPU or CPU
@@ -49,27 +45,10 @@ if __name__ == "__main__":
         help="How big is the test data as a fraction of the whole data per plate or offsets",
     )
     args = parser.parse_args()
-    ray.init()
-    use_gpu = False
-    resources = ray.cluster_resources()
-    if resources.get("GPU", 0) > 0:
-        use_gpu = True
-    else:
-        raise Exception("Only support with GPU is available only")
-    indices = ann_split_data(args.file_paths, args.batch_size, args.test_size, metadata_cb=cell_line_metadata_cb)
-    print("Finish spliting the data starting distributed training")
-    train_config = {
-        "batch_size": args.batch_size,
-        "test_size": args.test_size,
-        "indices": indices,
-    }
-    scaling_config = ray.train.ScalingConfig(
-        num_workers=int(resources.get("GPU")), use_gpu=use_gpu, resources_per_worker={"CPU": args.thread_per_worker}
+    trainer = RayTrainRunner(
+        LinearClassifier,  # replace with your own model
+        Dcl,  # replace with your own Dataset
+        ["num_genes", "num_classes"],  # change according to what you need for your model
+        cell_line_metadata_cb,  # include data you need for your dataset
     )
-    my_train_func = new_trainer(LinearClassifier, Dcl, ["num_genes", "num_classes"])
-    par_trainer = ray.train.torch.TorchTrainer(
-        my_train_func, scaling_config=scaling_config, train_loop_config=train_config
-    )
-    print("Spawning Ray worker and initiating distributed training")
-    result = par_trainer.fit()
-    print(result.metrics)
+    trainer.train(args.file_paths, args.thread_per_worker, args.batch_size, args.test_size)
