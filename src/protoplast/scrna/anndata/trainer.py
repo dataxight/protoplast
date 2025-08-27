@@ -37,6 +37,7 @@ class RayTrainRunner:
         test_size: int,
         prefetch_factor: int = 4,
         max_epochs: int = 1,
+        num_workers: int | None = None,
     ):
         self.prefetch_factor = prefetch_factor
         self.max_epochs = max_epochs
@@ -50,8 +51,10 @@ class RayTrainRunner:
             "test_size": test_size,
             "indices": indices,
         }
+        if num_workers is None:
+            num_workers = int(resources.get("GPU"))
         scaling_config = ray.train.ScalingConfig(
-            num_workers=int(resources.get("GPU")), use_gpu=True, resources_per_worker={"CPU": thread_per_worker}
+            num_workers=num_workers, use_gpu=True, resources_per_worker={"CPU": thread_per_worker}
         )
         my_train_func = self._trainer()
         par_trainer = ray.train.torch.TorchTrainer(
