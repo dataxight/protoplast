@@ -25,6 +25,8 @@ dependencies = [
   "torch>=2.8.0",
   "lightning>=2.5.3",
   "ray[train]>=2.40.0",
+  "fsspec-dnanexus>=0.2.5",
+  "dxpy>=0.398.0",
 ]
 requires-python = ">= 3.10"
 

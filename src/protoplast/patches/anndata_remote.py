@@ -8,6 +8,8 @@ import fsspec
 import h5py
 from anndata._core.file_backing import AnnDataFileManager as OriginalAnnDataFileManager
 
+from .file_handler import open_fsspec
+
 
 def is_local_file(path: str) -> bool:
     fs, _, paths = fsspec.get_fs_token_paths(path)
@@ -50,8 +52,7 @@ class PatchedAnnDataFileManager(OriginalAnnDataFileManager):
         if is_local_file(self.filename):
             self._file = h5py.File(self.filename, "r")
         else:
-            self._fsspec_file = fsspec.open(self.filename, mode="rb")
-            self._file = h5py.File(self._fsspec_file.open(), "r")
+            self._file = open_fsspec(self.filename)
 
     def close(self):
         """Close the backing file, remember filename, do *not* change to memory mode."""
