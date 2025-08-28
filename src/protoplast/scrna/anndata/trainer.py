@@ -20,12 +20,18 @@ class RayTrainRunner:
         model_keys: list[str],
         metadata_cb: Callable[[anndata.AnnData, dict], None] = cell_line_metadata_cb,
         splitter: Callable[[str, int, float, Callable[[anndata.AnnData, dict], None]], dict] = ann_split_data,
+        runtime_env_config: dict | None = None,
+        address: str | None = None,
     ):
         self.Model = Model
         self.Ds = Ds
         self.model_keys = model_keys
         self.metadata_cb = metadata_cb
         self.splitter = splitter
+        ray.init(address=address, runtime_env=runtime_env_config)
+        self.resources = ray.cluster_resources()
+        if self.resources.get("GPU", 0) <= 0:
+            raise Exception("Only support with GPU is available only")
 
     def train(
         self,
@@ -41,10 +47,6 @@ class RayTrainRunner:
         self.result_storage_path = result_storage_path
         self.prefetch_factor = prefetch_factor
         self.max_epochs = max_epochs
-        ray.init()
-        resources = ray.cluster_resources()
-        if resources.get("GPU", 0) <= 0:
-            raise Exception("Only support with GPU is available only")
         indices = self.splitter(file_paths, batch_size, test_size, metadata_cb=self.metadata_cb)
         train_config = {
             "batch_size": batch_size,
@@ -52,7 +54,7 @@ class RayTrainRunner:
             "indices": indices,
         }
         if num_workers is None:
-            num_workers = int(resources.get("GPU"))
+            num_workers = int(self.resources.get("GPU"))
         scaling_config = ray.train.ScalingConfig(
             num_workers=num_workers, use_gpu=True, resources_per_worker={"CPU": thread_per_worker}
         )
