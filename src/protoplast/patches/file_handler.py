@@ -3,7 +3,7 @@ import h5py
 
 
 def open_fsspec(filename: str):
-    if "dnanexus" in filename:
+    if filename.startswith("dnanexus"):
         dxfs = fsspec.filesystem("dnanexus")
         file = dxfs.open(filename, mode="rb")
         return h5py.File(file, "r")

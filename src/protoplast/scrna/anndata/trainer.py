@@ -36,7 +36,9 @@ class RayTrainRunner:
         prefetch_factor: int = 4,
         max_epochs: int = 1,
         num_workers: int | None = None,
+        result_storage_path: str | None = None,
     ):
+        self.result_storage_path = result_storage_path
         self.prefetch_factor = prefetch_factor
         self.max_epochs = max_epochs
         ray.init()
@@ -56,7 +58,10 @@ class RayTrainRunner:
         )
         my_train_func = self._trainer()
         par_trainer = ray.train.torch.TorchTrainer(
-            my_train_func, scaling_config=scaling_config, train_loop_config=train_config
+            my_train_func,
+            scaling_config=scaling_config,
+            train_loop_config=train_config,
+            run_config=self.result_storage_path,
         )
         print("Spawning Ray worker and initiating distributed training")
         return par_trainer.fit()
