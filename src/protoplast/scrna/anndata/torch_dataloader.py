@@ -1,10 +1,12 @@
+import os
 import random
 from collections.abc import Callable
 
+import lightning.pytorch as pl
 import numpy as np
 import torch
 import torch.distributed as td
-from torch.utils.data import get_worker_info
+from torch.utils.data import DataLoader, get_worker_info
 
 import anndata
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
@@ -155,3 +157,40 @@ class DistrbutedCellLineAnnDataset(DistributedAnnDataset):
         line_ids = ad.obs["cell_line"].iloc[start:end]
         line_idx = np.searchsorted(self.cell_lines, line_ids)
         return X, torch.tensor(line_idx)
+
+
+class AnnDataModule(pl.LightningDataModule):
+    def __init__(self, indices: dict, dataset: DistributedAnnDataset, prefetch_factor: int):
+        super().__init__()
+        self.indices = indices
+        self.dataset = dataset
+        num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
+        self.loader_config = dict(batch_size=None, num_workers=num_threads, prefetch_factor=prefetch_factor)
+
+    def setup(self, stage):
+        if stage == "fit":
+            self.train_ds = self.dataset.create_distributed_ds(self.indices)
+        if stage == "test":
+            self.val_ds = self.dataset.create_distributed_ds(self.indices, is_test=True)
+        if stage == "predict":
+            self.predict_ds = self.dataset.create_distributed_ds(self.indices)
+
+    def train_dataloader(self):
+        return DataLoader(self.train_ds, **self.loader_config)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_ds, **self.loader_config)
+
+    def test_dataloader(self):
+        # for now not support testing for splitting will support it soon in the future
+        return DataLoader(self.val_ds, **self.loader_config)
+
+    def predict_dataloader(self):
+        return DataLoader(self.predict_ds, **self.loader_config)
+
+    def on_after_batch_transfer(self, batch, dataloader_idx):
+        x = batch[0]
+        other = batch[1:]
+        if x.is_sparse or x.is_sparse_csr:
+            x = x.to_dense()
+        return (x, *other)

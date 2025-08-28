@@ -3,19 +3,7 @@ import torch
 from torch import nn
 
 
-class BaseAnnDataLightningModule(pl.LightningModule):
-    def densify(self, x: torch.Tensor):
-        """
-        Densify a sparse matrix in GPU how you use
-        this depends on what your Dataset yield for each batch
-        consult the documentation for more information
-        """
-        if x.is_sparse or x.is_sparse_csr:
-            x = x.to_dense()
-        return x
-
-
-class LinearClassifier(BaseAnnDataLightningModule):
+class LinearClassifier(pl.LightningModule):
     """
     Example model for implementing the cell line linear classifier
     you can write your own model by extending BaseAnnDataLightningModule
@@ -30,7 +18,6 @@ class LinearClassifier(BaseAnnDataLightningModule):
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        x = self.densify(x)
         logits = self.model(x)
         loss = self.loss_fn(logits, y)
         self.log("train_loss", loss, on_step=True, prog_bar=True)
@@ -38,7 +25,6 @@ class LinearClassifier(BaseAnnDataLightningModule):
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
-        x = self.densify(x)
         logits = self.model(x)
         preds = torch.argmax(logits, dim=1)
         correct = (preds == y).sum().item()

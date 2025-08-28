@@ -6,12 +6,11 @@ import ray
 import ray.train
 import ray.train.lightning
 import ray.train.torch
-from torch.utils.data import DataLoader
 
 import anndata
 
 from .lightning_models import BaseAnnDataLightningModule
-from .torch_dataloader import DistributedAnnDataset, ann_split_data, cell_line_metadata_cb
+from .torch_dataloader import AnnDataModule, DistributedAnnDataset, ann_split_data, cell_line_metadata_cb
 
 
 class RayTrainRunner:
@@ -76,12 +75,10 @@ class RayTrainRunner:
             indices = config.get("indices")
             num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
             print(f"=========Starting the training on {rank} with num threads: {num_threads}=========")
-            train_ds, test_ds = Ds.create_distributed_ds(indices), Ds.create_distributed_ds(indices, is_test=True)
-            loader_config = dict(batch_size=None, num_workers=num_threads, prefetch_factor=self.prefetch_factor)
-            train_dl, test_dl = DataLoader(train_ds, **loader_config), DataLoader(test_ds, **loader_config)
-            model_params = train_ds.metadata
+            model_params = indices["metadata"]
+            ann_dm = AnnDataModule(indices, Ds, self.prefetch_factor)
             if model_keys:
-                model_params = {k: v for k, v in train_ds.metadata.items() if k in model_keys}
+                model_params = {k: v for k, v in model_params.items() if k in model_keys}
             model = Model(**model_params)
             trainer = pl.Trainer(
                 max_epochs=self.max_epochs,
@@ -93,6 +90,6 @@ class RayTrainRunner:
                 enable_checkpointing=False,
             )
             trainer = ray.train.lightning.prepare_trainer(trainer)
-            trainer.fit(model, train_dataloaders=train_dl, val_dataloaders=test_dl)
+            trainer.fit(model, train_dataloaders=ann_dm, val_dataloaders=ann_dm)
 
         return anndata_train_func
