@@ -168,8 +168,10 @@ class AnnDataModule(pl.LightningDataModule):
         self.loader_config = dict(batch_size=None, num_workers=num_threads, prefetch_factor=prefetch_factor)
 
     def setup(self, stage):
+        # this is not necessary but it is here in case we want to download data to local node in the future
         if stage == "fit":
             self.train_ds = self.dataset.create_distributed_ds(self.indices)
+            self.val_ds = self.dataset.create_distributed_ds(self.indices, is_test=True)
         if stage == "test":
             self.val_ds = self.dataset.create_distributed_ds(self.indices, is_test=True)
         if stage == "predict":

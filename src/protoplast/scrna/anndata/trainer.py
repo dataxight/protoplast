@@ -9,14 +9,13 @@ import ray.train.torch
 
 import anndata
 
-from .lightning_models import BaseAnnDataLightningModule
 from .torch_dataloader import AnnDataModule, DistributedAnnDataset, ann_split_data, cell_line_metadata_cb
 
 
 class RayTrainRunner:
     def __init__(
         self,
-        Model: BaseAnnDataLightningModule,
+        Model: pl.LightningModule,
         Ds: DistributedAnnDataset,
         model_keys: list[str],
         metadata_cb: Callable[[anndata.AnnData, dict], None] = cell_line_metadata_cb,
@@ -60,8 +59,7 @@ class RayTrainRunner:
             my_train_func, scaling_config=scaling_config, train_loop_config=train_config
         )
         print("Spawning Ray worker and initiating distributed training")
-        result = par_trainer.fit()
-        print(result.metrics)
+        par_trainer.fit()
 
     def _trainer(self):
         Model, Ds, model_keys = self.Model, self.Ds, self.model_keys
@@ -90,6 +88,6 @@ class RayTrainRunner:
                 enable_checkpointing=False,
             )
             trainer = ray.train.lightning.prepare_trainer(trainer)
-            trainer.fit(model, train_dataloaders=ann_dm, val_dataloaders=ann_dm)
+            trainer.fit(model, datamodule=ann_dm)
 
         return anndata_train_func
