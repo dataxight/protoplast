@@ -59,7 +59,7 @@ class RayTrainRunner:
             my_train_func, scaling_config=scaling_config, train_loop_config=train_config
         )
         print("Spawning Ray worker and initiating distributed training")
-        par_trainer.fit()
+        return par_trainer.fit()
 
     def _trainer(self):
         Model, Ds, model_keys = self.Model, self.Ds, self.model_keys
