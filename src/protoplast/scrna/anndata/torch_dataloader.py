@@ -1,5 +1,6 @@
 import os
 import random
+import warnings
 from collections.abc import Callable
 
 import lightning.pytorch as pl
@@ -20,47 +21,69 @@ def ann_split_data(
     file_paths: list[str],
     batch_size: int,
     test_size: float | None = None,
+    validation_size: float | None = None,
     random_seed: int | None = 42,
     metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
 ):
     def to_batches(n):
-        return [(i, i + batch_size) for i in range(0, n, batch_size)]
+        return [(i, min(i + batch_size, n)) for i in range(0, n, batch_size)]
 
-    rng = random.Random()
-    if random_seed:
-        rng = random.Random(random_seed)
+    rng = random.Random(random_seed) if random_seed else random.Random()
+
     # First pass: compute total batches across all files
     file_batches = []
     total_batches = 0
     metadata = dict()
     for i, fp in enumerate(file_paths):
         ad = anndata.read_h5ad(fp, backed="r")
-        if i == 0:
-            if metadata_cb:
-                metadata_cb(ad, metadata)
+        if i == 0 and metadata_cb:
+            metadata_cb(ad, metadata)
+
         n_obs = ad.n_obs
+        if batch_size > n_obs:
+            warnings.warn(
+                f"Batch size ({batch_size}) is greater than number of observations "
+                f"in file {fp} ({n_obs}). Only one batch will be created.",
+                stacklevel=2,
+            )
+
         batches = to_batches(n_obs)
         total_batches += len(batches)
         file_batches.append(batches)
 
-    # How many batches should go to validation globally?
-    val_total = int(total_batches * test_size) if test_size else 0
+    # Safety check
+    if (test_size or 0) + (validation_size or 0) > 1:
+        raise ValueError("test_size + validation_size must be <= 1")
 
-    train_datas = []
-    validation_datas = []
+    # How many batches should go to validation & test globally?
+    val_total = int(total_batches * validation_size) if validation_size else 0
+    test_total = int(total_batches * test_size) if test_size else 0
 
-    # Second pass: allocate validation proportionally, per file
+    train_datas, validation_datas, test_datas = [], [], []
+
+    # Second pass: allocate splits proportionally per file
     for batches in file_batches:
         rng.shuffle(batches)
         n = len(batches)
-        val_n = int(round(n / total_batches * val_total)) if test_size else 0
+
+        val_n = int(round(n / total_batches * val_total)) if validation_size else 0
+        test_n = int(round(n / total_batches * test_total)) if test_size else 0
+
         val_split = batches[:val_n]
-        train_split = batches[val_n:]
+        test_split = batches[val_n : val_n + test_n]
+        train_split = batches[val_n + test_n :]
 
-        validation_datas.append(val_split)  # grouped by file
-        train_datas.append(train_split)  # grouped by file
+        validation_datas.append(val_split)
+        test_datas.append(test_split)
+        train_datas.append(train_split)
 
-    return dict(files=file_paths, train_indices=train_datas, test_indices=validation_datas, metadata=metadata)
+    return dict(
+        files=file_paths,
+        train_indices=train_datas,
+        val_indices=validation_datas,
+        test_indices=test_datas,
+        metadata=metadata,
+    )
 
 
 def cell_line_metadata_cb(ad: anndata.AnnData, metadata: dict):
@@ -77,7 +100,7 @@ def cell_line_metadata_cb(ad: anndata.AnnData, metadata: dict):
 
 
 class DistributedAnnDataset(torch.utils.data.IterableDataset):
-    def __init__(self, file_paths: list[str], indices: list[list[int]], metadata: dict, is_test: bool = False):
+    def __init__(self, file_paths: list[str], indices: list[list[int]], metadata: dict):
         # use first file as reference first
         self.files = file_paths
         # map each gene to an index
@@ -93,7 +116,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             self.nworkers = worker_info.num_workers
         w_rank = td.get_rank()
         w_size = td.get_world_size()
-        if w_rank >= 0 and not is_test:
+        if w_rank >= 0:
             self.ray_rank = w_rank
             self.ray_size = w_size
         else:
@@ -102,7 +125,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         self.batches = indices
 
     @classmethod
-    def create_distributed_ds(cls, indices: dict, is_test: bool = False):
+    def create_distributed_ds(cls, indices: dict, mode: str = "train"):
         """
         indices is in the following format
         {
@@ -115,10 +138,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             }
         }
         """
-        ikey = "train_indices"
-        if is_test:
-            ikey = "test_indices"
-        return cls(indices["files"], indices[ikey], indices["metadata"], is_test=is_test)
+        return cls(indices["files"], indices[f"{mode}_indices"], indices["metadata"])
 
     def process_X(self, start: int, end: int) -> torch.Tensor:
         sparse = self.sparse[start:end]
@@ -171,9 +191,9 @@ class AnnDataModule(pl.LightningDataModule):
         # this is not necessary but it is here in case we want to download data to local node in the future
         if stage == "fit":
             self.train_ds = self.dataset.create_distributed_ds(self.indices)
-            self.val_ds = self.dataset.create_distributed_ds(self.indices, is_test=True)
+            self.val_ds = self.dataset.create_distributed_ds(self.indices, "val")
         if stage == "test":
-            self.val_ds = self.dataset.create_distributed_ds(self.indices, is_test=True)
+            self.val_ds = self.dataset.create_distributed_ds(self.indices, "test")
         if stage == "predict":
             self.predict_ds = self.dataset.create_distributed_ds(self.indices)
 
@@ -191,8 +211,20 @@ class AnnDataModule(pl.LightningDataModule):
         return DataLoader(self.predict_ds, **self.loader_config)
 
     def on_after_batch_transfer(self, batch, dataloader_idx):
-        x = batch[0]
-        other = batch[1:]
-        if x.is_sparse or x.is_sparse_csr:
-            x = x.to_dense()
-        return (x, *other)
+        def densify(x: torch.Tensor):
+            if x.is_sparse or getattr(x, "is_sparse_csr", False):
+                return x.to_dense()
+            return x
+
+        if isinstance(batch, tuple):
+            x = batch[0]
+            other = batch[1:]
+            return (densify(x), *other)
+        elif isinstance(batch, dict):
+            new_batch = dict(batch)
+            new_batch["X"] = densify(batch["X"])
+            return new_batch
+        elif isinstance(batch, torch.Tensor):
+            return densify(batch)
+        else:
+            return batch

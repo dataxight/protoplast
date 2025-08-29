@@ -44,6 +44,13 @@ if __name__ == "__main__":
         type=float,
         help="How big is the test data as a fraction of the whole data per plate or offsets",
     )
+    parser.add_argument(
+        "--val_size",
+        default=None,
+        type=float,
+        help="How big is the validation data as a fraction of the whole data per plpate or offsets",
+    )
+    parser.add_argument("--ckpt_path", default=None, type=str, help="Path to the checkpoint you want to resume from")
     args = parser.parse_args()
     trainer = RayTrainRunner(
         LinearClassifier,  # replace with your own model
@@ -51,4 +58,11 @@ if __name__ == "__main__":
         ["num_genes", "num_classes"],  # change according to what you need for your model
         cell_line_metadata_cb,  # include data you need for your dataset
     )
-    trainer.train(args.file_paths, args.thread_per_worker, args.batch_size, args.test_size)
+    trainer.train(
+        args.file_paths,
+        args.thread_per_worker,
+        args.batch_size,
+        args.test_size,
+        args.val_size,
+        ckpt_path=args.ckpt_path,
+    )
