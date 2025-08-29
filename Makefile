@@ -91,8 +91,8 @@ release: dist ## package and upload a release
 
 build: clean ## builds source and wheel package
 	rm -rf build dist
-	uv build
-	ls -l build dist
+	@uvx --from build pyproject-build --installer uv
+	ls -l dist
 
 install: clean ## install the package to the active Python's site-packages
 	python setup.py install

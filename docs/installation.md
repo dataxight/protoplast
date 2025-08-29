@@ -16,18 +16,18 @@ pip install protoplast
 
 ## From source
 
-The source files for protoplast can be downloaded from the [Github repo](https://github.com/ptdtan/protoplast).
+The source files for protoplast can be downloaded from the [Github repo](https://github.com/dataxight/protoplast).
 
 You can either clone the public repository:
 
 ```sh
-git clone git://github.com/ptdtan/protoplast
+git clone git://github.com/dataxight/protoplast
 ```
 
-Or download the [tarball](https://github.com/ptdtan/protoplast/tarball/master):
+Or download the [tarball](https://github.com/dataxight/protoplast/tarball/master):
 
 ```sh
-curl -OJL https://github.com/ptdtan/protoplast/tarball/master
+curl -OJL https://github.com/dataxight/protoplast/tarball/master
 ```
 
 Once you have a copy of the source, you can install it with:
