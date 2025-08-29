@@ -8,7 +8,8 @@ authors = [
 ]
 maintainers = [
   {name = "Tan Phan", email = "tan@dataxight.com"},
-  {name = "Tan Phan", email = "tan@dataxight.com"},
+  {name = "Worapol Boontanonda", email = "ham@dataxight.com"},
+  {name = "Michael Pan", email = "michael@dataxight.com"},
 ]
 classifiers = [
 
