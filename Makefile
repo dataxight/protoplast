@@ -96,3 +96,15 @@ build: clean ## builds source and wheel package
 
 install: clean ## install the package to the active Python's site-packages
 	python setup.py install
+
+
+.PHONY: check
+check: ## Run code quality tools.
+	@echo "🚀 Checking lock file consistency with 'pyproject.toml'"
+	@uv lock --locked
+	@echo "🚀 Linting code: Running pre-commit"
+	#@uv run pre-commit run -a
+	@echo "🚀 Static type checking: Running mypy"
+	#@uv run mypy
+	@echo "🚀 Checking for obsolete dependencies: Running deptry"
+	#@uv run deptry src

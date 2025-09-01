@@ -76,6 +76,9 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "deptry>=0.23.1",
+    "mypy>=1.17.1",
+    "pre-commit>=4.3.0",
     "pytest>=8.4.1",
 ]
 docs = [
