@@ -113,18 +113,22 @@ class PerturbDataset(Dataset):
         x = adata.get([barcode])
         x = torch.tensor(x, dtype=torch.float32, device=self.device)
 
-        y = self.get_onehot_cell_types(idx)
-        xp = self.get_onehot_perturbs(idx)
-        b = self.get_onehot_batches(idx)
+        y_scalar = self.y_index[idx]
+        logger.info(f"y_scalar: {y_scalar}")
+        xp_scalar = self.xp_index[idx]
+        logger.info(f"xp_scalar: {xp_scalar}")
+        b_scalar = self.b_index[idx]
+        logger.info(f"b_scalar: {b_scalar}")
+        y = self.get_onehot_cell_types(y_scalar)
+        xp = self.get_onehot_perturbs(xp_scalar)
+        b = self.get_onehot_batches(b_scalar)
 
         # raw number from unique index array, for lookup in control_lookup
-        y_idx = self.y_index[idx]
-        b_idx = self.b_index[idx]
         is_control = self.perturb_flattened[idx] == self.control_label
 
         # Pick a control matching the perturbation
-        if len(self.control_lookup[(y_idx, b_idx)]) > 0:
-            ctrl_idx = np.random.choice(self.control_lookup[(y_idx, b_idx)])
+        if len(self.control_lookup[(y_scalar, b_scalar)]) > 0:
+            ctrl_idx = np.random.choice(self.control_lookup[(y_scalar, b_scalar)])
             ctrl_barcode = self.cell_barcodes_flattened[ctrl_idx]
             x_ctrl_matched = adata.get([ctrl_barcode])
             x_ctrl_matched = torch.tensor(x_ctrl_matched, dtype=torch.float32, device=self.device)
