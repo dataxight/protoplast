@@ -28,12 +28,14 @@ class RayTrainRunner:
         runtime_env_config: dict | None = None,
         address: str | None = None,
         ray_trainer_strategy: Strategy | None = None,
+        sparse_keys: list[str] = ["X"],
     ):
         self.Model = Model
         self.Ds = Ds
         self.model_keys = model_keys
         self.metadata_cb = metadata_cb
         self.splitter = splitter
+        self.sparse_keys = sparse_keys
         if not ray_trainer_strategy:
             self.ray_trainer_strategy = ray.train.lightning.RayDDPStrategy()
         else:
@@ -92,7 +94,7 @@ class RayTrainRunner:
             num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
             print(f"=========Starting the training on {rank} with num threads: {num_threads}=========")
             model_params = indices["metadata"]
-            ann_dm = AnnDataModule(indices, Ds, self.prefetch_factor)
+            ann_dm = AnnDataModule(indices, Ds, self.prefetch_factor, self.sparse_keys)
             if model_keys:
                 model_params = {k: v for k, v in model_params.items() if k in model_keys}
             model = Model(**model_params)

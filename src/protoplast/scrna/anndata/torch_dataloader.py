@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import torch.distributed as td
 from torch.utils.data import DataLoader, get_worker_info
+import scipy.sparse as sp
 
 import anndata
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
@@ -100,9 +101,11 @@ def cell_line_metadata_cb(ad: anndata.AnnData, metadata: dict):
 
 
 class DistributedAnnDataset(torch.utils.data.IterableDataset):
-    def __init__(self, file_paths: list[str], indices: list[list[int]], metadata: dict):
+    def __init__(self, file_paths: list[str], indices: list[list[int]], metadata: dict, sparse_keys: list[str], transform_type: str = "tuple"):
         # use first file as reference first
         self.files = file_paths
+        self.sparse_keys = sparse_keys
+        self.transform_type = transform_type
         # map each gene to an index
         for k, v in metadata.items():
             setattr(self, k, v)
@@ -125,7 +128,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         self.batches = indices
 
     @classmethod
-    def create_distributed_ds(cls, indices: dict, mode: str = "train"):
+    def create_distributed_ds(cls, indices: dict, sparse_keys: list[str], mode: str = "train"):
         """
         indices is in the following format
         {
@@ -138,30 +141,39 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             }
         }
         """
-        return cls(indices["files"], indices[f"{mode}_indices"], indices["metadata"])
+        return cls(indices["files"], indices[f"{mode}_indices"], indices["metadata"], sparse_keys)
 
-    def process_X(self, start: int, end: int) -> torch.Tensor:
-        sparse = self.sparse[start:end]
-        sparse_torch = torch.sparse_csr_tensor(
-            torch.from_numpy(sparse.indptr).long(),
-            torch.from_numpy(sparse.indices).long(),
-            torch.from_numpy(sparse.data).float(),
-            sparse.shape,
-        )
-        return sparse_torch
+    def _process_sparse(self, mat) -> torch.Tensor:
+        if sp.issparse(mat):
+            return torch.sparse_csr_tensor(
+                torch.from_numpy(mat.indptr).long(),
+                torch.from_numpy(mat.indices).long(),
+                torch.from_numpy(mat.data).float(),
+                mat.shape,
+            )
+        return torch.from_numpy(mat).float()
 
-    def transform(self, ad: anndata.AnnData, start: int, end: int):
-        X = self.process_X(start, end)
-        return X
+    def transform(self, start: int, end: int):
+        mats = []
+        for k in self.sparse_keys:
+            if "." in k:
+                attr, attr_k = k.split(".")
+                mat = getattr(self.ad, attr)[attr_k][start:end]
+                mats.append(self._process_sparse(mat))
+            else:
+                mat = getattr(self.ad, k)[start:end]
+                mats.append(self._process_sparse(mat))
+        if len(mats) == 1:
+            return mats[0]
+        return tuple(mats)
 
     def __iter__(self):
         gidx = 0
         for fidx, f in enumerate(self.files):
-            ad = anndata.read_h5ad(f, backed="r")
-            self.sparse = ad.X
+            self.ad = anndata.read_h5ad(f, backed="r")
             for start, end in self.batches[fidx]:
                 if gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid:
-                    yield self.transform(ad, start, end)
+                    yield self.transform(start, end)
                 gidx += 1
 
 
@@ -172,30 +184,31 @@ class DistrbutedCellLineAnnDataset(DistributedAnnDataset):
     metadata_cb correctly
     """
 
-    def transform(self, ad: anndata.AnnData, start: int, end: int):
-        X = super().transform(ad, start, end)
-        line_ids = ad.obs["cell_line"].iloc[start:end]
+    def transform(self, start: int, end: int):
+        X = super().transform(start, end)
+        line_ids = self.ad.obs["cell_line"].iloc[start:end]
         line_idx = np.searchsorted(self.cell_lines, line_ids)
         return X, torch.tensor(line_idx)
 
 
 class AnnDataModule(pl.LightningDataModule):
-    def __init__(self, indices: dict, dataset: DistributedAnnDataset, prefetch_factor: int):
+    def __init__(self, indices: dict, dataset: DistributedAnnDataset, prefetch_factor: int, sparse_keys: list[str]):
         super().__init__()
         self.indices = indices
         self.dataset = dataset
         num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
         self.loader_config = dict(batch_size=None, num_workers=num_threads, prefetch_factor=prefetch_factor)
+        self.sparse_keys = sparse_keys
 
     def setup(self, stage):
         # this is not necessary but it is here in case we want to download data to local node in the future
         if stage == "fit":
-            self.train_ds = self.dataset.create_distributed_ds(self.indices)
-            self.val_ds = self.dataset.create_distributed_ds(self.indices, "val")
+            self.train_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys)
+            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "val")
         if stage == "test":
-            self.val_ds = self.dataset.create_distributed_ds(self.indices, "test")
+            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "test")
         if stage == "predict":
-            self.predict_ds = self.dataset.create_distributed_ds(self.indices)
+            self.predict_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys)
 
     def train_dataloader(self):
         return DataLoader(self.train_ds, **self.loader_config)
@@ -217,13 +230,9 @@ class AnnDataModule(pl.LightningDataModule):
             return x
 
         if isinstance(batch, tuple):
-            x = batch[0]
-            other = batch[1:]
-            return (densify(x), *other)
+            return tuple([densify(d) for d in batch])
         elif isinstance(batch, dict):
-            new_batch = dict(batch)
-            new_batch["X"] = densify(batch["X"])
-            return new_batch
+            return {k: densify(v) for k, v in batch.items()}
         elif isinstance(batch, torch.Tensor):
             return densify(batch)
         else:
