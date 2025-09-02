@@ -5,10 +5,10 @@ from collections.abc import Callable
 
 import lightning.pytorch as pl
 import numpy as np
+import scipy.sparse as sp
 import torch
 import torch.distributed as td
 from torch.utils.data import DataLoader, get_worker_info
-import scipy.sparse as sp
 
 import anndata
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
@@ -101,7 +101,14 @@ def cell_line_metadata_cb(ad: anndata.AnnData, metadata: dict):
 
 
 class DistributedAnnDataset(torch.utils.data.IterableDataset):
-    def __init__(self, file_paths: list[str], indices: list[list[int]], metadata: dict, sparse_keys: list[str], transform_type: str = "tuple"):
+    def __init__(
+        self,
+        file_paths: list[str],
+        indices: list[list[int]],
+        metadata: dict,
+        sparse_keys: list[str],
+        transform_type: str = "tuple",
+    ):
         # use first file as reference first
         self.files = file_paths
         self.sparse_keys = sparse_keys

@@ -1,5 +1,5 @@
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 import lightning.pytorch as pl
 import ray
@@ -28,7 +28,7 @@ class RayTrainRunner:
         runtime_env_config: dict | None = None,
         address: str | None = None,
         ray_trainer_strategy: Strategy | None = None,
-        sparse_keys: list[str] = ["X"],
+        sparse_keys: Iterable[str] = ("X",),
     ):
         self.Model = Model
         self.Ds = Ds
