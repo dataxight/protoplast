@@ -10,8 +10,8 @@ class BaselinePerturbModel(nn.Module):
         n_targets: number of perturbation targets (genes + control)
         """
         super().__init__()
-        self.cell_embed = nn.Embedding(n_cell_lines, d_y)
-        self.xp_embed = nn.Embedding(n_targets, d_xp)
+        self.y_proj = nn.Linear(n_cell_lines, d_y)
+        self.xp_proj = nn.Linear(n_targets, d_xp)
         
         # Control predictor: just based on cell line
         self.ctrl_net = nn.Sequential(
@@ -36,9 +36,13 @@ class BaselinePerturbModel(nn.Module):
         y: [B] tensor of cell line indices
         xp: [B] tensor of perturbation indices (0=control)
         """
-        e_y = self.cell_embed(y)
-        e_xp = self.xp_embed(xp)
-        
+
+        if xp.ndim > 2:
+            xp = xp.squeeze(1)
+
+        e_y = self.y_proj(y)
+        e_xp = self.xp_proj(xp)
+
         # Control prediction
         x_ctrl = self.ctrl_net(e_y)
         

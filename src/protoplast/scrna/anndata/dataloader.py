@@ -58,7 +58,8 @@ class PerturbDataset(Dataset):
         logger.info(f"Total unique cell types: {len(self.cell_types)}")
 
         # get unique genes across all h5ad files
-        self.perturb_vocab = np.concatenate([ad.var_names.tolist() for ad in adatas])
+        # control label is first, so its one-hot is all zeros
+        self.perturb_vocab_flattened = np.concatenate([ad.var_names.tolist() for ad in adatas])
         self.perturb_flattened = [] 
         for adata in adatas:
             if "guide_id" in adata.obs:
@@ -66,9 +67,15 @@ class PerturbDataset(Dataset):
             else:
                 self.perturb_flattened = np.concatenate([self.perturb_flattened, adata.obs["gene"].tolist()])
         # Map categorical labels to integer ids
-        self.perturbs_training, _ = np.unique(self.perturb_flattened, return_inverse=True)
+        self.perturbs_training = np.unique(self.perturb_flattened)
         logger.info(f"Total unique perturbations in training set: {len(self.perturbs_training)}")
-        self.perturbs_vocab, self.xp_index = np.unique([self.control_label] + self.perturb_vocab, return_inverse=True)
+        # TODO: fix this, to make sure that target pertubation is a gene in the vocabulary
+        self.perturbs_vocab = np.unique(self.perturb_vocab_flattened)
+        self.perturbs_vocab = np.concatenate([self.perturbs_vocab, self.perturbs_training])
+        self.perturbs_vocab = np.unique(self.perturbs_vocab)
+        # if the control label is not in the vocabulary, add it
+        if self.control_label not in self.perturbs_vocab:
+            self.perturbs_vocab = np.concatenate([[self.control_label], self.perturbs_vocab])
 
         logger.info(f"Total perturbations (vocab + training set): {len(self.perturbs_vocab)}")
 
@@ -86,7 +93,6 @@ class PerturbDataset(Dataset):
 
         # Store precomputed label tensors
         self.y = torch.tensor(self.y_index, dtype=torch.long, device=device)
-        self.xp = torch.tensor(self.xp_index, dtype=torch.long, device=device)
         self.b = torch.tensor(self.b_index, dtype=torch.long, device=device)
 
     def __len__(self):
@@ -97,13 +103,13 @@ class PerturbDataset(Dataset):
         return np.where(idx < self.n_cells.cumsum())[0][0]
 
     def get_onehot_cell_types(self, idx):
-        return torch.nn.functional.one_hot(self.y[idx], num_classes=len(self.cell_types))
+        return torch.nn.functional.one_hot(idx, num_classes=len(self.cell_types))
 
     def get_onehot_perturbs(self, idx):
-        return torch.nn.functional.one_hot(self.xp[idx], num_classes=len(self.perturbs_vocab))
+        return torch.nn.functional.one_hot(idx, num_classes=len(self.perturbs_vocab))
 
     def get_onehot_batches(self, idx):
-        return torch.nn.functional.one_hot(self.b[idx], num_classes=len(self.batches))
+        return torch.nn.functional.one_hot(idx, num_classes=len(self.batches))
 
     def __getitem__(self, idx):
         # Fetch expression row, convert sparse → dense → torch
@@ -113,14 +119,11 @@ class PerturbDataset(Dataset):
         x = adata.get([barcode])
         x = torch.tensor(x, dtype=torch.float32, device=self.device)
 
-        y_scalar = self.y_index[idx]
-        logger.info(f"y_scalar: {y_scalar}")
-        xp_scalar = self.xp_index[idx]
-        logger.info(f"xp_scalar: {xp_scalar}")
-        b_scalar = self.b_index[idx]
-        logger.info(f"b_scalar: {b_scalar}")
-        y = self.get_onehot_cell_types(y_scalar)
-        xp = self.get_onehot_perturbs(xp_scalar)
+        y_scalar = self.y[idx]
+        xp_scalar = torch.tensor(np.where(self.perturb_flattened[idx] == self.perturbs_vocab)[0][0], dtype=torch.long, device=self.device)
+        b_scalar = self.b[idx]
+        y = self.get_onehot_cell_types(y_scalar).float()
+        xp = self.get_onehot_perturbs(xp_scalar).float()
         b = self.get_onehot_batches(b_scalar)
 
         # raw number from unique index array, for lookup in control_lookup
@@ -147,3 +150,4 @@ if __name__ == "__main__":
     print(b.shape)
     print(xp.shape)
     print(x_ctrl_matched.shape)
+    # print(ds[228314])
