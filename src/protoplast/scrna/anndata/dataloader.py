@@ -61,6 +61,7 @@ class PerturbDataset(Dataset):
         self.perturb_vocab = np.concatenate([ad.var_names.tolist() for ad in adatas])
         self.perturb_flattened = np.array([])
         for adata in adatas:
+            breakpoint()
             if "guide_id" in adata.obs:
                 self.perturb_flattened = np.concatenate([self.perturb_flattened, adata.obs["guide_id"].tolist()])
             else:
