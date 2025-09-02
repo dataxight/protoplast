@@ -59,15 +59,14 @@ class PerturbDataset(Dataset):
 
         # get unique genes across all h5ad files
         self.perturb_vocab = np.concatenate([ad.var_names.tolist() for ad in adatas])
-        self.perturb_flattened = np.array([])
+        self.perturb_flattened = [] 
         for adata in adatas:
-            breakpoint()
             if "guide_id" in adata.obs:
                 self.perturb_flattened = np.concatenate([self.perturb_flattened, adata.obs["guide_id"].tolist()])
             else:
                 self.perturb_flattened = np.concatenate([self.perturb_flattened, adata.obs["gene"].tolist()])
         # Map categorical labels to integer ids
-        self.perturbs_training = np.unique(self.perturb_flattened, return_inverse=True)
+        self.perturbs_training, _ = np.unique(self.perturb_flattened, return_inverse=True)
         logger.info(f"Total unique perturbations in training set: {len(self.perturbs_training)}")
         self.perturbs_vocab, self.xp_index = np.unique([self.control_label] + self.perturb_vocab, return_inverse=True)
 
@@ -138,5 +137,9 @@ if __name__ == "__main__":
     import glob
     h5ad_files = glob.glob("/home/tphan/state/state/competition_support_set/*.h5")
     ds = PerturbDataset(h5ad_files)
-    print(ds[0])
-    print(ds[1])
+    x, y, b, xp, x_ctrl_matched = ds[0]
+    print(x.shape)
+    print(y.shape)
+    print(b.shape)
+    print(xp.shape)
+    print(x_ctrl_matched.shape)
