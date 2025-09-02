@@ -36,6 +36,12 @@ dependencies = [
 requires-python = ">= 3.10"
 
 [project.optional-dependencies]
+ml = [
+    "scplode @ git+https://github.com/rkita/scplode.git@69d369f",
+    "torch",
+    "torchvision"
+]
+
 test = [
     "coverage",  # testing
     "pytest",  # testing
