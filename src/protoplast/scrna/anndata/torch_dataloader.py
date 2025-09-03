@@ -231,9 +231,10 @@ class AnnDataModule(pl.LightningDataModule):
         return DataLoader(self.predict_ds, **self.loader_config)
 
     def on_after_batch_transfer(self, batch, dataloader_idx):
-        def densify(x: torch.Tensor):
-            if x.is_sparse or getattr(x, "is_sparse_csr", False):
-                return x.to_dense()
+        def densify(x):
+            if isinstance(x, torch.Tensor):
+                if x.is_sparse or getattr(x, "is_sparse_csr", False):
+                    return x.to_dense()
             return x
 
         if isinstance(batch, tuple):
