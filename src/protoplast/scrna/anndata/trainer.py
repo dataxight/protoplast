@@ -59,17 +59,25 @@ class RayTrainRunner:
         result_storage_path: str = "~/protoplast_results",
         # read more here: https://lightning.ai/docs/pytorch/stable/common/trainer.html#fit
         ckpt_path: str | None = None,
+        is_gpu: bool = True,
     ):
         self.result_storage_path = result_storage_path
         self.prefetch_factor = prefetch_factor
         self.max_epochs = max_epochs
         indices = self.splitter(file_paths, batch_size, test_size, val_size, metadata_cb=self.metadata_cb)
         train_config = {"indices": indices, "ckpt_path": ckpt_path}
-        if num_workers is None:
-            num_workers = int(self.resources.get("GPU"))
-        scaling_config = ray.train.ScalingConfig(
-            num_workers=num_workers, use_gpu=True, resources_per_worker={"CPU": thread_per_worker}
-        )
+        if is_gpu:
+            if num_workers is None:
+                num_workers = int(self.resources.get("GPU"))
+            scaling_config = ray.train.ScalingConfig(
+                num_workers=num_workers, use_gpu=True, resources_per_worker={"CPU": thread_per_worker}
+            )
+        else:
+            if num_workers is None:
+                num_workers = max(int(self.resources.get("CPU", 1) / thread_per_worker), 1)
+            scaling_config = ray.train.ScalingConfig(
+                num_workers=num_workers, use_gpu=False, resources_per_worker={"CPU": thread_per_worker}
+            )
         my_train_func = self._trainer()
         par_trainer = ray.train.torch.TorchTrainer(
             my_train_func,

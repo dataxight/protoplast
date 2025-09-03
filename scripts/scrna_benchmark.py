@@ -1,0 +1,58 @@
+import os
+import sys
+
+from protoplast.scrna.anndata.lightning_models import LinearClassifier, NullClassifier
+from protoplast.scrna.anndata.torch_dataloader import DistrbutedCellLineAnnDataset as Dcl
+from protoplast.scrna.anndata.torch_dataloader import cell_line_metadata_cb
+from protoplast.scrna.anndata.trainer import RayTrainRunner
+
+if __name__ == "__main__":
+    tahoe_dir = sys.argv[1]
+    mode = sys.argv[2]
+    thread_per_worker = int(sys.argv[3])
+    batch_size = int(sys.argv[4])
+    num_workers = int(sys.argv[5])
+    paths = os.listdir(tahoe_dir)
+    paths = [os.path.join(tahoe_dir, p) for p in paths if p.endswith(".h5ad")]
+    if mode == "null":
+        print("Running null model")
+        trainer = RayTrainRunner(
+            NullClassifier,  # replace with your own model
+            Dcl,  # replace with your own Dataset
+            ["num_classes"],  # change according to what you need for your model
+            cell_line_metadata_cb,  # include data you need for your dataset
+            runtime_env_config={
+                "env_vars": {
+                    "OMP_NUM_THREADS": str(thread_per_worker),
+                    "MKL_NUM_THREADS": str(thread_per_worker),
+                    "NUMEXPR_NUM_THREADS": str(thread_per_worker),
+                    "OPENBLAS_NUM_THREADS": str(thread_per_worker),
+                    "TORCH_NUM_THREADS": str(thread_per_worker),
+                }
+            },
+        )
+        trainer.train(
+            paths,
+            thread_per_worker=thread_per_worker,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            is_gpu=False,
+            test_size=0.0,
+            val_size=0.0,
+        )
+    else:
+        print("Running linear model")
+        trainer = RayTrainRunner(
+            LinearClassifier,  # replace with your own model
+            Dcl,  # replace with your own Dataset
+            ["num_genes", "num_classes"],  # change according to what you need for your model
+            cell_line_metadata_cb,  # include data you need for your dataset
+        )
+        trainer.train(
+            paths,
+            thread_per_worker=thread_per_worker,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            test_size=0.0,
+            val_size=0.0,
+        )
