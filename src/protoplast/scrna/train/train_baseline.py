@@ -144,7 +144,7 @@ def main():
     # Create data module
     max_epoch = 30
     dm = PerturbationDataModule(
-        toml_config_path="/home/tphan/Softwares/protoplast/notebooks/starter.toml",
+        toml_config_path="/home/tphan/Softwares/protoplast/notebooks/vcc-training.toml",
         embed_key=None, 
         num_workers=8,
         batch_col="batch_var",
