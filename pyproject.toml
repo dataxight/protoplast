@@ -1,13 +1,15 @@
 [project]
 name = "protoplast"
-version = "0.1.0"
-description = "A collection of drivers for Protoform, the data engineering framework from DataXight"
+version = "0.0.1"
+description = "Scalable machine learning for molecular data analysis"
 readme = "README.md"
 authors = [
-  {name = "Tan Phan", email = "tan@dataxight.com"}
+  {name = "DataXight Solution", email = "solutions@dataxight.com"}
 ]
 maintainers = [
-  {name = "Tan Phan", email = "tan@dataxight.com"}
+  {name = "Tan Phan", email = "tan@dataxight.com"},
+  {name = "Worapol Boontanonda", email = "ham@dataxight.com"},
+  {name = "Michael Pan", email = "michael@dataxight.com"},
 ]
 classifiers = [
 
@@ -35,9 +37,9 @@ test = [
 ]
 
 [project.urls]
-bugs = "https://github.com/ptdtan/protoplast/issues"
-changelog = "https://github.com/ptdtan/protoplast/blob/master/changelog.md"
-homepage = "https://github.com/ptdtan/protoplast"
+bugs = "https://github.com/dataxight/protoplast/issues"
+changelog = "https://github.com/dataxight/protoplast/blob/master/changelog.md"
+homepage = "https://github.com/dataxight/protoplast"
 
 
 [tool.ty]
@@ -66,3 +68,26 @@ select = [
 
 [tool.uv]
 package = true
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "deptry>=0.23.1",
+    "mypy>=1.17.1",
+    "pre-commit>=4.3.0",
+    "pytest>=8.4.1",
+    "pytest-cov>=6.2.1",
+]
+docs = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material",
+    "mkdocstrings>=0.30.0",
+    "mkdocstrings-python>=1.18.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/protoplast"]

@@ -91,8 +91,20 @@ release: dist ## package and upload a release
 
 build: clean ## builds source and wheel package
 	rm -rf build dist
-	uv build
-	ls -l build dist
+	@uvx --from build pyproject-build --installer uv
+	ls -l dist
 
 install: clean ## install the package to the active Python's site-packages
 	python setup.py install
+
+
+.PHONY: check
+check: ## Run code quality tools.
+	@echo "🚀 Checking lock file consistency with 'pyproject.toml'"
+	@uv lock --locked
+	@echo "🚀 Linting code: Running pre-commit"
+	#@uv run pre-commit run -a
+	@echo "🚀 Static type checking: Running mypy"
+	#@uv run mypy
+	@echo "🚀 Checking for obsolete dependencies: Running deptry"
+	#@uv run deptry src
