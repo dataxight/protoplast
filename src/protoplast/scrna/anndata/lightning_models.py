@@ -43,14 +43,9 @@ class NullClassifier(pl.LightningModule):
     Null model baseline: ignores input features, outputs uniform logits or a learnable bias.
     """
 
-    def __init__(self, num_classes, learn_bias: bool = True):
+    def __init__(self, num_classes):
         super().__init__()
-        if learn_bias:
-            # Learnable bias for each class (like always predicting priors)
-            self.bias = nn.Parameter(torch.zeros(num_classes))
-        else:
-            # Fixed uniform distribution over classes
-            self.register_buffer("bias", torch.zeros(num_classes))
+        self.register_buffer("bias", torch.zeros(num_classes))
         self.loss_fn = nn.CrossEntropyLoss()
 
     def forward(self, x):
