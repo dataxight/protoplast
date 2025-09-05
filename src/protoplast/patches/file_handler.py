@@ -1,6 +1,7 @@
+from urllib.parse import urlparse
+
 import fsspec
 import h5py
-from urllib.parse import urlparse
 
 
 def open_fsspec(filename: str):

@@ -227,7 +227,7 @@ class AnnDataModule(pl.LightningDataModule):
 
     def predict_dataloader(self):
         return DataLoader(self.predict_ds, **self.loader_config)
-    
+
     @staticmethod
     def densify(x):
         if isinstance(x, torch.Tensor):
@@ -236,7 +236,6 @@ class AnnDataModule(pl.LightningDataModule):
         return x
 
     def on_after_batch_transfer(self, batch, dataloader_idx):
-        
         if isinstance(batch, tuple):
             return tuple([self.densify(d) for d in batch])
         elif isinstance(batch, dict):
