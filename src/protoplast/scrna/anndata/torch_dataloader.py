@@ -107,12 +107,10 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         indices: list[list[int]],
         metadata: dict,
         sparse_keys: list[str],
-        transform_type: str = "tuple",
     ):
         # use first file as reference first
         self.files = file_paths
         self.sparse_keys = sparse_keys
-        self.transform_type = transform_type
         # map each gene to an index
         for k, v in metadata.items():
             setattr(self, k, v)
