@@ -170,6 +170,8 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
                 mats.append(self._process_sparse(mat))
         if len(mats) == 1:
             return mats[0]
+        if mats[0].shape[0] == 0:
+            return None
         return tuple(mats)
 
     def __iter__(self):
@@ -178,7 +180,9 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             self.ad = anndata.read_h5ad(f, backed="r")
             for start, end in self.batches[fidx]:
                 if gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid:
-                    yield self.transform(start, end)
+                    data = self.transform(start, end)
+                    if data is not None:
+                        yield self.transform(start, end)
                 gidx += 1
 
 
@@ -191,6 +195,8 @@ class DistrbutedCellLineAnnDataset(DistributedAnnDataset):
 
     def transform(self, start: int, end: int):
         X = super().transform(start, end)
+        if X is None:
+            return None
         line_ids = self.ad.obs["cell_line"].iloc[start:end]
         line_idx = np.searchsorted(self.cell_lines, line_ids)
         return X, torch.tensor(line_idx)
