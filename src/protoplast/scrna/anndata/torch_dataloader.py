@@ -2,6 +2,7 @@ import os
 import random
 import warnings
 from collections.abc import Callable
+from anndata.experimental import AnnCollection
 
 import lightning.pytorch as pl
 import numpy as np
@@ -26,63 +27,42 @@ def ann_split_data(
     random_seed: int | None = 42,
     metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
 ):
-    def to_batches(n):
-        return [(i, min(i + batch_size, n)) for i in range(0, n, batch_size)]
-
     rng = random.Random(random_seed) if random_seed else random.Random()
-
-    # First pass: compute total batches across all files
-    file_batches = []
-    total_batches = 0
     metadata = dict()
+
+    # Create AnnCollection and add files
+    ads = []
     for i, fp in enumerate(file_paths):
         ad = anndata.read_h5ad(fp, backed="r")
         if i == 0 and metadata_cb:
             metadata_cb(ad, metadata)
+        ads.append(ad)
+    ac = AnnCollection(ads)
+    total_obs = ac.n_obs
 
-        n_obs = ad.n_obs
-        if batch_size > n_obs:
-            warnings.warn(
-                f"Batch size ({batch_size}) is greater than number of observations "
-                f"in file {fp} ({n_obs}). Only one batch will be created.",
-                stacklevel=2,
-            )
+    # Generate batch indices globally
+    starts = np.arange(0, total_obs, batch_size)
+    ends = np.minimum(starts + batch_size, total_obs)
+    all_batches = list(zip(starts, ends))
 
-        batches = to_batches(n_obs)
-        total_batches += len(batches)
-        file_batches.append(batches)
+    # Shuffle globally
+    rng.shuffle(all_batches)
 
-    # Safety check
-    if (test_size or 0) + (validation_size or 0) > 1:
-        raise ValueError("test_size + validation_size must be <= 1")
-
-    # How many batches should go to validation & test globally?
+    # Compute number of batches for validation & test
+    total_batches = len(all_batches)
     val_total = int(total_batches * validation_size) if validation_size else 0
     test_total = int(total_batches * test_size) if test_size else 0
 
-    train_datas, validation_datas, test_datas = [], [], []
-
-    # Second pass: allocate splits proportionally per file
-    for batches in file_batches:
-        rng.shuffle(batches)
-        n = len(batches)
-
-        val_n = int(round(n / total_batches * val_total)) if validation_size else 0
-        test_n = int(round(n / total_batches * test_total)) if test_size else 0
-
-        val_split = batches[:val_n]
-        test_split = batches[val_n : val_n + test_n]
-        train_split = batches[val_n + test_n :]
-
-        validation_datas.append(val_split)
-        test_datas.append(test_split)
-        train_datas.append(train_split)
+    # Split batches
+    val_indices = all_batches[:val_total]
+    test_indices = all_batches[val_total : val_total + test_total]
+    train_indices = all_batches[val_total + test_total :]
 
     return dict(
         files=file_paths,
-        train_indices=train_datas,
-        val_indices=validation_datas,
-        test_indices=test_datas,
+        train_indices=train_indices,
+        val_indices=val_indices,
+        test_indices=test_indices,
         metadata=metadata,
     )
 
@@ -131,6 +111,10 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             self.ray_rank = 0
             self.ray_size = 1
         self.batches = indices
+        ads = []
+        for f in self.files:
+            ads.append(anndata.read_h5ad(f, backed="r"))
+        self.ac = AnnCollection(ads)
 
     @classmethod
     def create_distributed_ds(cls, indices: dict, sparse_keys: list[str], mode: str = "train"):
@@ -159,14 +143,15 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         return torch.from_numpy(mat).float()
 
     def transform(self, start: int, end: int):
+        self.ad = self.ac[start:end].to_adata()
         mats = []
         for k in self.sparse_keys:
             if "." in k:
                 attr, attr_k = k.split(".")
-                mat = getattr(self.ad, attr)[attr_k][start:end]
+                mat = getattr(self.ad, attr)[attr_k]
                 mats.append(self._process_sparse(mat))
             else:
-                mat = getattr(self.ad, k)[start:end]
+                mat = getattr(self.ad, k)
                 mats.append(self._process_sparse(mat))
         if len(mats) == 1:
             return mats[0]
@@ -174,12 +159,11 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         gidx = 0
-        for fidx, f in enumerate(self.files):
-            self.ad = anndata.read_h5ad(f, backed="r")
-            for start, end in self.batches[fidx]:
-                if gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid:
-                    yield self.transform(start, end)
-                gidx += 1
+        for start, end in self.batches:
+            if gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid:
+
+                yield self.transform(start, end)
+            gidx += 1
 
 
 class DistrbutedCellLineAnnDataset(DistributedAnnDataset):
@@ -191,7 +175,7 @@ class DistrbutedCellLineAnnDataset(DistributedAnnDataset):
 
     def transform(self, start: int, end: int):
         X = super().transform(start, end)
-        line_ids = self.ad.obs["cell_line"].iloc[start:end]
+        line_ids = self.ad.obs["cell_line"]
         line_idx = np.searchsorted(self.cell_lines, line_ids)
         return X, torch.tensor(line_idx)
 
