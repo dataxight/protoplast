@@ -17,11 +17,6 @@ try:
 except Exception:
     import toml  # type: ignore
 
-# ----------------------------
-# Your original Dataset import
-# ----------------------------
-# Replace this import with the actual path/module where your class lives.
-# from your_module_or_path import PerturbDataset
 from protoplast.scrna.anndata.pert_dataset import PerturbDataset
 from protoplast.scrna.train.utils import expand_globs 
 
@@ -157,6 +152,13 @@ class PerturbDataModule(pl.LightningDataModule):
         config_path: str,
         pert_embedding_file: str,
         *,
+        # dataset opts
+        cell_type_label: str = "cell_type",
+        target_label: str = "target_gene", 
+        control_label: str = "non-targeting",
+        batch_label: str = "batch_var", 
+        use_batches: bool = True,
+        n_basal_samples: int = 30,
         # loader opts
         train_batch_size: int = 32,
         eval_batch_size: Optional[int] = None,
@@ -169,6 +171,15 @@ class PerturbDataModule(pl.LightningDataModule):
         self.config_path = config_path
         self.pert_embedding_file = pert_embedding_file
 
+        # dataset opts
+        self.cell_type_label = cell_type_label
+        self.target_label = target_label
+        self.control_label = control_label
+        self.batch_label = batch_label
+        self.use_batches = use_batches
+        self.n_basal_samples = n_basal_samples
+
+        # loader opts
         self.train_batch_size = int(train_batch_size)
         self.eval_batch_size = int(eval_batch_size or train_batch_size)
         self.num_workers = int(num_workers)
@@ -197,9 +208,18 @@ class PerturbDataModule(pl.LightningDataModule):
         cfg = cls._load_toml(cls, config_path)  # use static parsing
         # pull defaults from toml if present
         lcfg = cfg.get("loader", {})
+        dcfg = cfg.get("dataset_opts", {})
         return cls(
             config_path=config_path,
             pert_embedding_file=pert_embedding_file,
+            # dataset opts
+            cell_type_label=str(dcfg.get("cell_type_label", "cell_type")),
+            target_label=str(dcfg.get("target_label", "target_gene")),
+            control_label=str(dcfg.get("control_label", "non-targeting")),
+            batch_label=str(dcfg.get("batch_label", "batch_var")),
+            use_batches=bool(dcfg.get("use_batches", True)),
+            n_basal_samples=int(dcfg.get("n_basal_samples", 30)),
+            # loader opts
             train_batch_size=int(lcfg.get("batch_size", 32)),
             eval_batch_size=int(lcfg.get("eval_batch_size", lcfg.get("batch_size", 32))),
             num_workers=int(lcfg.get("num_workers", 4)),
@@ -216,13 +236,6 @@ class PerturbDataModule(pl.LightningDataModule):
     def setup(self, stage: Optional[str] = None):
         # 1) load config
         self.cfg = self._load_toml(self.config_path)
-
-        # dataset opts (defaults mirror your dataset)
-        ds_opts = self.cfg.get("dataset_opts", {})
-        cell_type_label = ds_opts.get("cell_type_label", "cell_type")
-        target_label    = ds_opts.get("target_label", "target_gene")
-        control_label   = ds_opts.get("control_label", "non-targeting")
-        batch_label     = ds_opts.get("batch_label", "batch_var")
 
         # 2) collect files per dataset name via brace+glob
         datasets_block: Dict[str, str] = self.cfg.get("datasets", {})
@@ -244,13 +257,12 @@ class PerturbDataModule(pl.LightningDataModule):
         self.ds = PerturbDataset(
             h5ad_files=all_files,
             pert_embedding_file=self.pert_embedding_file,
-            cell_type_label=cell_type_label,
-            target_label=target_label,
-            control_label=control_label,
-            batch_label=batch_label,
-            use_batches=bool(ds_opts.get("use_batches", True)),
-            n_basal_samples=int(ds_opts.get("n_basal_samples", 30)),
-            device=str(ds_opts.get("device", "cpu")),
+            cell_type_label=self.cell_type_label,
+            target_label=self.target_label,
+            control_label=self.control_label,
+            batch_label=self.batch_label,
+            use_batches=self.use_batches,
+            n_basal_samples=self.n_basal_samples
         )
 
         # 4) split planning
@@ -302,3 +314,36 @@ class PerturbDataModule(pl.LightningDataModule):
 
     def test_dataloader(self):
         return self._test_loader
+
+if __name__ == "__main__":
+    dm = PerturbDataModule(
+        config_path="notebooks/pert-dataconfig.toml",
+        pert_embedding_file="/home/tphan/Softwares/protoplast/notebooks/competition_support_set/ESM2_pert_features.pt",
+        train_batch_size=64,
+        eval_batch_size=64,
+        num_workers=8,
+        persistent_workers=False,
+        n_basal_samples=10
+    )
+    dm.setup()
+    train_loader = dm.train_dataloader()
+    val_loader   = dm.val_dataloader()
+    test_loader  = dm.test_dataloader()
+    print("train loader size: ", len(train_loader))
+    print("val loader size: ", len(val_loader))
+    for batch in train_loader:
+        print("train")
+        print(batch["pert_cell_emb"].shape)
+        print(batch["cell_type_onehot"].shape)
+        print(batch["pert_emb"].shape)
+        print(batch["ctrl_cell_emb"].shape)
+        print(batch["batch"].shape)
+        break
+    for batch in val_loader:
+        print("val")
+        print(batch["pert_cell_emb"].shape)
+        print(batch["cell_type_onehot"].shape)
+        print(batch["pert_emb"].shape)
+        print(batch["ctrl_cell_emb"].shape)
+        print(batch["batch"].shape)
+        break

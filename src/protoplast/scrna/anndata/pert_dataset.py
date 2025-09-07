@@ -40,18 +40,18 @@ class PerturbDataset(Dataset):
         batch_label: str = "batch_var", 
         use_batches: bool = True,
         n_basal_samples: int = 30,
-        device: str = "cpu",
+        barcodes: bool = False
     ):
         self.control_label = control_label
         self.target_label = target_label
         self.cell_type_label = cell_type_label
         self.batch_label = batch_label
         self.use_batches = use_batches
-        self.device = device
         self.h5ad_files = h5ad_files
         self.sp_adatas = []
         self.pert_embedding_file = pert_embedding_file
         self.n_basal_samples = n_basal_samples
+        self.barcodes = barcodes
 
         self.pert_embedding = torch.load(pert_embedding_file)
 
@@ -116,13 +116,14 @@ class PerturbDataset(Dataset):
     
     def get_basal_samples(self, idx):
         # randomly sample n_basal_samples from the control_lookup
-        # return in shape [1, K, G] where K is n_basal_samples
+        # return in shape [K, G] where K is n_basal_samples
         cell_type = self.cell_types_flattened[idx]
         # collect control cells via "random" strategy
         # TODO: support batch strategy
         basal_samples_indices = np.random.choice(self.control_lookup[cell_type], size=self.n_basal_samples, replace=True)
+        basal_samples_barcodes = self.cell_barcodes_flattened[basal_samples_indices]
         basal_samples = self.get_x_from_indices(basal_samples_indices)
-        return basal_samples.unsqueeze(0)
+        return basal_samples, basal_samples_barcodes
 
     def get_x_from_indices(self, indices):
         X = torch.tensor([], dtype=torch.float32)
@@ -140,27 +141,25 @@ class PerturbDataset(Dataset):
         # Fetch expression row, convert sparse → dense → torch
         file_idx = self._get_file_idx(idx)
         adata = self.sp_adatas[file_idx]
-        barcode = self.cell_barcodes_flattened[idx]
-        x = adata.get([barcode])
+        pert_barcode = self.cell_barcodes_flattened[idx]
+        x = adata.get([pert_barcode])
         x = torch.tensor(x, dtype=torch.float32)
         y_onehot = self.get_onehot_cell_types(idx)
         b_onehot = self.get_onehot_batches(idx)
         xp_onehot = self.get_onehot_perturbs(idx)
-        x_ctrl_matched = self.get_basal_samples(idx)
+        x_ctrl_matched, ctrl_barcodes = self.get_basal_samples(idx)
 
-        return {
+        cell_type = self.cell_types_flattened[idx]
+
+        sample = {
             "pert_cell_emb": x,
             "cell_type_onehot": y_onehot,
             "pert_emb": xp_onehot,
             "ctrl_cell_emb": x_ctrl_matched,
             "batch": b_onehot,
+            "cell_type": cell_type
         }
-     
-
-if __name__ == "__main__":
-    import glob
-    h5ad_files = glob.glob("/home/tphan/Softwares/protoplast/notebooks/competition_support_set/*.h5")
-    ds = PerturbDataset(h5ad_files, pert_embedding_file="/home/tphan/Softwares/protoplast/notebooks/competition_support_set/ESM2_pert_features.pt")
-    sample = ds[0]
-    for k, v in sample.items():
-        print(k, v.shape)
+        if self.barcodes:
+            sample["pert_barcodes"] = pert_barcode
+            sample["ctrl_barcodes"] = ctrl_barcodes
+        return sample
