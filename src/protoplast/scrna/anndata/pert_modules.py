@@ -165,7 +165,9 @@ class PerturbDataModule(pl.LightningDataModule):
         num_workers: int = 4,
         pin_memory: bool = True,
         persistent_workers: bool = True,
+        prefetch_factor: Optional[int] = 4,
         collate_fn=default_collate,
+        barcodes: bool = False
     ):
         super().__init__()
         self.config_path = config_path
@@ -185,7 +187,9 @@ class PerturbDataModule(pl.LightningDataModule):
         self.num_workers = int(num_workers)
         self.pin_memory = bool(pin_memory)
         self.persistent_workers = bool(persistent_workers)
+        self.prefetch_factor = prefetch_factor
         self._collate_fn = collate_fn
+        self.barcodes = barcodes
 
         # populated in setup()
         self.cfg = None
@@ -225,6 +229,7 @@ class PerturbDataModule(pl.LightningDataModule):
             num_workers=int(lcfg.get("num_workers", 4)),
             pin_memory=bool(lcfg.get("pin_memory", True)),
             persistent_workers=bool(lcfg.get("persistent_workers", True)),
+            prefetch_factor=lcfg.get("prefetch_factor"),
         )
 
     # Lightning-style lifecycle ----------------------------------------------
@@ -262,7 +267,8 @@ class PerturbDataModule(pl.LightningDataModule):
             control_label=self.control_label,
             batch_label=self.batch_label,
             use_batches=self.use_batches,
-            n_basal_samples=self.n_basal_samples
+            n_basal_samples=self.n_basal_samples,
+            barcodes=self.barcodes
         )
 
         # 4) split planning
@@ -277,16 +283,21 @@ class PerturbDataModule(pl.LightningDataModule):
         self.test_subset  = Subset(self.ds, split.test) if split.test else None
 
         # 6) build loaders (one-time)
-        self._train_loader = DataLoader(
-            self.train_subset,
-            batch_size=self.train_batch_size,
-            shuffle=True,
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
-            persistent_workers=self.persistent_workers,
-            drop_last=False,
-            collate_fn=self._collate_fn,
-        )
+        train_loader_kwargs = {
+            "batch_size": self.train_batch_size,
+            "shuffle": True,
+            "num_workers": self.num_workers,
+            "pin_memory": self.pin_memory,
+            "persistent_workers": self.persistent_workers,
+            "drop_last": False,
+            "collate_fn": self._collate_fn,
+        }
+        
+        # Add prefetch_factor only if specified and num_workers > 0
+        if self.prefetch_factor is not None and self.num_workers > 0:
+            train_loader_kwargs["prefetch_factor"] = self.prefetch_factor
+            
+        self._train_loader = DataLoader(self.train_subset, **train_loader_kwargs)
 
         def _mk_eval_loader(subset):
             if subset is None:
@@ -294,7 +305,7 @@ class PerturbDataModule(pl.LightningDataModule):
             return DataLoader(
                 subset,
                 batch_size=self.eval_batch_size,
-                shuffle=False,
+                shuffle=True,
                 num_workers=self.num_workers,
                 pin_memory=self.pin_memory,
                 persistent_workers=self.persistent_workers,
@@ -323,7 +334,8 @@ if __name__ == "__main__":
         eval_batch_size=64,
         num_workers=8,
         persistent_workers=False,
-        n_basal_samples=10
+        n_basal_samples=10,
+        barcodes=True
     )
     dm.setup()
     train_loader = dm.train_dataloader()

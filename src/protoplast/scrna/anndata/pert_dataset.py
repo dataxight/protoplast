@@ -79,6 +79,7 @@ class PerturbDataset(Dataset):
         logger.info(f"Total unique cell types: {len(self.cell_types_onehot_map)}")
 
         self.perturbs_flattened = np.concatenate([ad.obs[target_label].tolist() for ad in adatas]).flatten()
+        self.perturbs_identifiers = {p: i for i, p in enumerate(np.unique(self.perturbs_flattened))}
         # get unique batches across all h5ad files
         self.batches_flattened = np.concatenate([[f"f{i}_"] * ad.n_obs + ad.obs[batch_label].tolist() for i, ad in enumerate(adatas)]).flatten()
         self.batches_onehot_map = make_onehot_encoding_map(np.unique(self.batches_flattened))
@@ -148,6 +149,7 @@ class PerturbDataset(Dataset):
         b_onehot = self.get_onehot_batches(idx)
         xp_onehot = self.get_onehot_perturbs(idx)
         x_ctrl_matched, ctrl_barcodes = self.get_basal_samples(idx)
+        pert_identifier = torch.tensor(self.perturbs_identifiers[self.perturbs_flattened[idx]], dtype=torch.int64)
 
         cell_type = self.cell_types_flattened[idx]
 
@@ -157,7 +159,8 @@ class PerturbDataset(Dataset):
             "pert_emb": xp_onehot,
             "ctrl_cell_emb": x_ctrl_matched,
             "batch": b_onehot,
-            "cell_type": cell_type
+            "cell_type": cell_type,
+            "pert_ident": pert_identifier
         }
         if self.barcodes:
             sample["pert_barcodes"] = pert_barcode
