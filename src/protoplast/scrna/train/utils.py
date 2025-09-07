@@ -1,5 +1,8 @@
 import torch
 import numpy as np
+import re
+import glob
+from typing import List
 
 def _to_BD(t):
     # Coerce to (B, G) and contiguous
@@ -23,3 +26,24 @@ def make_onehot_encoding_map(labels):
         label: torch.tensor(np.eye(n, dtype=int)[i])
         for i, label in enumerate(labels)
     }
+
+def _brace_expand(pattern: str) -> List[str]:
+    """
+    Expand a single brace group like '/path/{a,b,c}.h5' into
+    ['/path/a.h5', '/path/b.h5', '/path/c.h5'].
+    Supports one brace group per pattern (simple and fast).
+    """
+    m = re.search(r"\{([^{}]+)\}", pattern)
+    if not m:
+        return [pattern]
+    start, end = m.span()
+    choices = m.group(1).split(",")
+    head, tail = pattern[:start], pattern[end:]
+    return [head + c + tail for c in choices]
+
+def expand_globs(brace_glob_pattern: str) -> List[str]:
+    files = []
+    for pat in _brace_expand(brace_glob_pattern):
+        files.extend(glob.glob(pat))
+    files = sorted(set(files))
+    return files
