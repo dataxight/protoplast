@@ -1,10 +1,11 @@
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, IterableDataset, get_worker_info
 import scplode as sp
 import anndata as ad
 import numpy as np
 from collections import defaultdict
 import logging
+from typing import Optional, Sequence, Union, Dict, List, Tuple
 
 from protoplast.scrna.train.utils import make_onehot_encoding_map
 
@@ -166,3 +167,266 @@ class PerturbDataset(Dataset):
             sample["pert_barcodes"] = pert_barcode
             sample["ctrl_barcodes"] = ctrl_barcodes
         return sample
+
+
+
+class GroupedPerturbIterableDataset(IterableDataset):
+    """
+    IterableDataset that groups cells by target_gene into non-overlapping sets of size S.
+    For each target, if its count isn't divisible by S, the last group is padded by
+    sampling with replacement from that target's full pool.
+
+    Each yielded item has an added leading S dimension:
+      - pert_cell_emb:    [S, G]
+      - cell_type_onehot: [S, N_cell_types]
+      - pert_emb:         [S, D_pert]
+      - ctrl_cell_emb:    [S, G]        (one matched control per S cell)
+      - batch:            [S, N_batches]
+      - cell_type:        list[str] length S
+      - pert_ident:       [S] (int64)
+      - (optional) pert_barcodes: list[str] length S
+      - (optional) ctrl_barcodes: list[str] length S
+
+    You can either pass an existing `PerturbDataset` via `base=` or let this class
+    construct one by passing the same constructor args your dataset expects.
+    
+    Optionally, you can provide `valid_indices` to only include cells at those indices
+    in the base dataset (useful for train/val/test splits).
+    """
+
+    def __init__(
+        self,
+        base: Union['PerturbDataset', None] = None,
+        *,
+        # If base is None, we construct a PerturbDataset using these:
+        h5ad_files: Optional[Sequence[str]] = None,
+        pert_embedding_file: Optional[str] = None,
+        cell_type_label: str = "cell_type",
+        target_label: str = "target_gene",
+        control_label: str = "non-targeting",
+        batch_label: str = "batch_var",
+        use_batches: bool = True,
+        n_basal_samples: int = 30,
+        barcodes: bool = False,
+        # Grouping controls:
+        group_size_S: int = 8,
+        # Split controls:
+        valid_indices: Optional[Sequence[int]] = None,
+        # Randomness:
+        seed: Optional[int] = None,
+    ):
+        """
+        Args:
+            base: Existing PerturbDataset. If None, a new one is constructed from args below.
+            h5ad_files, pert_embedding_file, ...: Passed to PerturbDataset if base is None.
+            group_size_S: Group size S.
+            valid_indices: Optional list of indices to include from base dataset (for splits).
+            seed: Optional seed for reproducibility (affects group shuffling and padding choices).
+        """
+        if base is None:
+            if h5ad_files is None or pert_embedding_file is None:
+                raise ValueError("Provide either `base` or both `h5ad_files` and `pert_embedding_file`.")
+            # Create PerturbDataset directly since we're in the same module
+            base = PerturbDataset(
+                h5ad_files=list(h5ad_files),
+                pert_embedding_file=pert_embedding_file,
+                cell_type_label=cell_type_label,
+                target_label=target_label,
+                control_label=control_label,
+                batch_label=batch_label,
+                use_batches=use_batches,
+                n_basal_samples=n_basal_samples,
+                barcodes=barcodes,
+            )
+        self.base = base
+        
+        # Store valid indices for filtering
+        self.valid_indices = set(valid_indices) if valid_indices is not None else None
+
+        self.S = int(group_size_S)
+        if self.S <= 0:
+            raise ValueError("group_size_S must be a positive integer.")
+
+        self.seed = seed
+        # Global RNG for group construction
+        self._rng = np.random.default_rng(seed if seed is not None else np.random.SeedSequence().entropy)
+
+        # Build: for each target label -> indices
+        self.target_to_indices: Dict[str, np.ndarray] = self._build_target_index()
+
+        # Precompute first-epoch groups and their count
+        self.groups: List[np.ndarray] = self._build_groups_for_epoch()
+        self._len = len(self.groups)
+
+        logger.info(f"GroupedPerturbIterableDataset initialized: {self._len} groups (S={self.S}).")
+
+    # ---------- Helpers ----------
+
+    def _build_target_index(self) -> Dict[str, np.ndarray]:
+        """Create mapping: target -> np.ndarray of indices in base dataset."""
+        targets = np.unique(self.base.perturbs_flattened)
+        t2idx: Dict[str, List[int]] = {t: [] for t in targets}
+        for i, t in enumerate(self.base.perturbs_flattened):
+            # Only include index if it's in valid_indices (if specified)
+            if self.valid_indices is None or i in self.valid_indices:
+                t2idx[t].append(i)
+        
+        # Remove empty targets (targets with no valid indices)
+        t2idx = {t: idxs for t, idxs in t2idx.items() if idxs}
+        t2idx_np = {t: np.asarray(idxs, dtype=np.int64) for t, idxs in t2idx.items()}
+
+        # Log small preview
+        preview = ", ".join([f"{t}:{len(v)}" for t, v in list(t2idx_np.items())[:10]])
+        split_info = f" (filtered to {len(self.valid_indices)} indices)" if self.valid_indices else ""
+        logger.info("Per-target counts (preview): " + (preview if preview else "no targets") + split_info)
+        return t2idx_np
+
+    def _build_groups_for_epoch(self) -> List[np.ndarray]:
+        """
+        For each target:
+          - shuffle indices,
+          - chunk into size S,
+          - pad last chunk by sampling with replacement from that target if needed.
+        Shuffle the final list of groups to randomize target order.
+        """
+        groups: List[np.ndarray] = []
+        for t, idxs in self.target_to_indices.items():
+            n = len(idxs)
+            if n == 0:
+                continue
+
+            idxs_shuf = np.array(idxs, copy=True)
+            self._rng.shuffle(idxs_shuf)
+
+            full_chunks = n // self.S
+            remainder = n % self.S
+
+            # full chunks
+            for c in range(full_chunks):
+                start = c * self.S
+                groups.append(idxs_shuf[start:start + self.S])
+
+            # padded last chunk if needed
+            if remainder > 0:
+                tail = idxs_shuf[full_chunks * self.S :]
+                pad_count = self.S - remainder
+                pad = self._rng.choice(idxs, size=pad_count, replace=True)
+                groups.append(np.concatenate([tail, pad], axis=0))
+
+        self._rng.shuffle(groups)
+        return groups
+
+    def _iter_group_range_for_worker(self) -> Tuple[int, int]:
+        """
+        Split group list across workers (contiguous sharding).
+        """
+        n = len(self.groups)
+        wi = get_worker_info()
+        if wi is None:
+            return 0, n
+        per_worker = (n + wi.num_workers - 1) // wi.num_workers
+        start = wi.id * per_worker
+        end = min(start + per_worker, n)
+        return start, end
+
+    def _stack_onehots(self, getter_fn, idxs: np.ndarray) -> torch.Tensor:
+        """
+        Stack one-hot/embedding tensors returned by base getters over idxs into [S, ...].
+        """
+        items = []
+        for i in idxs:
+            t = getter_fn(int(i))
+            if not isinstance(t, torch.Tensor):
+                t = torch.tensor(t)
+            items.append(t)
+        return torch.stack(items, dim=0)
+
+    # ---------- PyTorch Dataset API ----------
+
+    def __len__(self):
+        # Number of S-sized groups in one epoch
+        return self._len
+
+    def __iter__(self):
+        """
+        Create a fresh epoch iterator:
+          - rebuild (reshuffle) groups,
+          - shard across workers,
+          - for each group, fetch tensors and return a dict with S-leading dimension.
+        """
+        # Rebuild groups for a new epoch order
+        self.groups = self._build_groups_for_epoch()
+        start, end = self._iter_group_range_for_worker()
+
+        # Local RNG if you want per-iterator randomness beyond group reshuffle
+        local_rng = np.random.default_rng(self._rng.integers(0, 2**32 - 1))
+
+        for g in range(start, end):
+            idxs = self.groups[g]  # np.ndarray of length S
+
+            # --- Perturbed expressions: [S, G]
+            X = self.base.get_x_from_indices(idxs)
+
+            # --- One-hots / embeddings
+            Y = self._stack_onehots(self.base.get_onehot_cell_types, idxs)  # [S, N_cell_types]
+            B = self._stack_onehots(self.base.get_onehot_batches, idxs)     # [S, N_batches]
+
+            # pert embedding is the same across the group (same target); derive from the first index
+            xp_vec = self.base.get_onehot_perturbs(int(idxs[0]))            # [D_pert] or [1, D_pert]
+            if xp_vec.dim() == 1:
+                XP = xp_vec.unsqueeze(0).repeat(self.S, 1)                  # [S, D_pert]
+            else:
+                XP = xp_vec.repeat_interleave(self.S, dim=0)                # defensive, keep [S, D_pert]
+
+            # --- Controls: one matched control (same cell_type) per cell -> [S, G]
+            ctrl_indices = []
+            for i in idxs:
+                ct = self.base.cell_types_flattened[int(i)]
+                pool = self.base.control_lookup.get(ct, [])
+                if len(pool) == 0:
+                    # Fallback to any control if no same-type control exists (edge case)
+                    pool = self.base.control_index
+                j = local_rng.choice(pool, size=1, replace=True)[0]
+                ctrl_indices.append(int(j))
+            X_ctrl = self.base.get_x_from_indices(np.asarray(ctrl_indices, dtype=np.int64))  # [S, G]
+
+            # --- Metadata
+            cell_types = [self.base.cell_types_flattened[int(i)] for i in idxs]              # list[str], len S
+            pert_ident = torch.stack([
+                torch.tensor(self.base.perturbs_identifiers[self.base.perturbs_flattened[int(i)]],
+                             dtype=torch.int64)
+                for i in idxs
+            ], dim=0)  # [S]
+
+            sample = {
+                "pert_cell_emb": X,            # [S, G]
+                "cell_type_onehot": Y,         # [S, N_cell_types]
+                "pert_emb": XP,                # [S, D_pert]
+                "ctrl_cell_emb": X_ctrl,       # [S, G]
+                "batch": B,                    # [S, N_batches]
+                "cell_type": cell_types,       # list[str] length S
+                "pert_ident": pert_ident,      # [S]
+            }
+
+            if self.base.barcodes:
+                sample["pert_barcodes"] = self.base.cell_barcodes_flattened[idxs].tolist()  # [S]
+                sample["ctrl_barcodes"] = self.base.cell_barcodes_flattened[
+                    np.asarray(ctrl_indices, dtype=np.int64)
+                ].tolist()  # [S]
+
+            yield sample
+
+if __name__ == "__main__":
+    ds = GroupedPerturbIterableDataset(
+        h5ad_files=["/home/tphan/Softwares/protoplast/notebooks/competition_support_set/competition_train.h5"],
+        pert_embedding_file="/home/tphan/Softwares/protoplast/notebooks/competition_support_set/ESM2_pert_features.pt",
+        barcodes=True
+    )
+    for di in ds:
+        sample = di
+        for k, v in sample.items():
+            if isinstance(v, torch.Tensor):
+                print(k, v.shape)
+            else:
+                print(k, len(v))
+        break
