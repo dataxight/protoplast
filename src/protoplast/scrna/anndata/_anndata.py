@@ -19,7 +19,7 @@ apply_file_backing_patch()
 apply_read_h5ad_backed_patch()
 
 
-def read_h5ad(
+def read_h5ad_df(
     path: str,
     batch_size: int = 1000,
     preview_size: int = 20,

@@ -14,7 +14,7 @@ from daft.dataframe import DataFrame
 from daft.expressions import col
 from scipy.sparse import csr_matrix
 
-from protoplast.scrna.anndata import read_h5ad
+from protoplast.scrna.anndata import read_h5ad_df as read_h5ad
 
 
 @pytest.fixture(scope="function")

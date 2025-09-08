@@ -156,66 +156,6 @@ class H5ADReader:
         logger.debug(f"Filtered. {start_idx} to {end_idx} {batch.num_rows}")
         return MicroPartition.from_arrow_record_batches([batch], arrow_schema=after_scan_schema.to_pyarrow_schema())
 
-    def read_cells_data_to_micropartition(
-        self,
-        start_idx: int,
-        end_idx: int,
-        schema: Schema,
-        after_scan_schema: Schema,
-        pyarrow_filters: pc.Expression | None = None,
-        dtype: np.dtype = np.float32,
-    ) -> MicroPartition:
-        """
-        Read a batch of cells into memory and return a MicroPartition
-        """
-        # TODO: use the correct dtype. Should use int32 for count data, float32 for other data
-        logger.info(f"Reading cells from {start_idx} to {end_idx}")
-        batch_data = {field.name: np.zeros(end_idx - start_idx, dtype=np.float32) for field in schema}
-        logger.debug(f"Init zero batch data {start_idx} to {end_idx} ")
-
-        # TODO: as we can provide the file-like object, consider using fsspec so we can read it remotely
-        with h5py.File(self.filename, "r") as f:
-            cells = f["X"]["indptr"][start_idx : end_idx + 1]  # +1 because we want to include where the last cell ends
-            read_start = cells[0]
-            read_end = cells[-1]
-            z = pa.array(f["X"]["data"][read_start:read_end])
-            y = pa.array(f["X"]["indices"][read_start:read_end], type=pa.int32())
-            x = np.zeros(read_end - read_start, dtype=np.int32)
-            logger.debug(f"Z. {start_idx} to {end_idx} ")
-
-            # iterate the cells and read the data
-            for i, cell_start in enumerate(cells[:-1]):  # -1 because the last value is not a cell start
-                cell_end = cells[i + 1]
-                cell_start -= read_start  # adjust the coordinates to the read start
-                cell_end -= read_start  # adjust the coordinates to the read start
-                x[cell_start:cell_end] = i  # fill the array with the cell index
-            x = pa.array(x)
-            ccr = pa.table({"x": x, "y": y, "z": z})
-            logger.debug(f"CCRC. {start_idx} to {end_idx} {ccr.num_rows}")
-
-            column_names = schema.column_names()
-            # get the indices of the projection genes
-            yy = [i for i, gene_name in enumerate(self.gene_names) if gene_name in column_names]
-            # only keep the genes that are in the schema
-            ccr = ccr.filter(pc.is_in(ccr["y"], pa.array(yy)))
-            for yi in yy:
-                # for each gene, get the mask of the cells that have non-zero values
-                # then set the values in the batch data
-                non_zero_cell_indices = ccr.filter(pc.equal(ccr["y"], yi))["x"].to_numpy()
-                batch_data[self.gene_names[yi]][non_zero_cell_indices] = ccr.filter(pc.equal(ccr["y"], yi))[
-                    "z"
-                ].to_numpy()
-            logger.debug(f"Batch data. {start_idx} to {end_idx} ")
-
-        # convert the batch data to a pyarrow record batch, zero-copy
-        batch_data = {field.name: batch_data[field.name] for field in after_scan_schema}
-        batch = pa.RecordBatch.from_pydict(batch_data)
-        logger.debug(f"Batch. {start_idx} to {end_idx} {batch.num_rows}")
-        if pyarrow_filters is not None:
-            batch = batch.filter(pyarrow_filters)
-        logger.debug(f"Filtered. {start_idx} to {end_idx} {batch.num_rows}")
-        return MicroPartition.from_arrow_record_batches([batch], arrow_schema=after_scan_schema.to_pyarrow_schema())
-
 
 class H5ADSource(DataSource):
     def __init__(
@@ -316,7 +256,7 @@ class H5ADSourceTask(DataSourceTask):
 
     def execute(self) -> Iterator[MicroPartition]:
         reader = H5ADReader(self._file_path, self._var_h5dataset)
-        micropartition = reader.read_cells_data_to_micropartition2(
+        micropartition = reader.read_cells_data_to_micropartition(
             self._start_idx, self._end_idx, self._push_down_schema, self._after_scan_schema, self._arrow_filters
         )
 
