@@ -6,6 +6,7 @@ import ray
 import ray.train
 import ray.train.lightning
 import ray.train.torch
+import torch
 from beartype import beartype
 from lightning.pytorch.strategies import Strategy
 
@@ -22,6 +23,8 @@ class RayTrainRunner:
         Ds: type[DistributedAnnDataset],
         model_keys: list[str],
         metadata_cb: Callable[[anndata.AnnData, dict], None] = cell_line_metadata_cb,
+        before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
+        after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         splitter: Callable[
             [list[str], int, float, float, int, Callable[[anndata.AnnData, dict], None]], dict
         ] = ann_split_data,
@@ -36,6 +39,8 @@ class RayTrainRunner:
         self.metadata_cb = metadata_cb
         self.splitter = splitter
         self.sparse_keys = sparse_keys
+        self.before_dense_cb = before_dense_cb
+        self.after_dense_cb = after_dense_cb
         if not ray_trainer_strategy:
             self.ray_trainer_strategy = ray.train.lightning.RayDDPStrategy()
         else:
@@ -106,7 +111,9 @@ class RayTrainRunner:
             num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
             print(f"=========Starting the training on {rank} with num threads: {num_threads}=========")
             model_params = indices["metadata"]
-            ann_dm = AnnDataModule(indices, Ds, self.prefetch_factor, self.sparse_keys)
+            ann_dm = AnnDataModule(
+                indices, Ds, self.prefetch_factor, self.sparse_keys, self.before_dense_cb, self.after_dense_cb
+            )
             if model_keys:
                 model_params = {k: v for k, v in model_params.items() if k in model_keys}
             model = Model(**model_params)
