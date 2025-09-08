@@ -122,8 +122,12 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         else:
             self.wid = worker_info.id
             self.nworkers = worker_info.num_workers
-        w_rank = td.get_rank()
-        w_size = td.get_world_size()
+        try:
+            w_rank = td.get_rank()
+            w_size = td.get_world_size()
+        except ValueError:
+            w_rank = -1
+            w_size = -1
         if w_rank >= 0:
             self.ray_rank = w_rank
             self.ray_size = w_size
@@ -203,13 +207,23 @@ class DistrbutedCellLineAnnDataset(DistributedAnnDataset):
 
 
 class AnnDataModule(pl.LightningDataModule):
-    def __init__(self, indices: dict, dataset: DistributedAnnDataset, prefetch_factor: int, sparse_keys: list[str]):
+    def __init__(
+        self,
+        indices: dict,
+        dataset: DistributedAnnDataset,
+        prefetch_factor: int,
+        sparse_keys: list[str],
+        before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
+        after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
+    ):
         super().__init__()
         self.indices = indices
         self.dataset = dataset
         num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
         self.loader_config = dict(batch_size=None, num_workers=num_threads, prefetch_factor=prefetch_factor)
         self.sparse_keys = sparse_keys
+        self.before_dense_cb = before_dense_cb
+        self.after_dense_cb = after_dense_cb
 
     def setup(self, stage):
         # this is not necessary but it is here in case we want to download data to local node in the future
@@ -234,18 +248,21 @@ class AnnDataModule(pl.LightningDataModule):
     def predict_dataloader(self):
         return DataLoader(self.predict_ds, **self.loader_config)
 
-    @staticmethod
-    def densify(x):
+    def densify(self, x, idx: str | int = None):
         if isinstance(x, torch.Tensor):
-            if x.is_sparse or getattr(x, "is_sparse_csr", False):
-                return x.to_dense()
+            if self.before_dense_cb:
+                x = self.before_dense_cb(x, idx)
+            if x.is_sparse or x.is_sparse_csr:
+                x = x.to_dense()
+            if self.after_dense_cb:
+                x = self.after_dense_cb(x, idx)
         return x
 
     def on_after_batch_transfer(self, batch, dataloader_idx):
-        if isinstance(batch, tuple):
-            return tuple([self.densify(d) for d in batch])
+        if (type(batch) is list) or (type(batch) is tuple):
+            return [self.densify(d, i) for i, d in enumerate(batch)]
         elif isinstance(batch, dict):
-            return {k: self.densify(v) for k, v in batch.items()}
+            return {k: self.densify(v, k) for k, v in batch.items()}
         elif isinstance(batch, torch.Tensor):
             return self.densify(batch)
         else:
