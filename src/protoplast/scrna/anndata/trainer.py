@@ -61,23 +61,26 @@ class RayTrainRunner:
         ckpt_path: str | None = None,
         is_gpu: bool = True,
         random_seed: int | None = 42,
+        resource_per_worker: dict | None = None,
     ):
         self.result_storage_path = result_storage_path
         self.prefetch_factor = prefetch_factor
         self.max_epochs = max_epochs
         indices = self.splitter(file_paths, batch_size, test_size, val_size, random_seed, metadata_cb=self.metadata_cb)
         train_config = {"indices": indices, "ckpt_path": ckpt_path}
+        if not resource_per_worker:
+            resource_per_worker = {"CPU": thread_per_worker}
         if is_gpu:
             if num_workers is None:
                 num_workers = int(self.resources.get("GPU"))
             scaling_config = ray.train.ScalingConfig(
-                num_workers=num_workers, use_gpu=True, resources_per_worker={"CPU": thread_per_worker}
+                num_workers=num_workers, use_gpu=True, resources_per_worker=resource_per_worker
             )
         else:
             if num_workers is None:
                 num_workers = max(int(self.resources.get("CPU", 1) / thread_per_worker), 1)
             scaling_config = ray.train.ScalingConfig(
-                num_workers=num_workers, use_gpu=False, resources_per_worker={"CPU": thread_per_worker}
+                num_workers=num_workers, use_gpu=False, resources_per_worker=resource_per_worker
             )
         my_train_func = self._trainer()
         par_trainer = ray.train.torch.TorchTrainer(
