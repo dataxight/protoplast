@@ -113,7 +113,7 @@ class H5ADReader:
         else:
             coo = ad.X[start_idx:end_idx, :].tocoo()
 
-        batch_data = [pa.array(coo.row, type=pa.int32()), pa.array(coo.col, type=pa.int32()), pa.array(coo.data, type=pa.float32())]
+        batch_data = [pa.array(coo.row + start_idx, type=pa.int32()), pa.array(coo.col, type=pa.int32()), pa.array(coo.data, type=pa.float32())]
         batch = pa.RecordBatch.from_arrays(batch_data, names=[col for col in schema.column_names()])
         return MicroPartition.from_arrow_record_batches([batch], arrow_schema=schema.to_pyarrow_schema())
 

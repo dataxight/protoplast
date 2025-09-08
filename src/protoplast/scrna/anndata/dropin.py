@@ -178,11 +178,14 @@ class AnnDataParquetBacked:
         Returns:
             np.ndarray: Array of shape (len(indices), n_vars).
         """
-        row_positions = self.obs.index.get_indexer(indices)
+        # check if indices is barcode list or index list
+        if isinstance(indices, list):
+            if all(isinstance(i, str) for i in indices):
+                indices = self.obs.index.get_indexer(indices)
+        else:
+            raise ValueError(f"Unsupported index type: {type(indices)}")
         coo = (daft.read_parquet(str(self.dat_path))
-            .where(col("x").is_in(row_positions))
-            .select(col("x"), col("y"), col("z"))
-            .collect()
+            .filter(col("x").is_in(indices))
         ).to_arrow()
         return coo
 
@@ -220,7 +223,7 @@ class AnnDataParquetBacked:
 
         i = torch.LongTensor(indices)
         v = torch.FloatTensor(values)
-        return torch.sparse.FloatTensor(i, v, [len(_indices), self.n_vars])
+        return torch.sparse_coo_tensor(i, v, [len(_indices), self.n_vars], dtype=torch.float32)
 
     
     def get_adata(self, indices: Union[List[str], pd.Index, np.ndarray]) -> ad.AnnData:
@@ -310,4 +313,4 @@ class AnnDataParquetBacked:
 
 if __name__ == "__main__":
     adata = read_h5ad("/home/tphan/Softwares/protoplast/notebooks/competition_support_set/jurkat.h5")
-    print(adata.get([0, 2]))
+    print(adata.get([0, 2, 100, 500]))
