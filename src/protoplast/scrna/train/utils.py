@@ -19,11 +19,11 @@ def save_checkpoint(model, optimizer, epoch, model_dir):
         "optimizer_state": optimizer.state_dict(),
     }, f"{model_dir}/epoch={epoch}.pt")
 
-def make_onehot_encoding_map(labels):
+def make_onehot_encoding_map(labels, device="cpu"):
     labels = list(labels)  # make sure it's a list
     n = len(labels)
     return {
-        label: torch.tensor(np.eye(n, dtype=np.float32)[i], dtype=torch.float32)
+        label: torch.tensor(np.eye(n, dtype=np.float32)[i], dtype=torch.float32, device=device)
         for i, label in enumerate(labels)
     }
 

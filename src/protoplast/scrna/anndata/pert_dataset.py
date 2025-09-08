@@ -41,7 +41,8 @@ class PerturbDataset(Dataset):
         batch_label: str = "batch_var", 
         use_batches: bool = True,
         n_basal_samples: int = 30,
-        barcodes: bool = False
+        barcodes: bool = False,
+        device: str = "cpu"
     ):
         self.control_label = control_label
         self.target_label = target_label
@@ -49,26 +50,32 @@ class PerturbDataset(Dataset):
         self.batch_label = batch_label
         self.use_batches = use_batches
         self.h5ad_files = h5ad_files
-        self.sp_adatas = []
+        self.pp_adatas = []
         self.pert_embedding_file = pert_embedding_file
         self.n_basal_samples = n_basal_samples
         self.barcodes = barcodes
 
-        self.pert_embedding = torch.load(pert_embedding_file)
+        # cuda:0 if device is cuda, cpu otherwise
+        if device == "cuda":
+            device = f"cuda:{torch.cuda.current_device()}"
+        else:
+            device = "cpu"
+        self.device = device
+        self.pert_embedding = torch.load(pert_embedding_file, map_location=device)
 
         # Load and concatenate AnnData objects
         for i,f in enumerate(h5ad_files):
             logger.info(f"write mmap file for {f}")
             adata = sp.read_h5ad(f)
             logger.info(f"n_obs for {f}: {adata.n_obs}")
-            self.sp_adatas.append(adata)
+            self.pp_adatas.append(adata)
 
         adatas = [ad.read_h5ad(f, backed="r") for f in h5ad_files]
 
         # get an array of the number of cells in each h5ad file
         self.n_cells = np.array([ad.n_obs for ad in adatas])
         logger.info(f"n_cells: {self.n_cells.sum()}")
-        logger.info(f"n_genes: {self.sp_adatas[0].n_vars}")
+        logger.info(f"n_genes: {self.pp_adatas[0].n_vars}")
 
         # get all cell barcodes across all h5ad files
         self.cell_barcodes_flattened = np.concatenate([ad.obs_names.tolist() for ad in adatas]).flatten()
@@ -76,14 +83,14 @@ class PerturbDataset(Dataset):
         # get unique cell types across all h5ad files
         self.cell_types_flattened = np.concatenate([ad.obs[cell_type_label].tolist() for ad in adatas]).flatten()
         # Map categorical labels to integer ids
-        self.cell_types_onehot_map = make_onehot_encoding_map(np.unique(self.cell_types_flattened))
+        self.cell_types_onehot_map = make_onehot_encoding_map(np.unique(self.cell_types_flattened), device=device)
         logger.info(f"Total unique cell types: {len(self.cell_types_onehot_map)}")
 
         self.perturbs_flattened = np.concatenate([ad.obs[target_label].tolist() for ad in adatas]).flatten()
         self.perturbs_identifiers = {p: i for i, p in enumerate(np.unique(self.perturbs_flattened))}
         # get unique batches across all h5ad files
         self.batches_flattened = np.concatenate([[f"f{i}_"] * ad.n_obs + ad.obs[batch_label].tolist() for i, ad in enumerate(adatas)]).flatten()
-        self.batches_onehot_map = make_onehot_encoding_map(np.unique(self.batches_flattened))
+        self.batches_onehot_map = make_onehot_encoding_map(np.unique(self.batches_flattened), device=device)
         logger.info(f"Total unique batches: {len(self.batches_onehot_map)}")
 
         # Index controls by (y,b) for fast lookup
@@ -128,37 +135,43 @@ class PerturbDataset(Dataset):
         return basal_samples, basal_samples_barcodes
 
     def get_x_from_indices(self, indices):
-        X = torch.tensor([], dtype=torch.float32)
+        X = None
+        file_to_idx = defaultdict(list)
         for idx in indices:
             file_idx = self._get_file_idx(idx)
-            adata = self.sp_adatas[file_idx]
-            barcode = self.cell_barcodes_flattened[idx]
-            x = adata.get([barcode])
-            x = torch.tensor(x, dtype=torch.float32)
-            X = torch.cat([X, x])
+            file_to_idx[file_idx].append(idx)
+        for file_idx, indices in file_to_idx.items():
+            adata = self.pp_adatas[file_idx]
+            barcodes = self.cell_barcodes_flattened[indices]
+            x = adata.get(barcodes.tolist())
+            x = torch.tensor(x, dtype=torch.float32, device=self.device)
+            if X is None:
+                X = x
+            else:
+                X = torch.cat([X, x])
 
         return X
     
     def __getitem__(self, idx):
         # Fetch expression row, convert sparse → dense → torch
         file_idx = self._get_file_idx(idx)
-        adata = self.sp_adatas[file_idx]
+        adata = self.pp_adatas[file_idx]
         pert_barcode = self.cell_barcodes_flattened[idx]
         x = adata.get([pert_barcode])
-        x = torch.tensor(x, dtype=torch.float32)
+        x = torch.tensor(x, dtype=torch.float32, device=self.device)
         y_onehot = self.get_onehot_cell_types(idx)
         b_onehot = self.get_onehot_batches(idx)
         xp_onehot = self.get_onehot_perturbs(idx)
         x_ctrl_matched, ctrl_barcodes = self.get_basal_samples(idx)
-        pert_identifier = torch.tensor(self.perturbs_identifiers[self.perturbs_flattened[idx]], dtype=torch.int64)
+        pert_identifier = torch.tensor(self.perturbs_identifiers[self.perturbs_flattened[idx]], dtype=torch.int64, device=self.device)
 
         cell_type = self.cell_types_flattened[idx]
 
         sample = {
-            "pert_cell_emb": x,
+            "pert_cell_emb": x, # sparse tensor
             "cell_type_onehot": y_onehot,
             "pert_emb": xp_onehot,
-            "ctrl_cell_emb": x_ctrl_matched,
+            "ctrl_cell_emb": x_ctrl_matched, # sparse tensor
             "batch": b_onehot,
             "cell_type": cell_type,
             "pert_ident": pert_identifier
@@ -197,7 +210,6 @@ class GroupedPerturbIterableDataset(IterableDataset):
     def __init__(
         self,
         base: Union['PerturbDataset', None] = None,
-        *,
         # If base is None, we construct a PerturbDataset using these:
         h5ad_files: Optional[Sequence[str]] = None,
         pert_embedding_file: Optional[str] = None,
@@ -214,6 +226,7 @@ class GroupedPerturbIterableDataset(IterableDataset):
         valid_indices: Optional[Sequence[int]] = None,
         # Randomness:
         seed: Optional[int] = None,
+        **kwargs
     ):
         """
         Args:
@@ -237,6 +250,7 @@ class GroupedPerturbIterableDataset(IterableDataset):
                 use_batches=use_batches,
                 n_basal_samples=n_basal_samples,
                 barcodes=barcodes,
+                **kwargs
             )
         self.base = base
         
@@ -337,7 +351,7 @@ class GroupedPerturbIterableDataset(IterableDataset):
         for i in idxs:
             t = getter_fn(int(i))
             if not isinstance(t, torch.Tensor):
-                t = torch.tensor(t)
+                t = torch.tensor(t, device=self.base.device)
             items.append(t)
         return torch.stack(items, dim=0)
 
@@ -420,7 +434,8 @@ if __name__ == "__main__":
     ds = GroupedPerturbIterableDataset(
         h5ad_files=["/home/tphan/Softwares/protoplast/notebooks/competition_support_set/competition_train.h5"],
         pert_embedding_file="/home/tphan/Softwares/protoplast/notebooks/competition_support_set/ESM2_pert_features.pt",
-        barcodes=True
+        barcodes=True,
+        device="cuda"
     )
     for di in ds:
         sample = di

@@ -128,7 +128,10 @@ def default_collate(batch_list):
     out = {}
     keys = batch_list[0].keys()
     for k in keys:
-        vs = [b[k] for b in batch_list]
+        if k == "pert_cell_emb":
+            vs = [b[k].to_dense() for b in batch_list]
+        else:
+            vs = [b[k] for b in batch_list]
         if torch.is_tensor(vs[0]):
             out[k] = torch.stack(vs, dim=0)
         else:
