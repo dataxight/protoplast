@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import h5py
 import numpy as np
 import pyarrow as pa
+import scipy.sparse
 import pyarrow.compute as pc
 from daft.io.source import DataSource, DataSourceTask
 from daft.logical.schema import Schema
@@ -101,7 +102,22 @@ class H5ADReader:
             end_row = min(i + max_batch_size, n)
             yield start_row, end_row
 
-    def read_cells_data_to_micropartition2(
+    def read_coo_partition(self, start_idx: int, end_idx: int, schema: Schema) -> MicroPartition:
+        """
+        Read a batch of cells into memory and return a MicroPartition
+        """
+        ad = anndata.read_h5ad(self.filename, backed="r")
+        coo = None
+        if type(ad.X).__name__ == "Dataset":
+            coo = scipy.sparse.coo_matrix(ad.X[start_idx:end_idx, :])
+        else:
+            coo = ad.X[start_idx:end_idx, :].tocoo()
+
+        batch_data = [pa.array(coo.row, type=pa.int32()), pa.array(coo.col, type=pa.int32()), pa.array(coo.data, type=pa.float32())]
+        batch = pa.RecordBatch.from_arrays(batch_data, names=[col for col in schema.column_names()])
+        return MicroPartition.from_arrow_record_batches([batch], arrow_schema=schema.to_pyarrow_schema())
+
+    def read_cells_data_to_micropartition(
         self,
         start_idx: int,
         end_idx: int,
@@ -122,7 +138,11 @@ class H5ADReader:
         logger.debug(f"dtype: {ad.X.dtype}")
         gene_indices = [self.gene_index_map[gene] for gene in after_scan_schema.column_names()]
         # NOTE: somehow the dtype loaded by anndata is float64 in case of float data
-        dense_X = sparse_X[start_idx:end_idx, gene_indices].toarray()
+        dense_X = None
+        if type(sparse_X).__name__ == "Dataset":
+            dense_X = np.array(sparse_X[start_idx:end_idx, gene_indices]).astype(np.float32)
+        else:
+            dense_X = sparse_X[start_idx:end_idx, gene_indices].toarray()
         logger.debug(f"Densified. {start_idx} to {end_idx} {dense_X.shape}")
         dense_T = dense_X.T
         logger.debug(f"Transposed. {start_idx} to {end_idx} {dense_T.shape}")
@@ -308,3 +328,65 @@ class H5ADSourceTask(DataSourceTask):
     @property
     def schema(self) -> Schema:
         return self._after_scan_schema
+
+
+class H5ADCooDataSource(DataSource):
+    """
+    Read csr matrix from the h5ad file then populate it into a coo matrix
+    """
+    def __init__(self, filename: str, batch_size: int = 1000):
+        self.filename = filename
+        self._ad = anndata.read_h5ad(filename, backed="r")
+        self._schema = Schema.from_pyarrow_schema(pa.schema([pa.field("x", pa.int32()), pa.field("y", pa.int32()), pa.field("z", pa.float32())]))
+        self._reader = H5ADReader(filename)
+        self._batch_size = batch_size
+
+    @property
+    def name(self) -> str:
+        return "H5ADCooDataSource"
+
+    @property
+    def schema(self) -> Schema:
+        return self._schema
+
+    def display_name(self) -> str:
+        return f"H5ADCooDataSource({self.filename})"
+
+    def multiline_display(self) -> list[str]:
+        return [
+            self.display_name(),
+            f"Schema = {self._schema}",
+            f"Num cells = {self._ad.n_obs}",
+        ]
+
+    def get_tasks(self, pushdowns: Pushdowns | None = None) -> Iterator[H5ADCooSourceTask]:
+        for start_idx, end_idx in self._reader.generate_cell_batches(self._batch_size):
+            yield H5ADCooSourceTask(
+                _file_path=self.filename,
+                _schema=self._schema,
+                _start_idx=start_idx,
+                _end_idx=end_idx,
+            )
+
+
+@dataclass
+class H5ADCooSourceTask(DataSourceTask):
+    _file_path: str
+    _schema: Schema
+    _start_idx: int
+    _end_idx: int
+
+    def execute(self) -> Iterator[MicroPartition]:
+        reader = H5ADReader(self._file_path)
+        micropartition = reader.read_coo_partition(
+            self._start_idx, self._end_idx, self._schema
+        )
+
+        yield micropartition
+
+    def get_micro_partitions(self) -> Iterator[MicroPartition]:
+        yield from self.execute()
+
+    @property
+    def schema(self) -> Schema:
+        return self._schema

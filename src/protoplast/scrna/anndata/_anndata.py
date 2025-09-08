@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .scan import H5ADSource
+from .scan import H5ADSource, H5ADCooDataSource
 
 if TYPE_CHECKING:
     from daft import DataFrame
@@ -44,3 +44,9 @@ def read_h5ad(
         var_h5dataset=var_h5dataset,
         io_config=io_config,
     ).read()
+
+def read_h5ad_coo(
+    path: str,
+    batch_size: int = 1000
+) -> DataFrame:
+    return H5ADCooDataSource(path, batch_size=batch_size).read()
