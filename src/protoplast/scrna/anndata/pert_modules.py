@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import time
-
+from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader, Subset
 
@@ -11,13 +11,6 @@ except Exception:  # fallback stub
     class _PLStub:
         class LightningDataModule: ...
     pl = _PLStub()
-
-try:
-    from tqdm import tqdm
-except ImportError:
-    # Fallback if tqdm is not available
-    def tqdm(iterable, *args, **kwargs):
-        return iterable
 
 # --- TOML loader: stdlib (3.11+) or fallback to 'toml' package ---
 try:
@@ -580,50 +573,21 @@ if __name__ == "__main__":
     test_loader_grouped  = dm_grouped.test_dataloader()
     print("train loader size (grouped): ", len(train_loader_grouped) if train_loader_grouped else "None")
     print("val loader size (grouped): ", len(val_loader_grouped) if val_loader_grouped else "None")
-    
-    # Show sample batch shapes
     if train_loader_grouped:
         for batch in train_loader_grouped:
-            print("Sample batch shapes (grouped train):")
-            print(f"  pert_cell_emb: {batch['pert_cell_emb'].shape}")
-            print(f"  cell_type_onehot: {batch['cell_type_onehot'].shape}")
-            print(f"  pert_emb: {batch['pert_emb'].shape}")
-            print(f"  ctrl_cell_emb: {batch['ctrl_cell_emb'].shape}")
-            print(f"  batch: {batch['batch'].shape}")
+            print("train (grouped):")
+            print(batch["pert_cell_emb"].shape)
+            print(batch["cell_type_onehot"].shape)
+            print(batch["pert_emb"].shape)
+            print(batch["ctrl_cell_emb"].shape)
+            print(batch["batch"].shape)
             break
-    
-    # Benchmark the grouped dataloaders
-    print("\n" + "="*50)
-    print("BENCHMARKING GROUPED DATALOADERS")
-    print("="*50)
-    
-    # Benchmark train loader
-    train_results = benchmark_dataloader(
-        train_loader_grouped, 
-        "Grouped Train Loader", 
-        max_batches=50  # Limit to 50 batches for quick benchmark
-    )
-    
-    # Benchmark val loader
-    val_results = benchmark_dataloader(
-        val_loader_grouped, 
-        "Grouped Val Loader", 
-        max_batches=20  # Fewer batches for val
-    )
-    
-    # Summary comparison
-    print("\n" + "="*50)
-    print("BENCHMARK SUMMARY")
-    print("="*50)
-    
-    if train_results:
-        print(f"Train Loader Performance:")
-        print(f"  Cells/sec: {train_results['cells_per_second']:.1f}")
-        print(f"  Groups/sec: {train_results['total_groups'] / train_results['elapsed_time']:.1f}")
-    
-    if val_results:
-        print(f"Val Loader Performance:")
-        print(f"  Cells/sec: {val_results['cells_per_second']:.1f}")
-        print(f"  Groups/sec: {val_results['total_groups'] / val_results['elapsed_time']:.1f}")
-    
-    print("\nBenchmark completed!")
+    if val_loader_grouped:
+        for batch in val_loader_grouped:
+            print("val (grouped):")
+            print(batch["pert_cell_emb"].shape)
+            print(batch["cell_type_onehot"].shape)
+            print(batch["pert_emb"].shape)
+            print(batch["ctrl_cell_emb"].shape)
+            print(batch["batch"].shape)
+            break
