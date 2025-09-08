@@ -8,7 +8,12 @@ import pytest
 import torch
 from scipy.sparse import csr_matrix
 
-from protoplast.scrna.anndata.torch_dataloader import AnnDataModule, DistributedAnnDataset, ann_split_data
+from protoplast.scrna.anndata.torch_dataloader import (
+    AnnDataModule,
+    DistributedAnnDataset,
+    ann_split_data,
+    cell_line_metadata_cb,
+)
 
 
 @pytest.fixture(scope="function")
@@ -28,7 +33,7 @@ def test_even_h5ad_file(tmpdir: pathlib.Path) -> str:
 
     X = csr_matrix((data, indices, indptr), shape=(n_obs, n_vars))
 
-    obs = pd.DataFrame(index=[f"cell_{i}" for i in range(n_obs)])
+    obs = pd.DataFrame(index=[f"cell_{i}" for i in range(n_obs)], data={"cell_line": pd.Categorical([0, 0, 1, 1])})
     var = pd.DataFrame(index=[f"gene_{i}" for i in range(n_vars)])
     adata = ad.AnnData(X=X, obs=obs, var=var)
 
@@ -200,3 +205,32 @@ def test_load_with_callbacks(test_even_h5ad_file: str):
         assert not data.is_sparse
         assert not data.is_sparse_csr
         assert torch.all(data < 1)
+
+
+def test_custom_dataset(test_even_h5ad_file: str):
+    from protoplast.scrna.anndata.torch_dataloader import DistributedCellLineAnnDataset
+
+    indices = ann_split_data(
+        [test_even_h5ad_file], batch_size=2, test_size=0.0, validation_size=0.0, metadata_cb=cell_line_metadata_cb
+    )
+    data_module = AnnDataModule(
+        indices=indices,
+        dataset=DistributedCellLineAnnDataset,
+        prefetch_factor=2,
+        sparse_keys=["X"],
+    )
+    data_module.setup(stage="fit")
+    train_loader = data_module.train_dataloader()
+    for i, data in enumerate(train_loader):
+        data = data_module.on_after_batch_transfer(data, i)
+        assert isinstance(data, Iterable)
+        assert len(data) == 2
+        n, m = data[0].shape
+        assert n > 0
+        assert m > 0
+        assert isinstance(data[0], torch.Tensor)
+        assert not data[0].is_sparse
+        assert not data[0].is_sparse_csr
+        assert isinstance(data[1], torch.Tensor)
+        assert data[1].dtype == torch.int64
+        assert data[1].shape[0] == n

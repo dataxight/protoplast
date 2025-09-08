@@ -1,7 +1,7 @@
 import argparse
 
 from protoplast.scrna.anndata.lightning_models import LinearClassifier
-from protoplast.scrna.anndata.torch_dataloader import DistrbutedCellLineAnnDataset as Dcl
+from protoplast.scrna.anndata.torch_dataloader import DistributedCellLineAnnDataset as Dcl
 from protoplast.scrna.anndata.torch_dataloader import cell_line_metadata_cb
 from protoplast.scrna.anndata.trainer import RayTrainRunner
 

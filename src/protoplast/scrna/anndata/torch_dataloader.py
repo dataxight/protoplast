@@ -190,7 +190,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
                 gidx += 1
 
 
-class DistrbutedCellLineAnnDataset(DistributedAnnDataset):
+class DistributedCellLineAnnDataset(DistributedAnnDataset):
     """
     Example of how to extend DistributedAnnDataset to adapt it for cell line linear
     classification model here self.cell_lines is available through writing the
