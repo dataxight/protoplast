@@ -1,5 +1,6 @@
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
+import time
 
 import torch
 from torch.utils.data import DataLoader, Subset
@@ -10,6 +11,13 @@ except Exception:  # fallback stub
     class _PLStub:
         class LightningDataModule: ...
     pl = _PLStub()
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    # Fallback if tqdm is not available
+    def tqdm(iterable, *args, **kwargs):
+        return iterable
 
 # --- TOML loader: stdlib (3.11+) or fallback to 'toml' package ---
 try:
@@ -423,6 +431,97 @@ class PerturbDataModule(pl.LightningDataModule):
     def test_dataloader(self):
         return self._test_loader
 
+
+def benchmark_dataloader(dataloader, name: str, max_batches: int = 100):
+    """
+    Benchmark a dataloader to measure cells per second throughput.
+    
+    Args:
+        dataloader: PyTorch DataLoader to benchmark
+        name: Name for the benchmark (used in output)
+        max_batches: Maximum number of batches to process
+    
+    Returns:
+        dict: Benchmark results including cells_per_second, total_cells, etc.
+        
+    Example:
+        >>> dm = PerturbDataModule(config_path="config.toml", pert_embedding_file="emb.pt", use_grouped_dataset=True)
+        >>> dm.setup()
+        >>> train_loader = dm.train_dataloader()
+        >>> results = benchmark_dataloader(train_loader, "My Dataset", max_batches=50)
+        >>> print(f"Throughput: {results['cells_per_second']:.1f} cells/sec")
+    """
+    print(f"\n=== Benchmarking {name} ===")
+    
+    if dataloader is None:
+        print("Dataloader is None, skipping benchmark.")
+        return
+    
+    total_cells = 0
+    total_groups = 0
+    start_time = time.time()
+    
+    # Use tqdm for progress tracking
+    pbar = tqdm(enumerate(dataloader), total=min(max_batches, len(dataloader)), 
+                desc=f"Benchmarking {name}", unit="batch")
+    
+    for batch_idx, batch in pbar:
+        if batch_idx >= max_batches:
+            break
+            
+        # Count cells in this batch
+        if "pert_cell_emb" in batch:
+            # For grouped datasets, shape is [batch_size, group_size, features]
+            # For regular datasets, shape is [batch_size, features]
+            cell_emb_shape = batch["pert_cell_emb"].shape
+            if len(cell_emb_shape) == 3:  # Grouped dataset
+                batch_cells = cell_emb_shape[0] * cell_emb_shape[1]  # batch_size * group_size
+                total_groups += cell_emb_shape[0]
+            else:  # Regular dataset
+                batch_cells = cell_emb_shape[0]  # batch_size
+            
+            total_cells += batch_cells
+            
+            # Update progress bar with current rate
+            elapsed = time.time() - start_time
+            if elapsed > 0:
+                cells_per_sec = total_cells / elapsed
+                pbar.set_postfix({
+                    'cells': total_cells,
+                    'cells/sec': f'{cells_per_sec:.1f}',
+                    'groups': total_groups if total_groups > 0 else 'N/A'
+                })
+    
+    pbar.close()
+    
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    
+    if elapsed_time > 0:
+        cells_per_second = total_cells / elapsed_time
+        batches_per_second = (batch_idx + 1) / elapsed_time
+        
+        print(f"Results for {name}:")
+        print(f"  Total cells processed: {total_cells:,}")
+        print(f"  Total batches processed: {batch_idx + 1}")
+        if total_groups > 0:
+            print(f"  Total groups processed: {total_groups}")
+            print(f"  Average cells per group: {total_cells / total_groups:.1f}")
+        print(f"  Time elapsed: {elapsed_time:.2f} seconds")
+        print(f"  Cells per second: {cells_per_second:.1f}")
+        print(f"  Batches per second: {batches_per_second:.1f}")
+    else:
+        print(f"Benchmark completed too quickly to measure for {name}")
+    
+    return {
+        'total_cells': total_cells,
+        'total_batches': batch_idx + 1,
+        'total_groups': total_groups,
+        'elapsed_time': elapsed_time,
+        'cells_per_second': cells_per_second if elapsed_time > 0 else 0,
+        'batches_per_second': batches_per_second if elapsed_time > 0 else 0
+    }
+
 if __name__ == "__main__":
     # Test with regular PerturbDataset
     # print("Testing with regular PerturbDataset...")
@@ -481,21 +580,50 @@ if __name__ == "__main__":
     test_loader_grouped  = dm_grouped.test_dataloader()
     print("train loader size (grouped): ", len(train_loader_grouped) if train_loader_grouped else "None")
     print("val loader size (grouped): ", len(val_loader_grouped) if val_loader_grouped else "None")
+    
+    # Show sample batch shapes
     if train_loader_grouped:
         for batch in train_loader_grouped:
-            print("train (grouped):")
-            print(batch["pert_cell_emb"].shape)
-            print(batch["cell_type_onehot"].shape)
-            print(batch["pert_emb"].shape)
-            print(batch["ctrl_cell_emb"].shape)
-            print(batch["batch"].shape)
+            print("Sample batch shapes (grouped train):")
+            print(f"  pert_cell_emb: {batch['pert_cell_emb'].shape}")
+            print(f"  cell_type_onehot: {batch['cell_type_onehot'].shape}")
+            print(f"  pert_emb: {batch['pert_emb'].shape}")
+            print(f"  ctrl_cell_emb: {batch['ctrl_cell_emb'].shape}")
+            print(f"  batch: {batch['batch'].shape}")
             break
-    if val_loader_grouped:
-        for batch in val_loader_grouped:
-            print("val (grouped):")
-            print(batch["pert_cell_emb"].shape)
-            print(batch["cell_type_onehot"].shape)
-            print(batch["pert_emb"].shape)
-            print(batch["ctrl_cell_emb"].shape)
-            print(batch["batch"].shape)
-            break
+    
+    # Benchmark the grouped dataloaders
+    print("\n" + "="*50)
+    print("BENCHMARKING GROUPED DATALOADERS")
+    print("="*50)
+    
+    # Benchmark train loader
+    train_results = benchmark_dataloader(
+        train_loader_grouped, 
+        "Grouped Train Loader", 
+        max_batches=50  # Limit to 50 batches for quick benchmark
+    )
+    
+    # Benchmark val loader
+    val_results = benchmark_dataloader(
+        val_loader_grouped, 
+        "Grouped Val Loader", 
+        max_batches=20  # Fewer batches for val
+    )
+    
+    # Summary comparison
+    print("\n" + "="*50)
+    print("BENCHMARK SUMMARY")
+    print("="*50)
+    
+    if train_results:
+        print(f"Train Loader Performance:")
+        print(f"  Cells/sec: {train_results['cells_per_second']:.1f}")
+        print(f"  Groups/sec: {train_results['total_groups'] / train_results['elapsed_time']:.1f}")
+    
+    if val_results:
+        print(f"Val Loader Performance:")
+        print(f"  Cells/sec: {val_results['cells_per_second']:.1f}")
+        print(f"  Groups/sec: {val_results['total_groups'] / val_results['elapsed_time']:.1f}")
+    
+    print("\nBenchmark completed!")
