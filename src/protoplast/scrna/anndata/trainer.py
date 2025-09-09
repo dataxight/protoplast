@@ -26,7 +26,7 @@ class RayTrainRunner:
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         splitter: Callable[
-            [list[str], int, float, float, int, Callable[[anndata.AnnData, dict], None]], dict
+            [list[str], int, float, float, int, Callable[[anndata.AnnData, dict], None], bool], dict
         ] = ann_split_data,
         runtime_env_config: dict | None = None,
         address: str | None = None,
@@ -67,11 +67,20 @@ class RayTrainRunner:
         is_gpu: bool = True,
         random_seed: int | None = 42,
         resource_per_worker: dict | None = None,
+        is_shuffled: bool = True,
     ):
         self.result_storage_path = result_storage_path
         self.prefetch_factor = prefetch_factor
         self.max_epochs = max_epochs
-        indices = self.splitter(file_paths, batch_size, test_size, val_size, random_seed, metadata_cb=self.metadata_cb)
+        indices = self.splitter(
+            file_paths,
+            batch_size,
+            test_size,
+            val_size,
+            random_seed,
+            metadata_cb=self.metadata_cb,
+            is_shuffled=is_shuffled,
+        )
         train_config = {"indices": indices, "ckpt_path": ckpt_path}
         if not resource_per_worker:
             resource_per_worker = {"CPU": thread_per_worker}

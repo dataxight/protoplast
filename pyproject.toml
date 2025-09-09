@@ -30,6 +30,8 @@ dependencies = [
   "fsspec-dnanexus",
   "dxpy",
   "beartype>=0.21.0",
+  "scdataset>=0.2.0",
+  "scikit-learn>=1.7.1",
 ]
 requires-python = ">= 3.10"
 

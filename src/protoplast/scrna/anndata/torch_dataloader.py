@@ -25,6 +25,7 @@ def ann_split_data(
     validation_size: float | None = None,
     random_seed: int | None = 42,
     metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
+    is_shuffled: bool = True,
 ):
     def to_batches(n):
         return [(i, min(i + batch_size, n)) for i in range(0, n, batch_size)]
@@ -64,7 +65,8 @@ def ann_split_data(
 
     # Second pass: allocate splits proportionally per file
     for batches in file_batches:
-        rng.shuffle(batches)
+        if is_shuffled:
+            rng.shuffle(batches)
         n = len(batches)
 
         val_n = int(round(n / total_batches * val_total)) if validation_size else 0

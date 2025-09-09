@@ -1,6 +1,8 @@
 import os
 import sys
 
+from scd import train as scl_train
+
 from protoplast.scrna.anndata.lightning_models import LinearClassifier, NullClassifier
 from protoplast.scrna.anndata.torch_dataloader import DistributedCellLineAnnDataset as Dcl
 from protoplast.scrna.anndata.torch_dataloader import cell_line_metadata_cb
@@ -38,10 +40,11 @@ if __name__ == "__main__":
             num_workers=num_workers,
             is_gpu=False,
             test_size=0.0,
-            val_size=0.0,
+            val_size=0.2,
+            is_shuffled=False,
         )
-    else:
-        print("Running linear model")
+    elif mode == "pl":
+        print("Running protoplast linear model")
         trainer = RayTrainRunner(
             LinearClassifier,  # replace with your own model
             Dcl,  # replace with your own Dataset
@@ -54,5 +57,9 @@ if __name__ == "__main__":
             batch_size=batch_size,
             num_workers=num_workers,
             test_size=0.0,
-            val_size=0.0,
+            val_size=0.2,
+            is_shuffled=False,
         )
+    elif mode == "scl":
+        print("Running with scDataset")
+        scl_train(paths, batch_size=batch_size, num_workers=num_workers, fetch_factor=4)
