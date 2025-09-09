@@ -128,12 +128,9 @@ def default_collate(batch_list):
     out = {}
     keys = batch_list[0].keys()
     for k in keys:
-        if k == "pert_cell_emb":
-            vs = [b[k].to_dense() for b in batch_list]
-        else:
-            vs = [b[k] for b in batch_list]
+        vs = [b[k] for b in batch_list]
         if torch.is_tensor(vs[0]):
-            out[k] = torch.stack(vs, dim=0)
+            out[k] = torch.stack(vs, dim=0).contiguous()
         else:
             out[k] = vs
     return out
@@ -180,7 +177,8 @@ class PerturbDataModule(pl.LightningDataModule):
         persistent_workers: bool = True,
         prefetch_factor: Optional[int] = 4,
         collate_fn=default_collate,
-        barcodes: bool = False
+        barcodes: bool = False,
+        device: str = "cpu"
     ):
         super().__init__()
         self.config_path = config_path
@@ -208,7 +206,7 @@ class PerturbDataModule(pl.LightningDataModule):
         self.prefetch_factor = prefetch_factor
         self._collate_fn = collate_fn
         self.barcodes = barcodes
-
+        self.device = device
         # populated in setup()
         self.cfg = None
         self.ds: Optional[PerturbDataset] = None
@@ -292,7 +290,8 @@ class PerturbDataModule(pl.LightningDataModule):
                 batch_label=self.batch_label,
                 use_batches=self.use_batches,
                 n_basal_samples=self.n_basal_samples,
-                barcodes=self.barcodes
+                barcodes=self.barcodes,
+                device=self.device
             )
         else:
             # For grouped datasets, we'll create them in the split section
@@ -311,7 +310,8 @@ class PerturbDataModule(pl.LightningDataModule):
                 batch_label=self.batch_label,
                 use_batches=self.use_batches,
                 n_basal_samples=self.n_basal_samples,
-                barcodes=self.barcodes
+                barcodes=self.barcodes,
+                device=self.device
             )
             
             # Get split indices using the base dataset
