@@ -1,3 +1,4 @@
+import math
 import os
 import random
 import warnings
@@ -194,6 +195,218 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             gidx += 1
 
 
+class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
+    def __init__(
+        self,
+        file_paths: list[str],
+        batch_size: int,
+        block_size: int,
+        sparse_keys: list[str],
+        metadata: dict,
+        random_seed: int | None = 42,
+    ):
+        self.files = file_paths
+        self.batch_size = batch_size
+        self.block_size = block_size
+        self.sparse_keys = sparse_keys
+        self.random_seed = random_seed
+        
+        # Set metadata as instance attributes
+        for k, v in metadata.items():
+            setattr(self, k, v)
+        self.metadata = metadata
+        
+        # Initialize worker and distributed training info
+        worker_info = get_worker_info()
+        if worker_info is None:
+            self.wid = 0
+            self.nworkers = 1
+        else:
+            self.wid = worker_info.id
+            self.nworkers = worker_info.num_workers
+            
+        try:
+            w_rank = td.get_rank()
+            w_size = td.get_world_size()
+        except ValueError:
+            w_rank = -1
+            w_size = -1
+            
+        if w_rank >= 0:
+            self.ray_rank = w_rank
+            self.ray_size = w_size
+        else:
+            self.ray_rank = 0
+            self.ray_size = 1
+            
+        # Load anndata objects and create block ranges
+        self.adatas = []
+        self.block_ranges = []
+        self.n_cells = 0
+        self.n_obs = []
+        
+        for i, file_path in enumerate(self.files):
+            ad = anndata.read_h5ad(file_path, backed="r")
+            self.adatas.append(ad)
+            self.n_cells += ad.n_obs
+            self.n_obs.append(ad.n_obs)
+            
+            # Create block ranges for this file
+            n_cells = ad.n_obs
+            file_ranges = []
+            
+            for start in range(0, n_cells, self.block_size):
+                end = min(start + self.block_size, n_cells)
+                file_ranges.append((i, start, end))
+                
+            self.block_ranges.extend(file_ranges)
+        
+        # Shuffle the block ranges
+        if self.random_seed is not None:
+            rng = random.Random(self.random_seed)
+            rng.shuffle(self.block_ranges)
+        else:
+            random.shuffle(self.block_ranges)
+            
+        # Calculate LCM of block_size and batch_size
+        self.n_lcm = self._lcm(self.block_size, self.batch_size)
+        self.n_blocks = self.n_lcm // self.block_size
+        self.ad = None
+
+    
+    @classmethod
+    def create_block_based_ds(
+        cls, 
+        file_paths: list[str], 
+        batch_size: int, 
+        block_size: int, 
+        sparse_keys: list[str], 
+        metadata: dict,
+        random_seed: int | None = 42
+    ):
+        """
+        Create a BlockBasedAnnDataset instance.
+        
+        Args:
+            file_paths: List of paths to h5ad files
+            batch_size: Size of batches to yield
+            block_size: Size of blocks to read at once
+            sparse_keys: Keys for sparse matrices to extract
+            metadata: Metadata dictionary to set as instance attributes
+            random_seed: Random seed for shuffling block ranges
+        """
+        return cls(file_paths, batch_size, block_size, sparse_keys, metadata, random_seed)
+        
+    def _lcm(self, a: int, b: int) -> int:
+        """Calculate least common multiple of two numbers."""
+        return abs(a * b) // math.gcd(a, b)
+    
+    def _process_sparse(self, mat) -> torch.Tensor:
+        """Convert sparse matrix to torch tensor."""
+        if sp.issparse(mat):
+            return torch.sparse_csr_tensor(
+                torch.from_numpy(mat.indptr).long(),
+                torch.from_numpy(mat.indices).long(),
+                torch.from_numpy(mat.data).float(),
+                mat.shape,
+            )
+        return torch.from_numpy(mat).float()
+    
+    def _get_range(self, file_idx: int, start: int, end: int, sparse_key: str | None = None):
+        """Helper function to get random items from a file
+        this is in case we need to create padding data
+        """
+        mat = None
+        if "." in sparse_key:
+            attr, attr_k = sparse_key.split(".")
+            mat = getattr(self.adatas[file_idx], attr)[attr_k][start:end]
+        else:
+            mat = getattr(self.adatas[file_idx], sparse_key)[start:end]
+        # just in case it is a dense matrix, convert it to a sparse matrix
+        mat = sp.csr_matrix(mat)
+        return mat
+
+    def __iter__(self):
+        gidx = 0
+        
+        # Process blocks in groups of n_blocks
+        for i in range(0, len(self.block_ranges), self.n_blocks):
+            if gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid:
+                mats = []
+                
+                # Collect n_blocks worth of data
+                for j in range(self.n_blocks):
+                    if i + j >= len(self.block_ranges):
+                        break
+                        
+                    file_idx, start, end = self.block_ranges[i + j]
+                    
+                    # Get data for each sparse key and stack them
+                    block_mats = []
+                    for k in self.sparse_keys:
+                        mat = self._get_range(file_idx, start, end, k)
+                        block_mats.append(mat)
+                    
+                    # If we have multiple sparse keys, we need to handle them appropriately
+                    # For now, we'll assume we're working with the first sparse key for stacking
+                    if len(block_mats) > 0:
+                        mats.append(block_mats[0])  # Use first sparse key for main matrix
+                
+                if not mats:
+                    gidx += 1
+                    continue
+                
+                # Stack the matrices
+                X = sp.vstack(mats)
+                
+                # Check if we need padding to make it divisible by batch_size
+                if X.shape[0] % self.batch_size != 0:
+                    remainder = X.shape[0] % self.batch_size
+                    padding_needed = self.batch_size - remainder
+                    
+                    # Get random padding data
+                    padding_mats = []
+                    remaining_padding = padding_needed
+                    
+                    while remaining_padding > 0:
+                        # Choose a random file
+                        rfi = random.choice(range(len(self.adatas)))
+                        n_obs = self.adatas[rfi].n_obs
+                        
+                        if n_obs < remaining_padding:
+                            # If the file doesn't have enough cells, take all of them
+                            chunk_size = n_obs
+                            rstart = 0
+                        else:
+                            # Take a random chunk
+                            chunk_size = min(remaining_padding, n_obs)
+                            rstart = random.choice(range(n_obs - chunk_size + 1))
+                        
+                        # Get the padding data using the first sparse key
+                        k = self.sparse_keys[0]
+                        X_r = self._get_range(rfi, rstart, rstart + chunk_size, k)
+                        
+                        padding_mats.append(X_r)
+                        remaining_padding -= chunk_size
+                    
+                    # Stack padding matrices
+                    if padding_mats:
+                        X_padding = sp.vstack(padding_mats)
+                        # Concatenate original and padding
+                        X = sp.vstack([X, X_padding])
+                
+                # Yield batches
+                n_batches = self.n_lcm // self.batch_size
+                for bi in range(n_batches):
+                    start_idx = bi * self.batch_size
+                    end_idx = start_idx + self.batch_size
+                    
+                    batch_data = X[start_idx:end_idx, :]
+                    yield self._process_sparse(batch_data)
+            
+            gidx += 1
+
+
 class DistributedCellLineAnnDataset(DistributedAnnDataset):
     """
     Example of how to extend DistributedAnnDataset to adapt it for cell line linear
@@ -271,3 +484,44 @@ class AnnDataModule(pl.LightningDataModule):
             return self.densify(batch)
         else:
             return batch
+
+
+if __name__ == "__main__":
+    files = ["notebooks/competition_support_set/k562.h5", "notebooks/competition_support_set/rpe1.h5"]
+    import time
+    from tqdm import tqdm
+    def benchmark(loader, n_samples, batch_size):
+        num_iter = n_samples // batch_size
+        loader_iter = loader.__iter__()
+    
+        start_time = time.time()
+        batch_times = []
+        batch_time = time.time()
+        for i, _batch in tqdm(enumerate(loader_iter), total=num_iter):
+            batch_times.append(time.time() - batch_time)
+            batch_time = time.time()
+            if i == num_iter:
+                break
+    
+        execution_time = time.time() - start_time
+        time_per_sample = (1e6 * execution_time) / (num_iter * batch_size)
+        print(f"time per sample: {time_per_sample:.2f} μs")
+        samples_per_sec = num_iter * batch_size / execution_time
+        print(f"samples per sec: {samples_per_sec:.2f} samples/sec")
+    
+        return samples_per_sec, time_per_sample, batch_times
+
+    def asis_collate_fn(batch):
+        return batch[0]
+
+    ds = BlockBasedAnnDataset(
+        file_paths=files,
+        batch_size=128,
+        block_size=16,
+        sparse_keys=["X"],
+        metadata={"created_by": "block-based-dataset", "dataset_version": "v1.0"},
+        random_seed=73
+    )
+    dataloader = DataLoader(ds, batch_size=1, num_workers=1, prefetch_factor=4, collate_fn=asis_collate_fn, pin_memory=True,
+    persistent_workers=True)
+    benchmark(dataloader, ds.n_cells, 128)
