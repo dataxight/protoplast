@@ -14,6 +14,7 @@ import pandas as pd
 import torch
 import scipy.sparse
 from tqdm.auto import tqdm
+import lance
 
 from protoplast.scrna.anndata import read_h5ad_coo
 
@@ -59,7 +60,7 @@ class AnnDataParquetBacked:
 
         # Other paths
         self.obs_path = self.adata_path.with_suffix(".obs")
-        self.dat_path = self.adata_path.with_suffix(".parquet")
+        self.dat_path = self.adata_path.with_suffix(".lance")
         self.var_path = self.adata_path.with_suffix(".var")
         self.mtime_path = self.adata_path.with_suffix(".mtime")  # store file mtime
 
@@ -98,6 +99,7 @@ class AnnDataParquetBacked:
         logger.info("Loading index: dat (implicitly)")
         self.n_vars = self.var.shape[0]
         self.n_obs = self.obs.shape[0]
+        self.expression = lance.dataset(str(self.dat_path))
 
         return True
 
@@ -184,9 +186,7 @@ class AnnDataParquetBacked:
                 indices = self.obs.index.get_indexer(indices)
         else:
             raise ValueError(f"Unsupported index type: {type(indices)}")
-        coo = (daft.read_parquet(str(self.dat_path))
-            .filter(col("x").is_in(indices))
-        ).to_arrow()
+        coo = self.expression.take(indices).to_arrow()
         return coo
 
     def get(self, indices: Union[List[str], pd.Index, np.ndarray]) -> np.ndarray:
