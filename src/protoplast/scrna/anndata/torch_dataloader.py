@@ -1,3 +1,4 @@
+
 import os
 import random
 import warnings
@@ -192,6 +193,220 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
                 gidx += 1
 
 
+class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
+    def __init__(
+        self,
+        file_paths: list[str],
+        ds_batch_size: int,
+        block_size: int,
+        load_factor: int,
+        sparse_keys: list[str],
+        random_seed: int | None = 42,
+        mode: str = "train"
+    ):
+        self.files = file_paths
+        self.batch_size = ds_batch_size # use ds_ just to not collide with the batch_size argument for loader
+        self.block_size = block_size
+        self.sparse_keys = sparse_keys
+        self.random_seed = random_seed
+        self.mode = mode
+        if not isinstance(load_factor, int):
+            raise ValueError("load_factor must be an integer")
+        self.block_group_size = load_factor 
+
+        if int(self.block_size * load_factor) % int(self.batch_size) != 0:
+            raise ValueError("block_size * load_factor must be divisible by batch_size")
+        
+        # Initialize worker and distributed training info
+        worker_info = get_worker_info()
+        if worker_info is None:
+            self.wid = 0
+            self.nworkers = 1
+        else:
+            self.wid = worker_info.id
+            self.nworkers = worker_info.num_workers
+            
+        try:
+            w_rank = td.get_rank()
+            w_size = td.get_world_size()
+        except ValueError:
+            w_rank = -1
+            w_size = -1
+            
+        if w_rank >= 0:
+            self.ray_rank = w_rank
+            self.ray_size = w_size
+        else:
+            self.ray_rank = 0
+            self.ray_size = 1
+            
+        # Load anndata objects and create block ranges
+        self.block_ranges = []
+        self.n_cells = 0
+        self.n_obs = []
+        
+        for i, file_path in enumerate(self.files):
+            ad = anndata.read_h5ad(file_path, backed="r")
+            self.n_cells += ad.n_obs
+            self.n_obs.append(ad.n_obs)
+            
+            # Create block ranges for this file
+            n_cells = ad.n_obs
+            file_ranges = []
+            
+            for start in range(0, n_cells, self.block_size):
+                end = min(start + self.block_size, n_cells)
+                file_ranges.append((i, start, end))
+                
+            self.block_ranges.extend(file_ranges)
+        
+        # Shuffle the block ranges
+        if self.random_seed is not None:
+            rng = random.Random(self.random_seed)
+            rng.shuffle(self.block_ranges)
+        else:
+            random.shuffle(self.block_ranges)
+            
+    
+    @classmethod
+    def create_distributed_ds(
+        cls, 
+        file_paths: list[str], 
+        ds_batch_size: int, 
+        block_size: int, 
+        load_factor: int,
+        sparse_keys: list[str], 
+        random_seed: int | None = 42,
+        mode: str = "train"
+    ):
+        """
+        Create a BlockBasedAnnDataset instance.
+        
+        Args:
+            file_paths: List of paths to h5ad files
+            batch_size: Size of batches to yield
+            block_size: Size of blocks to read at once
+            load_factor: Factor by which to load blocks
+            sparse_keys: Keys for sparse matrices to extract
+            metadata: Metadata dictionary to set as instance attributes
+            random_seed: Random seed for shuffling block ranges
+        """
+        return cls(file_paths, ds_batch_size, block_size, load_factor, sparse_keys, random_seed, mode)
+    
+    def _process_sparse(self, mat) -> torch.Tensor:
+        """Convert sparse matrix to torch tensor."""
+        if sp.issparse(mat):
+            return torch.sparse_csr_tensor(
+                torch.from_numpy(mat.indptr).long(),
+                torch.from_numpy(mat.indices).long(),
+                torch.from_numpy(mat.data).float(),
+                mat.shape,
+            )
+        return torch.from_numpy(mat).float()
+    
+    def _get_mat_by_range(self, file_idx: int, start: int, end: int, sparse_key: str | None = None):
+        """Helper function to get random items from a file
+        this is in case we need to create padding data
+        """
+        mat = None
+        # Since PyTorch seems to adopt lazy way of initializing workers, 
+        # this means that the actual file opening has to happen inside of the__getitem__function of the Dataset wrapper. 
+        # refer to https://stackoverflow.com/questions/46045512/h5py-hdf5-database-randomly-returning-nans-and-near-very-small-data-with-multi/52438133#52438133
+        adata = anndata.read_h5ad(self.files[file_idx], backed="r")
+        if "." in sparse_key:
+            attr, attr_k = sparse_key.split(".")
+            mat = getattr(adata, attr)[attr_k][start:end]
+        else:
+            mat = getattr(adata, sparse_key)[start:end]
+        # just in case it is a dense matrix, convert it to a sparse matrix
+        mat = sp.csr_matrix(mat)
+        return mat
+
+    def __iter__(self):
+        gidx = 0
+        
+        # Process blocks in groups of block_group_size
+        for i in range(0, len(self.block_ranges), self.block_group_size):
+            if gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid:
+                mats = []
+                
+                # Collect block_group_size worth of data
+                for j in range(self.block_group_size):
+                    if i + j >= len(self.block_ranges):
+                        break
+                        
+                    file_idx, start, end = self.block_ranges[i + j]
+                    
+                    # Get data for each sparse key and stack them
+                    block_mats = []
+                    for k in self.sparse_keys:
+                        mat = self._get_mat_by_range(file_idx, start, end, k)
+                        block_mats.append(mat)
+                    
+                    # If we have multiple sparse keys, we need to handle them appropriately
+                    # For now, we'll assume we're working with the first sparse key for stacking
+                    if len(block_mats) > 0:
+                        mats.append(block_mats[0])  # Use first sparse key for main matrix
+                
+                if not mats:
+                    gidx += 1
+                    continue
+                
+                # Stack the matrices
+                X = sp.vstack(mats)
+                
+                # Check if we need padding to make it divisible by batch_size
+                # TODO: implement the drop_last logic here to skip the last batch if needed so we don't need to do padding
+                if X.shape[0] % self.batch_size != 0:
+                    remainder = X.shape[0] % self.batch_size
+                    padding_needed = self.batch_size - remainder
+                    
+                    # Get random padding data
+                    padding_mats = []
+                    remaining_padding = padding_needed
+                    
+                    while remaining_padding > 0:
+                        # Choose a random file
+                        rfi = random.choice(range(len(self.files)))
+                        n_obs = anndata.read_h5ad(self.files[rfi], backed="r").n_obs
+                        
+                        if n_obs < remaining_padding:
+                            # If the file doesn't have enough cells, take all of them
+                            chunk_size = n_obs
+                            rstart = 0
+                        else:
+                            # Take a random chunk
+                            chunk_size = min(remaining_padding, n_obs)
+                            rstart = random.choice(range(n_obs - chunk_size + 1))
+                        
+                        # Get the padding data using the first sparse key
+                        k = self.sparse_keys[0]
+                        X_r = self._get_mat_by_range(rfi, rstart, rstart + chunk_size, k)
+                        
+                        padding_mats.append(X_r)
+                        remaining_padding -= chunk_size
+                    
+                    # Stack padding matrices
+                    if padding_mats:
+                        X_padding = sp.vstack(padding_mats)
+                        # Concatenate original and padding
+                        X = sp.vstack([X, X_padding])
+                
+                # Yield batches
+                # shuffle X
+                ridx = np.random.permutation(X.shape[0])
+                X = X[ridx, :]
+                n_batches = (self.block_size * self.block_group_size) // self.batch_size
+                for bi in range(n_batches):
+                    start_idx = bi * self.batch_size
+                    end_idx = start_idx + self.batch_size
+                    
+                    batch_data = X[start_idx:end_idx, :]
+                    yield self._process_sparse(batch_data)
+            
+            gidx += 1
+
+
 class DistributedCellLineAnnDataset(DistributedAnnDataset):
     """
     Example of how to extend DistributedAnnDataset to adapt it for cell line linear
@@ -211,31 +426,29 @@ class DistributedCellLineAnnDataset(DistributedAnnDataset):
 class AnnDataModule(pl.LightningDataModule):
     def __init__(
         self,
-        indices: dict,
-        dataset: DistributedAnnDataset,
+        dataset: DistributedAnnDataset | BlockBasedAnnDataset,
         prefetch_factor: int,
-        sparse_keys: list[str],
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
+        **dataset_kwargs,
     ):
         super().__init__()
-        self.indices = indices
         self.dataset = dataset
         num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
         self.loader_config = dict(batch_size=None, num_workers=num_threads, prefetch_factor=prefetch_factor)
-        self.sparse_keys = sparse_keys
         self.before_dense_cb = before_dense_cb
         self.after_dense_cb = after_dense_cb
+        self.dataset_kwargs = dataset_kwargs
 
     def setup(self, stage):
         # this is not necessary but it is here in case we want to download data to local node in the future
         if stage == "fit":
-            self.train_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys)
-            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "val")
+            self.train_ds = self.dataset.create_distributed_ds(**self.dataset_kwargs)
+            self.val_ds = self.dataset.create_distributed_ds(**self.dataset_kwargs, mode="val")
         if stage == "test":
-            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "test")
+            self.val_ds = self.dataset.create_distributed_ds(**self.dataset_kwargs, mode="test")
         if stage == "predict":
-            self.predict_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys)
+            self.predict_ds = self.dataset.create_distributed_ds(**self.dataset_kwargs, mode="predict")
 
     def train_dataloader(self):
         return DataLoader(self.train_ds, **self.loader_config)
@@ -269,3 +482,44 @@ class AnnDataModule(pl.LightningDataModule):
             return self.densify(batch)
         else:
             return batch
+
+
+if __name__ == "__main__":
+    files = ["notebooks/competition_support_set/k562.h5", "notebooks/competition_support_set/rpe1.h5"]
+    import time
+    from tqdm import tqdm
+    def benchmark(loader, n_samples, batch_size):
+        num_iter = n_samples // batch_size
+        loader_iter = loader.__iter__()
+    
+        start_time = time.time()
+        batch_times = []
+        batch_time = time.time()
+        for i, _batch in tqdm(enumerate(loader_iter), total=num_iter):
+            batch_times.append(time.time() - batch_time)
+            batch_time = time.time()
+            if i == num_iter:
+                break
+    
+        execution_time = time.time() - start_time
+        time_per_sample = (1e6 * execution_time) / (num_iter * batch_size)
+        print(f"time per sample: {time_per_sample:.2f} μs")
+        samples_per_sec = num_iter * batch_size / execution_time
+        print(f"samples per sec: {samples_per_sec:.2f} samples/sec")
+    
+        return samples_per_sec, time_per_sample, batch_times
+
+    def pass_through_collate_fn(batch):
+        return batch[0]
+
+    ds = BlockBasedAnnDataset(
+        file_paths=files,
+        batch_size=64,
+        block_size=16,
+        load_factor=16,
+        sparse_keys=["X"],
+        metadata={"created_by": "block-based-dataset", "dataset_version": "v1.0"},
+        random_seed=73
+    )
+    dataloader = DataLoader(ds, batch_size=None, num_workers=12, prefetch_factor=16, collate_fn=pass_through_collate_fn, pin_memory=False, persistent_workers=False)
+    benchmark(dataloader, ds.n_cells, 64)
