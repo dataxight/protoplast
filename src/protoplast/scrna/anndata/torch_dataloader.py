@@ -240,14 +240,12 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
             self.ray_size = 1
             
         # Load anndata objects and create block ranges
-        self.adatas = []
         self.block_ranges = []
         self.n_cells = 0
         self.n_obs = []
         
         for i, file_path in enumerate(self.files):
             ad = anndata.read_h5ad(file_path, backed="r")
-            self.adatas.append(ad)
             self.n_cells += ad.n_obs
             self.n_obs.append(ad.n_obs)
             
@@ -271,7 +269,6 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         # Calculate LCM of block_size and batch_size
         self.n_lcm = self._lcm(self.block_size, self.batch_size)
         self.n_blocks = self.n_lcm // self.block_size
-        self.ad = None
 
     
     @classmethod
@@ -317,11 +314,12 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         this is in case we need to create padding data
         """
         mat = None
+        adata = anndata.read_h5ad(self.files[file_idx], backed="r")
         if "." in sparse_key:
             attr, attr_k = sparse_key.split(".")
-            mat = getattr(self.adatas[file_idx], attr)[attr_k][start:end]
+            mat = getattr(adata, attr)[attr_k][start:end]
         else:
-            mat = getattr(self.adatas[file_idx], sparse_key)[start:end]
+            mat = getattr(adata, sparse_key)[start:end]
         # just in case it is a dense matrix, convert it to a sparse matrix
         mat = sp.csr_matrix(mat)
         return mat
@@ -370,8 +368,8 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                     
                     while remaining_padding > 0:
                         # Choose a random file
-                        rfi = random.choice(range(len(self.adatas)))
-                        n_obs = self.adatas[rfi].n_obs
+                        rfi = random.choice(range(len(self.files)))
+                        n_obs = anndata.read_h5ad(self.files[rfi], backed="r").n_obs
                         
                         if n_obs < remaining_padding:
                             # If the file doesn't have enough cells, take all of them
@@ -396,6 +394,9 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                         X = sp.vstack([X, X_padding])
                 
                 # Yield batches
+                # shuffle X
+                ridx = np.random.permutation(X.shape[0])
+                X = X[ridx, :]
                 n_batches = self.n_lcm // self.batch_size
                 for bi in range(n_batches):
                     start_idx = bi * self.batch_size
@@ -517,11 +518,10 @@ if __name__ == "__main__":
     ds = BlockBasedAnnDataset(
         file_paths=files,
         batch_size=128,
-        block_size=16,
+        block_size=64,
         sparse_keys=["X"],
         metadata={"created_by": "block-based-dataset", "dataset_version": "v1.0"},
         random_seed=73
     )
-    dataloader = DataLoader(ds, batch_size=1, num_workers=1, prefetch_factor=4, collate_fn=asis_collate_fn, pin_memory=True,
-    persistent_workers=True)
+    dataloader = DataLoader(ds, batch_size=1, num_workers=16, prefetch_factor=4, collate_fn=asis_collate_fn, pin_memory=False, persistent_workers=False)
     benchmark(dataloader, ds.n_cells, 128)
