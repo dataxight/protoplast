@@ -1,4 +1,4 @@
-import math
+
 import os
 import random
 import warnings
@@ -201,6 +201,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         file_paths: list[str],
         batch_size: int,
         block_size: int,
+        load_factor: int,
         sparse_keys: list[str],
         metadata: dict,
         random_seed: int | None = 42,
@@ -210,7 +211,14 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         self.block_size = block_size
         self.sparse_keys = sparse_keys
         self.random_seed = random_seed
-        
+
+        if not isinstance(load_factor, int):
+            raise ValueError("load_factor must be an integer")
+        self.block_group_size = load_factor 
+
+        if int(self.block_size * load_factor) % int(self.batch_size) != 0:
+            raise ValueError("block_size * load_factor must be divisible by batch_size")
+
         # Set metadata as instance attributes
         for k, v in metadata.items():
             setattr(self, k, v)
@@ -266,10 +274,6 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         else:
             random.shuffle(self.block_ranges)
             
-        # Calculate LCM of block_size and batch_size
-        self.n_lcm = self._lcm(self.block_size, self.batch_size)
-        self.n_blocks = self.n_lcm // self.block_size
-
     
     @classmethod
     def create_block_based_ds(
@@ -277,6 +281,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         file_paths: list[str], 
         batch_size: int, 
         block_size: int, 
+        load_factor: int,
         sparse_keys: list[str], 
         metadata: dict,
         random_seed: int | None = 42
@@ -288,15 +293,12 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
             file_paths: List of paths to h5ad files
             batch_size: Size of batches to yield
             block_size: Size of blocks to read at once
+            load_factor: Factor by which to load blocks
             sparse_keys: Keys for sparse matrices to extract
             metadata: Metadata dictionary to set as instance attributes
             random_seed: Random seed for shuffling block ranges
         """
-        return cls(file_paths, batch_size, block_size, sparse_keys, metadata, random_seed)
-        
-    def _lcm(self, a: int, b: int) -> int:
-        """Calculate least common multiple of two numbers."""
-        return abs(a * b) // math.gcd(a, b)
+        return cls(file_paths, batch_size, block_size, load_factor, sparse_keys, metadata, random_seed)
     
     def _process_sparse(self, mat) -> torch.Tensor:
         """Convert sparse matrix to torch tensor."""
@@ -309,11 +311,14 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
             )
         return torch.from_numpy(mat).float()
     
-    def _get_range(self, file_idx: int, start: int, end: int, sparse_key: str | None = None):
+    def _get_mat_by_range(self, file_idx: int, start: int, end: int, sparse_key: str | None = None):
         """Helper function to get random items from a file
         this is in case we need to create padding data
         """
         mat = None
+        # Since PyTorch seems to adopt lazy way of initializing workers, 
+        # this means that the actual file opening has to happen inside of the__getitem__function of the Dataset wrapper. 
+        # refer to https://stackoverflow.com/questions/46045512/h5py-hdf5-database-randomly-returning-nans-and-near-very-small-data-with-multi/52438133#52438133
         adata = anndata.read_h5ad(self.files[file_idx], backed="r")
         if "." in sparse_key:
             attr, attr_k = sparse_key.split(".")
@@ -327,13 +332,13 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
     def __iter__(self):
         gidx = 0
         
-        # Process blocks in groups of n_blocks
-        for i in range(0, len(self.block_ranges), self.n_blocks):
+        # Process blocks in groups of block_group_size
+        for i in range(0, len(self.block_ranges), self.block_group_size):
             if gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid:
                 mats = []
                 
-                # Collect n_blocks worth of data
-                for j in range(self.n_blocks):
+                # Collect block_group_size worth of data
+                for j in range(self.block_group_size):
                     if i + j >= len(self.block_ranges):
                         break
                         
@@ -342,7 +347,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                     # Get data for each sparse key and stack them
                     block_mats = []
                     for k in self.sparse_keys:
-                        mat = self._get_range(file_idx, start, end, k)
+                        mat = self._get_mat_by_range(file_idx, start, end, k)
                         block_mats.append(mat)
                     
                     # If we have multiple sparse keys, we need to handle them appropriately
@@ -358,6 +363,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                 X = sp.vstack(mats)
                 
                 # Check if we need padding to make it divisible by batch_size
+                # TODO: implement the drop_last logic here to skip the last batch if needed so we don't need to do padding
                 if X.shape[0] % self.batch_size != 0:
                     remainder = X.shape[0] % self.batch_size
                     padding_needed = self.batch_size - remainder
@@ -382,7 +388,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                         
                         # Get the padding data using the first sparse key
                         k = self.sparse_keys[0]
-                        X_r = self._get_range(rfi, rstart, rstart + chunk_size, k)
+                        X_r = self._get_mat_by_range(rfi, rstart, rstart + chunk_size, k)
                         
                         padding_mats.append(X_r)
                         remaining_padding -= chunk_size
@@ -397,7 +403,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                 # shuffle X
                 ridx = np.random.permutation(X.shape[0])
                 X = X[ridx, :]
-                n_batches = self.n_lcm // self.batch_size
+                n_batches = (self.block_size * self.block_group_size) // self.batch_size
                 for bi in range(n_batches):
                     start_idx = bi * self.batch_size
                     end_idx = start_idx + self.batch_size
@@ -517,11 +523,12 @@ if __name__ == "__main__":
 
     ds = BlockBasedAnnDataset(
         file_paths=files,
-        batch_size=128,
-        block_size=64,
+        batch_size=64,
+        block_size=16,
+        load_factor=16,
         sparse_keys=["X"],
         metadata={"created_by": "block-based-dataset", "dataset_version": "v1.0"},
         random_seed=73
     )
-    dataloader = DataLoader(ds, batch_size=1, num_workers=16, prefetch_factor=4, collate_fn=pass_through_collate_fn, pin_memory=False, persistent_workers=False)
-    benchmark(dataloader, ds.n_cells, 128)
+    dataloader = DataLoader(ds, batch_size=None, num_workers=12, prefetch_factor=16, collate_fn=pass_through_collate_fn, pin_memory=False, persistent_workers=False)
+    benchmark(dataloader, ds.n_cells, 64)
