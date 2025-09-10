@@ -65,5 +65,8 @@ if __name__ == "__main__":
             is_shuffled=False,
         )
     elif mode == "scl":
-        print("Running with scDataset")
+        print("Running with scDataset streaming")
         scl_train(paths, batch_size=batch_size, num_workers=num_workers, fetch_factor=16)
+    elif mode == "scls":
+        print("Running with scDataset block shuffling")
+        scl_train(paths, batch_size=batch_size, num_workers=num_workers, fetch_factor=16, is_shuffle=True, block_size=4)

@@ -14,7 +14,9 @@ from torch.utils.data import DataLoader
 from protoplast.scrna.anndata.lightning_models import LinearClassifier
 
 
-def train(paths: str, batch_size: int = 64, num_workers: int = 12, fetch_factor: int = 16):
+def train(
+    paths: str, batch_size: int = 64, num_workers: int = 12, fetch_factor: int = 16, is_shuffle=False, block_size=4
+):
     start = time.time()
     adatas = [ad.read_h5ad(f, backed="r") for f in paths if f.endswith("h5ad")]
     for data in adatas:
@@ -48,7 +50,10 @@ def train(paths: str, batch_size: int = 64, num_workers: int = 12, fetch_factor:
     train_idx, test_idx = train_test_split(indices, test_size=0.2, random_state=42)
     print(f"Data splitting time: {time.time() - start:.2f} seconds")
 
-    train_strategy = BlockShuffling(indices=train_idx)
+    if is_shuffle:
+        train_strategy = BlockShuffling(indices=train_idx, block_size=block_size)
+    else:
+        train_strategy = Streaming(indices=train_idx)
     val_strategy = Streaming(indices=test_idx)
     scdata_train = scDataset(
         data_collection=collection,
