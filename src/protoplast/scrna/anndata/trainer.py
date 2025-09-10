@@ -10,6 +10,7 @@ import ray.train.torch
 import torch
 from beartype import beartype
 from lightning.pytorch.strategies import Strategy
+from .strategy import ShuffleStrategy, DefaultShuffleStrategy
 
 import anndata
 
@@ -26,9 +27,7 @@ class RayTrainRunner:
         metadata_cb: Callable[[anndata.AnnData, dict], None] = cell_line_metadata_cb,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
-        splitter: Callable[
-            [list[str], int, float, float, int, Callable[[anndata.AnnData, dict], None], bool], dict
-        ] = ann_split_data,
+        shuffle_strategy: ShuffleStrategy = DefaultShuffleStrategy,
         runtime_env_config: dict | None = None,
         address: str | None = None,
         ray_trainer_strategy: Strategy | None = None,
@@ -38,7 +37,7 @@ class RayTrainRunner:
         self.Ds = Ds
         self.model_keys = model_keys
         self.metadata_cb = metadata_cb
-        self.splitter = splitter
+        self.shuffle_strategy = shuffle_strategy
         self.sparse_keys = sparse_keys
         self.before_dense_cb = before_dense_cb
         self.after_dense_cb = after_dense_cb
@@ -74,15 +73,14 @@ class RayTrainRunner:
         self.prefetch_factor = prefetch_factor
         self.max_epochs = max_epochs
         start = time.time()
-        indices = self.splitter(
-            file_paths,
+        shuffle_stragey = self.shuffle_strategy(file_paths,
             batch_size,
             test_size,
             val_size,
             random_seed,
             metadata_cb=self.metadata_cb,
-            is_shuffled=is_shuffled,
-        )
+            is_shuffled=is_shuffled,)
+        indices = shuffle_stragey.split()
         print(f"Data splitting time: {time.time() - start:.2f} seconds")
         train_config = {"indices": indices, "ckpt_path": ckpt_path}
         if not resource_per_worker:
