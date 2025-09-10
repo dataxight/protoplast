@@ -110,3 +110,6 @@ docs = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/protoplast"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

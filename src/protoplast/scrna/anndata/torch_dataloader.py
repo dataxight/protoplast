@@ -199,30 +199,25 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
     def __init__(
         self,
         file_paths: list[str],
-        batch_size: int,
+        ds_batch_size: int,
         block_size: int,
         load_factor: int,
         sparse_keys: list[str],
-        metadata: dict,
         random_seed: int | None = 42,
+        mode: str = "train"
     ):
         self.files = file_paths
-        self.batch_size = batch_size
+        self.batch_size = ds_batch_size # use ds_ just to not collide with the batch_size argument for loader
         self.block_size = block_size
         self.sparse_keys = sparse_keys
         self.random_seed = random_seed
-
+        self.mode = mode
         if not isinstance(load_factor, int):
             raise ValueError("load_factor must be an integer")
         self.block_group_size = load_factor 
 
         if int(self.block_size * load_factor) % int(self.batch_size) != 0:
             raise ValueError("block_size * load_factor must be divisible by batch_size")
-
-        # Set metadata as instance attributes
-        for k, v in metadata.items():
-            setattr(self, k, v)
-        self.metadata = metadata
         
         # Initialize worker and distributed training info
         worker_info = get_worker_info()
@@ -276,15 +271,15 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
             
     
     @classmethod
-    def create_block_based_ds(
+    def create_distributed_ds(
         cls, 
         file_paths: list[str], 
-        batch_size: int, 
+        ds_batch_size: int, 
         block_size: int, 
         load_factor: int,
         sparse_keys: list[str], 
-        metadata: dict,
-        random_seed: int | None = 42
+        random_seed: int | None = 42,
+        mode: str = "train"
     ):
         """
         Create a BlockBasedAnnDataset instance.
@@ -298,7 +293,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
             metadata: Metadata dictionary to set as instance attributes
             random_seed: Random seed for shuffling block ranges
         """
-        return cls(file_paths, batch_size, block_size, load_factor, sparse_keys, metadata, random_seed)
+        return cls(file_paths, ds_batch_size, block_size, load_factor, sparse_keys, random_seed, mode)
     
     def _process_sparse(self, mat) -> torch.Tensor:
         """Convert sparse matrix to torch tensor."""
@@ -433,31 +428,29 @@ class DistributedCellLineAnnDataset(DistributedAnnDataset):
 class AnnDataModule(pl.LightningDataModule):
     def __init__(
         self,
-        indices: dict,
-        dataset: DistributedAnnDataset,
+        dataset: DistributedAnnDataset | BlockBasedAnnDataset,
         prefetch_factor: int,
-        sparse_keys: list[str],
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
+        **dataset_kwargs,
     ):
         super().__init__()
-        self.indices = indices
         self.dataset = dataset
         num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
         self.loader_config = dict(batch_size=None, num_workers=num_threads, prefetch_factor=prefetch_factor)
-        self.sparse_keys = sparse_keys
         self.before_dense_cb = before_dense_cb
         self.after_dense_cb = after_dense_cb
+        self.dataset_kwargs = dataset_kwargs
 
     def setup(self, stage):
         # this is not necessary but it is here in case we want to download data to local node in the future
         if stage == "fit":
-            self.train_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys)
-            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "val")
+            self.train_ds = self.dataset.create_distributed_ds(**self.dataset_kwargs)
+            self.val_ds = self.dataset.create_distributed_ds(**self.dataset_kwargs, mode="val")
         if stage == "test":
-            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "test")
+            self.val_ds = self.dataset.create_distributed_ds(**self.dataset_kwargs, mode="test")
         if stage == "predict":
-            self.predict_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys)
+            self.predict_ds = self.dataset.create_distributed_ds(**self.dataset_kwargs, mode="predict")
 
     def train_dataloader(self):
         return DataLoader(self.train_ds, **self.loader_config)
