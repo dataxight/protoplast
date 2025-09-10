@@ -7,13 +7,15 @@ import pandas as pd
 import pytest
 import torch
 from scipy.sparse import csr_matrix
+import os
 
 from protoplast.scrna.anndata.torch_dataloader import (
     AnnDataModule,
     DistributedAnnDataset,
-    ann_split_data,
     cell_line_metadata_cb,
 )
+
+from protoplast.scrna.anndata.strategy import DefaultShuffleStrategy
 
 
 @pytest.fixture(scope="function")
@@ -74,11 +76,18 @@ def test_uneven_h5ad_file(tmp_path: pathlib.Path) -> str:
     filepath = tmp_path / "test_uneven.h5ad"
     adata.write_h5ad(filepath)
     return str(filepath)
+    
+@pytest.fixture(scope="module", autouse=True)
+def set_env_vars():
+    os.environ["OMP_NUM_THREADS"] = "1"
 
 
 def test_load_simple(test_even_h5ad_file: str):
-    indices = ann_split_data([test_even_h5ad_file], batch_size=2, test_size=0.0, validation_size=0.0)
-    data_module = AnnDataModule(indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"])
+    strategy = DefaultShuffleStrategy(
+        [test_even_h5ad_file], batch_size=2, mini_batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
+    )
+    indices = strategy.split()
+    data_module = AnnDataModule(indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"], shuffle_stragey=strategy)
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
     for i, data in enumerate(train_loader):
@@ -92,7 +101,10 @@ def test_load_simple(test_even_h5ad_file: str):
 
 
 def test_load_with_tuple(test_even_h5ad_file: str):
-    indices = ann_split_data([test_even_h5ad_file], batch_size=2, test_size=0.0, validation_size=0.0)
+    strategy = DefaultShuffleStrategy(
+        [test_even_h5ad_file], batch_size=2, mini_batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
+    )
+    indices = strategy.split()
 
     class DistributedAnnDatasetWithTuple(DistributedAnnDataset):
         def transform(self, start: int, end: int):
@@ -102,7 +114,7 @@ def test_load_with_tuple(test_even_h5ad_file: str):
             return (X,)
 
     data_module = AnnDataModule(
-        indices=indices, dataset=DistributedAnnDatasetWithTuple, prefetch_factor=2, sparse_keys=["X"]
+        indices=indices, dataset=DistributedAnnDatasetWithTuple, prefetch_factor=2, sparse_keys=["X"], shuffle_stragey=strategy
     )
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
@@ -119,7 +131,10 @@ def test_load_with_tuple(test_even_h5ad_file: str):
 
 
 def test_load_with_dict(test_even_h5ad_file: str):
-    indices = ann_split_data([test_even_h5ad_file], batch_size=2, test_size=0.0, validation_size=0.0)
+    strategy = DefaultShuffleStrategy(
+        [test_even_h5ad_file], batch_size=2, mini_batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
+    )
+    indices = strategy.split()
 
     class DistributedAnnDatasetWithDict(DistributedAnnDataset):
         def transform(self, start: int, end: int):
@@ -129,7 +144,7 @@ def test_load_with_dict(test_even_h5ad_file: str):
             return {"X": X}
 
     data_module = AnnDataModule(
-        indices=indices, dataset=DistributedAnnDatasetWithDict, prefetch_factor=2, sparse_keys=["X"]
+        indices=indices, dataset=DistributedAnnDatasetWithDict, prefetch_factor=2, sparse_keys=["X"], shuffle_stragey=strategy
     )
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
@@ -146,8 +161,11 @@ def test_load_with_dict(test_even_h5ad_file: str):
 
 
 def test_load_uneven(test_uneven_h5ad_file: str):
-    indices = ann_split_data([test_uneven_h5ad_file], batch_size=2, test_size=0.0, validation_size=0.0)
-    data_module = AnnDataModule(indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"])
+    strategy = DefaultShuffleStrategy(
+        [test_uneven_h5ad_file], batch_size=2, mini_batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
+    )
+    indices = strategy.split()
+    data_module = AnnDataModule(indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"], shuffle_stragey=strategy)
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
     for i, data in enumerate(train_loader):
@@ -161,10 +179,11 @@ def test_load_uneven(test_uneven_h5ad_file: str):
 
 
 def test_load_multiple_files(test_even_h5ad_file: str, test_uneven_h5ad_file: str):
-    indices = ann_split_data(
-        [test_even_h5ad_file, test_uneven_h5ad_file], batch_size=2, test_size=0.0, validation_size=0.0
+    strategy = DefaultShuffleStrategy(
+        [test_even_h5ad_file, test_uneven_h5ad_file], batch_size=2, mini_batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
     )
-    data_module = AnnDataModule(indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"])
+    indices = strategy.split()
+    data_module = AnnDataModule(indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"], shuffle_stragey=strategy)
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
     for i, data in enumerate(train_loader):
@@ -185,12 +204,16 @@ def test_load_with_callbacks(test_even_h5ad_file: str):
     def after_dense_cb(x, idx):
         return x / (x.max() + 1)
 
-    indices = ann_split_data([test_even_h5ad_file], batch_size=2, test_size=0.0, validation_size=0.0)
+    strategy = DefaultShuffleStrategy(
+        [test_even_h5ad_file], batch_size=2, mini_batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
+    )
+    indices = strategy.split()
     data_module = AnnDataModule(
         indices=indices,
         dataset=DistributedAnnDataset,
         prefetch_factor=2,
         sparse_keys=["X"],
+        shuffle_stragey=strategy,
         before_dense_cb=before_dense_cb,
         after_dense_cb=after_dense_cb,
     )
@@ -210,14 +233,16 @@ def test_load_with_callbacks(test_even_h5ad_file: str):
 def test_custom_dataset(test_even_h5ad_file: str):
     from protoplast.scrna.anndata.torch_dataloader import DistributedCellLineAnnDataset
 
-    indices = ann_split_data(
-        [test_even_h5ad_file], batch_size=2, test_size=0.0, validation_size=0.0, metadata_cb=cell_line_metadata_cb
+    strategy = DefaultShuffleStrategy(
+        [test_even_h5ad_file], batch_size=2, mini_batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0, metadata_cb=cell_line_metadata_cb
     )
+    indices = strategy.split()
     data_module = AnnDataModule(
         indices=indices,
         dataset=DistributedCellLineAnnDataset,
         prefetch_factor=2,
         sparse_keys=["X"],
+        shuffle_stragey=strategy,
     )
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()

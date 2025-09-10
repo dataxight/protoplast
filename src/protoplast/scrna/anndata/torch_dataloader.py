@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader, get_worker_info
 import anndata
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
 from protoplast.patches.anndata_remote import apply_file_backing_patch
+from .strategy import ShuffleStrategy, SplitInfo
 
 apply_file_backing_patch()
 apply_read_h5ad_backed_patch()
@@ -65,9 +66,19 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             self.ray_rank = 0
             self.ray_size = 1
         self.batches = indices
+        if self.ray_size > 1:
+            # make sure each worker work on different when yielded
+            r = self.ray_rank % len(self.files)
+            self.files = self.files[r:] + self.files[:r]
+        else:
+            r = 0
+        self.file_index_map = {
+            idx: (idx + r) % len(file_paths)
+            for idx in range(len(file_paths))
+        }
 
     @classmethod
-    def create_distributed_ds(cls, indices: dict, sparse_keys: list[str], mode: str = "train"):
+    def create_distributed_ds(cls, indices: SplitInfo, sparse_keys: list[str], mode: str = "train"):
         """
         indices is in the following format
         {
@@ -80,6 +91,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             }
         }
         """
+        indices = indices.to_dict() if isinstance(indices, SplitInfo) else indices
         return cls(indices["files"], indices[f"{mode}_indices"], indices["metadata"], sparse_keys)
 
     def _process_sparse(self, mat) -> torch.Tensor:
@@ -107,17 +119,39 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         if mats[0].shape[0] == 0:
             return None
         return tuple(mats)
+    
+    def get_data(self, start: int, end: int):
+        data = self.transform(start, end)
+        if (type(data) is list) or (type(data) is tuple):
+            for idx in range(len(data[0])):
+                yield tuple(d[idx] for d in data)
+        elif isinstance(data, dict):
+            for idx in range(len(data[next(iter(data))])):
+                yield {k: v[idx] for k, v in data.items()}
+        elif isinstance(data, torch.Tensor):
+            for idx in range(data.shape[0]):
+                yield data[idx]
+        else:
+            raise ValueError("Unsupported data type")
+    
+
+    def __len__(self):
+        return sum(
+            end-start 
+            for i in range(len(self.files)) 
+            for start,end in self.batches[i] 
+        )
 
     def __iter__(self):
-        gidx = 0
+        global_rank = self.ray_rank * self.nworkers + self.wid
+        total_workers = self.ray_size * self.nworkers
+
         for fidx, f in enumerate(self.files):
+            orig_idx = self.file_index_map[fidx]
             self.ad = anndata.read_h5ad(f, backed="r")
-            for start, end in self.batches[fidx]:
-                if gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid:
-                    data = self.transform(start, end)
-                    if data is not None:
-                        yield self.transform(start, end)
-                gidx += 1
+            for lidx, (start, end) in enumerate(self.batches[orig_idx]):
+                if lidx % total_workers == global_rank:
+                    yield from self.get_data(start, end)
 
 
 class DistributedCellLineAnnDataset(DistributedAnnDataset):
@@ -143,6 +177,7 @@ class AnnDataModule(pl.LightningDataModule):
         dataset: DistributedAnnDataset,
         prefetch_factor: int,
         sparse_keys: list[str],
+        shuffle_stragey: ShuffleStrategy,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
     ):
@@ -150,7 +185,14 @@ class AnnDataModule(pl.LightningDataModule):
         self.indices = indices
         self.dataset = dataset
         num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
-        self.loader_config = dict(batch_size=None, num_workers=num_threads, prefetch_factor=prefetch_factor)
+        self.loader_config = dict(
+            batch_size=shuffle_stragey.mini_batch_size, 
+            num_workers=num_threads, 
+            prefetch_factor=prefetch_factor, 
+            collate_fn=shuffle_stragey.mixer, 
+            persistent_workers=True,
+            drop_last=True,
+        )
         self.sparse_keys = sparse_keys
         self.before_dense_cb = before_dense_cb
         self.after_dense_cb = after_dense_cb

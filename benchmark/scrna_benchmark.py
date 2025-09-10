@@ -57,12 +57,12 @@ if __name__ == "__main__":
         )
         trainer.train(
             paths,
+            mini_batch_size=batch_size // 10,
             thread_per_worker=thread_per_worker,
             batch_size=batch_size,
             num_workers=num_workers,
             test_size=0.0,
             val_size=0.2,
-            is_shuffled=False,
         )
     elif mode == "scl":
         print("Running with scDataset streaming")
