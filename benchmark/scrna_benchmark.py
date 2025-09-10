@@ -14,7 +14,11 @@ if __name__ == "__main__":
     thread_per_worker = int(sys.argv[3])
     batch_size = int(sys.argv[4])
     num_workers = int(sys.argv[5])
-    paths = os.listdir(tahoe_dir)
+    if os.path.isfile(tahoe_dir):
+        paths = [tahoe_dir]
+    else:
+        paths = os.listdir(tahoe_dir)
+
     paths = [os.path.join(tahoe_dir, p) for p in paths if p.endswith(".h5ad")]
     if mode == "null":
         print("Running null model")
@@ -62,4 +66,4 @@ if __name__ == "__main__":
         )
     elif mode == "scl":
         print("Running with scDataset")
-        scl_train(paths, batch_size=batch_size, num_workers=num_workers, fetch_factor=4)
+        scl_train(paths, batch_size=batch_size, num_workers=num_workers, fetch_factor=16)

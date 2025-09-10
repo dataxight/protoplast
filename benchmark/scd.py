@@ -1,9 +1,11 @@
+import time
+
 import anndata as ad
 import numpy as np
 import torch
 from anndata.experimental import AnnCollection
 from lightning.pytorch import Trainer
-from scdataset import Streaming, scDataset
+from scdataset import BlockShuffling, Streaming, scDataset
 from scipy import sparse
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
@@ -13,6 +15,7 @@ from protoplast.scrna.anndata.lightning_models import LinearClassifier
 
 
 def train(paths: str, batch_size: int = 64, num_workers: int = 12, fetch_factor: int = 16):
+    start = time.time()
     adatas = [ad.read_h5ad(f, backed="r") for f in paths if f.endswith("h5ad")]
     for data in adatas:
         data.obs = data.obs[["cell_line"]]
@@ -20,6 +23,7 @@ def train(paths: str, batch_size: int = 64, num_workers: int = 12, fetch_factor:
     collection = AnnCollection(adatas)
     cell_line_encoder = LabelEncoder()
     cell_line_encoder.fit(collection.obs["cell_line"].values)
+    print(f"Data loading time: {time.time() - start:.2f} seconds")
 
     def fetch_transform(batch):
         # Materialize the AnnData batch (X matrix) in memory
@@ -38,11 +42,13 @@ def train(paths: str, batch_size: int = 64, num_workers: int = 12, fetch_factor:
 
     indices = np.arange(collection.n_obs)
 
+    start = time.time()
     # Stratified train/test split on cell_line
     print("Splitting data into train and test sets")
     train_idx, test_idx = train_test_split(indices, test_size=0.2, random_state=42)
+    print(f"Data splitting time: {time.time() - start:.2f} seconds")
 
-    train_strategy = Streaming(indices=train_idx)
+    train_strategy = BlockShuffling(indices=train_idx)
     val_strategy = Streaming(indices=test_idx)
     scdata_train = scDataset(
         data_collection=collection,
@@ -83,3 +89,4 @@ def train(paths: str, batch_size: int = 64, num_workers: int = 12, fetch_factor:
     trainer = Trainer(max_epochs=1)
     print("Starting training")
     trainer.fit(model, train_loader, val_loader)
+    print(trainer.callback_metrics)

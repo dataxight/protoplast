@@ -1,4 +1,5 @@
 import os
+import time
 from collections.abc import Callable, Iterable
 
 import lightning.pytorch as pl
@@ -54,12 +55,12 @@ class RayTrainRunner:
     def train(
         self,
         file_paths: list[str],
-        thread_per_worker: int,
         batch_size: int,
         test_size: float,
         val_size: float,
         prefetch_factor: int = 4,
         max_epochs: int = 1,
+        thread_per_worker: int | None = None,
         num_workers: int | None = None,
         result_storage_path: str = "~/protoplast_results",
         # read more here: https://lightning.ai/docs/pytorch/stable/common/trainer.html#fit
@@ -72,6 +73,7 @@ class RayTrainRunner:
         self.result_storage_path = result_storage_path
         self.prefetch_factor = prefetch_factor
         self.max_epochs = max_epochs
+        start = time.time()
         indices = self.splitter(
             file_paths,
             batch_size,
@@ -81,8 +83,12 @@ class RayTrainRunner:
             metadata_cb=self.metadata_cb,
             is_shuffled=is_shuffled,
         )
+        print(f"Data splitting time: {time.time() - start:.2f} seconds")
         train_config = {"indices": indices, "ckpt_path": ckpt_path}
         if not resource_per_worker:
+            if not thread_per_worker:
+                print("Setting thread_per_worker to half of the available CPUs capped at 4")
+                thread_per_worker = min(int(self.resources.get("CPU", 1) / 2), 4)
             resource_per_worker = {"CPU": thread_per_worker}
         if is_gpu:
             if num_workers is None:
