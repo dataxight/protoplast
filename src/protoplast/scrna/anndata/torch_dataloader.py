@@ -512,7 +512,7 @@ if __name__ == "__main__":
     
         return samples_per_sec, time_per_sample, batch_times
 
-    def asis_collate_fn(batch):
+    def pass_through_collate_fn(batch):
         return batch[0]
 
     ds = BlockBasedAnnDataset(
@@ -523,5 +523,5 @@ if __name__ == "__main__":
         metadata={"created_by": "block-based-dataset", "dataset_version": "v1.0"},
         random_seed=73
     )
-    dataloader = DataLoader(ds, batch_size=1, num_workers=16, prefetch_factor=4, collate_fn=asis_collate_fn, pin_memory=False, persistent_workers=False)
+    dataloader = DataLoader(ds, batch_size=1, num_workers=16, prefetch_factor=4, collate_fn=pass_through_collate_fn, pin_memory=False, persistent_workers=False)
     benchmark(dataloader, ds.n_cells, 128)
