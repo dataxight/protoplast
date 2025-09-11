@@ -309,7 +309,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
 
 
     def _is_sparse(self, mat):
-        return isinstance(mat, anndata._core.sparse_dataset._CSRDataset) or sp.isparse(mat)
+        return isinstance(mat, anndata._core.sparse_dataset._CSRDataset) or sp.issparse(mat)
 
     def _process_sparse2(self, mat, start, end):
         if self._is_sparse(mat):
@@ -367,9 +367,9 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         adata = self.adatas[file_idx]
         if "." in sparse_key:
             attr, attr_k = sparse_key.split(".")
-            mat = getattr(adata, attr)[attr_k][start:end]
+            mat = self._process_sparse2(getattr(adata, attr)[attr_k], start, end)
         else:
-            mat = getattr(adata, sparse_key)[start:end]
+            mat = self._process_sparse2(getattr(adata, sparse_key), start, end)
         # just in case it is a dense matrix, convert it to a sparse matrix
         mat = sp.csr_matrix(mat)
         return mat
@@ -459,8 +459,8 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                     start_idx = bi * self.batch_size
                     end_idx = start_idx + self.batch_size
                     
-                    #batch_data = X[start_idx:end_idx, :]
-                    yield self._process_sparse2(X, start_idx, end_idx)
+                    batch_data = X[start_idx:end_idx, :]
+                    yield batch_data
             
             gidx += 1
 
