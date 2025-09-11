@@ -20,7 +20,7 @@ class LinearClassifier(pl.LightningModule):
         x, y = batch
         logits = self.model(x)
         loss = self.loss_fn(logits, y)
-        self.log("train_loss", loss, on_step=True, prog_bar=True)
+        self.log("train_loss", loss, on_step=True, prog_bar=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):

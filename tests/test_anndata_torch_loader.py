@@ -16,6 +16,7 @@ from protoplast.scrna.anndata.torch_dataloader import (
 )
 
 from protoplast.scrna.anndata.strategy import DefaultShuffleStrategy
+from torch.utils.data import DataLoader
 
 
 @pytest.fixture(scope="function")
@@ -27,7 +28,7 @@ def test_even_h5ad_file(tmpdir: pathlib.Path) -> str:
     #  [0, 3, 0, 4, 0],
     #  [5, 0, 0, 0, 0]]
     n_obs = 4
-    n_vars = 5
+    n_vars = 6
 
     indptr = np.array([0, 2, 2, 4, 5])
     indices = np.array([0, 2, 1, 3, 0])
@@ -76,10 +77,111 @@ def test_uneven_h5ad_file(tmp_path: pathlib.Path) -> str:
     filepath = tmp_path / "test_uneven.h5ad"
     adata.write_h5ad(filepath)
     return str(filepath)
+
+@pytest.fixture
+def test_h5ad_plate(tmp_path: pathlib.Path):
+    """
+    Factory fixture to create a test h5ad file with uneven data.
+    Usage: filepath = test_uneven_h5ad_file(plate_no=2)
+    """
+    def _make(plate_no: int = 1) -> str:
+        # Dense matrix with uneven sparsity
+        dense = np.array(
+            [
+                [1, 0, 2, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0],
+                [0, 3, 0, 4, 0, 0],
+                [5, 0, 0, 0, 0, 6],
+                [0, 7, 8, 0, 0, 0],
+                [0, 0, 0, 0, 9, 0],
+                [10, 0, 11, 12, 0, 0],
+                [0, 0, 0, 0, 0, 13],
+                [14, 0, 0, 0, 15, 0],
+                [0, 16, 0, 0, 0, 0],
+                [0, 16, 0, 0, 0, 0],
+            ],
+            dtype=np.float32,
+        )
+
+        n_obs, n_vars = dense.shape
+        X = csr_matrix(dense)
+
+        # Annotate cells and genes with specified plate_no
+        obs = pd.DataFrame(
+            {"plate": [plate_no] * n_obs},
+            index=[f"cell_{i}" for i in range(n_obs)]
+        )
+        var = pd.DataFrame(index=[f"gene_{i}" for i in range(n_vars)])
+        adata = ad.AnnData(X=X, obs=obs, var=var)
+
+        # Write to tmp_path
+        filepath = tmp_path / f"test_uneven_plate{plate_no}.h5ad"
+        adata.write_h5ad(filepath)
+        return str(filepath)
+
+    return _make
     
 @pytest.fixture(scope="module", autouse=True)
 def set_env_vars():
     os.environ["OMP_NUM_THREADS"] = "1"
+
+def test_entropy(test_h5ad_plate):
+    # Create two test files with different plate numbers
+    file1 = test_h5ad_plate(plate_no=1)
+    file2 = test_h5ad_plate(plate_no=2)
+    file3 = test_h5ad_plate(plate_no=3)
+
+    paths = [file1, file2, file3]
+
+    batch_size = 3
+    total_workers = 2
+    prefetch_factor = 2
+    mini_batch_size = 3
+
+    shuffle_strategy = DefaultShuffleStrategy(
+        paths,
+        batch_size,
+        mini_batch_size=mini_batch_size,
+        total_workers=total_workers,
+        test_size=0.0,
+        validation_size=0.0,
+        is_shuffled=True,
+    )
+    
+    indices = shuffle_strategy.split()
+
+    class BenchmarkDistributedAnnDataset(DistributedAnnDataset):
+        def transform(self, start: int, end: int):
+            X = super().transform(start, end)
+            plate = self.ad.obs["plate"].iloc[start:end]
+            if X is None:
+                return None
+            return X, plate
+    
+    # Initialize dataset and dataloader
+    dataset = BenchmarkDistributedAnnDataset(
+        file_paths=paths,
+        indices=indices.train_indices,
+        metadata=indices.metadata,
+        sparse_keys=["X"],
+    )
+    
+    dataloader = DataLoader(
+        dataset,
+        batch_size=shuffle_strategy.mini_batch_size,
+        num_workers=total_workers,
+        prefetch_factor=prefetch_factor + 1,
+        collate_fn=shuffle_strategy.mixer,
+    )
+    total_n  = 0
+    for batch in dataloader:
+        X, plates = batch
+        assert isinstance(X, torch.Tensor)
+        assert isinstance(plates, list) or isinstance(plates, np.ndarray) or isinstance(plates, torch.Tensor)
+        assert X.shape[0] == len(plates)
+        assert len(np.unique(plates)) > 1
+        total_n += 1
+    assert (sum(end - start for fidxes in indices.train_indices for start, end in fidxes) / mini_batch_size) == total_n
 
 
 def test_load_simple(test_even_h5ad_file: str):
@@ -190,7 +292,7 @@ def test_load_multiple_files(test_even_h5ad_file: str, test_uneven_h5ad_file: st
         data = data_module.on_after_batch_transfer(data, i)
         n, m = data.shape
         assert n > 0
-        assert m > 0
+        assert m == 6
         assert isinstance(data, torch.Tensor)
         assert not data.is_sparse
         assert not data.is_sparse_csr

@@ -169,7 +169,7 @@ class DefaultShuffleStrategy(ShuffleStrategy):
 
             # Sparse tensor
             if isinstance(sample, torch.Tensor) and (sample.is_sparse or sample.is_sparse_csr):
-                return torch.vstack(items)
+                return torch.stack(items)
 
             # Dense tensor
             elif isinstance(sample, torch.Tensor):

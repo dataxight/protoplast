@@ -32,6 +32,7 @@ class RayTrainRunner:
         address: str | None = None,
         ray_trainer_strategy: Strategy | None = None,
         sparse_keys: Iterable[str] = ("X",),
+        max_open_files: int = 3
     ):
         self.Model = Model
         self.Ds = Ds
@@ -41,6 +42,7 @@ class RayTrainRunner:
         self.sparse_keys = sparse_keys
         self.before_dense_cb = before_dense_cb
         self.after_dense_cb = after_dense_cb
+        self.max_open_files = max_open_files
         if not ray_trainer_strategy:
             self.ray_trainer_strategy = ray.train.lightning.RayDDPStrategy()
         else:
