@@ -252,3 +252,32 @@ def test_block_based_dataset(test_even_h5ad_file: str):
         assert isinstance(data, torch.Tensor)
         assert not data.is_sparse
         assert not data.is_sparse_csr
+        
+        
+def test_process_sparse2(tmpdir: pathlib.Path):
+    for i in range(10):
+        # Create a random dense matrix
+        dense_matrix = np.random.randint(0, 10, size=(200, 200))
+
+        # Convert to CSR sparse matrix
+        sparse_matrix = csr_matrix(dense_matrix)
+        
+        # Create as anndata object
+        adata = ad.AnnData(X=sparse_matrix)
+        
+        filepath = str(tmpdir / "test.h5ad")
+        adata.write_h5ad(filepath)
+
+        data_module = AnnDataModule(dataset=BlockBasedAnnDataset, prefetch_factor=2, sparse_keys=["X"], file_paths=[filepath],
+                                    ds_batch_size=2,
+                                    block_size=2,
+                                    load_factor=2
+        )
+        data_module.setup(stage="fit")
+        
+        start = np.random.randint(1, 50)
+        end = np.random.randint(150, 200)
+        subset_sparse = data_module.train_ds._process_sparse2(adata.X, start, end)
+        
+        # Verify that this is correct
+        assert np.array_equal(subset_sparse.todense(), adata.X[start : end].todense())
