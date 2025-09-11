@@ -10,6 +10,8 @@ import scipy.sparse as sp
 import torch
 import torch.distributed as td
 from torch.utils.data import DataLoader, get_worker_info
+import anndata
+import scipy as scp 
 
 import anndata
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
@@ -304,6 +306,57 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                 mat.shape,
             )
         return torch.from_numpy(mat).float()
+
+
+    def _is_sparse(self, mat):
+        return isinstance(mat, anndata._core.sparse_dataset._CSRDataset) or sp.isparse(mat)
+
+    def _process_sparse2(self, mat, start, end):
+        if self._is_sparse(mat):
+            sampling_indices = range(start, end)
+
+            # List of pointers to indicate number of non-zero values for each row
+            # in a sparse matrix
+            indptr = torch.zeros(len(sampling_indices) + 1).long()
+        
+            if isinstance(mat, scp.sparse._csr.csr_matrix):
+                mat_indptr = mat.indptr
+                mat_indices = mat.indices
+                mat_data = mat.data        
+            else:
+                mat_indptr = mat._indptr
+                mat_indices = mat._indices
+                mat_data = mat._data
+            
+            # First pass compute indptr of the rows for pin-point non-zero columns in that row
+            total_non_zeros = 0
+            for i, row_num in enumerate(sampling_indices):
+                # End index of the current row in indptr
+                indptr[i + 1] = indptr[i] + (mat_indptr[row_num + 1] - mat_indptr[row_num])
+            
+                total_non_zeros += (indptr[i + 1] - indptr[i])
+            
+            # List of indices of non-zero columns in the rows and the data of those columns
+            indices = torch.zeros(total_non_zeros).long()
+            data = torch.zeros(total_non_zeros).float()
+            shape = (len(sampling_indices), mat.shape[1])
+
+            for i, row_num in enumerate(sampling_indices):
+                # Column indices of non-zero val within the current row
+                indices[indptr[i]:indptr[i+1]] = torch.from_numpy(mat_indices[mat_indptr[row_num]:mat_indptr[row_num+1]])
+                
+                # Data of non-zero
+                data[indptr[i]:indptr[i+1]] = torch.from_numpy(mat_data[mat_indptr[row_num]:mat_indptr[row_num+1]])
+            
+            sparse_mat = torch.sparse_csr_tensor(
+                indptr,
+                indices,
+                data,
+                shape,
+            )
+            return sparse_mat
+        
+        return torch.from_numpy(mat[start:end, :]).float()
     
     def _get_mat_by_range(self, file_idx: int, start: int, end: int, sparse_key: str | None = None):
         """Helper function to get random items from a file
@@ -406,8 +459,8 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                     start_idx = bi * self.batch_size
                     end_idx = start_idx + self.batch_size
                     
-                    batch_data = X[start_idx:end_idx, :]
-                    yield self._process_sparse(batch_data)
+                    #batch_data = X[start_idx:end_idx, :]
+                    yield self._process_sparse2(X, start_idx, end_idx)
             
             gidx += 1
 
