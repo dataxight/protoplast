@@ -29,7 +29,7 @@ def pass_through_collate_fn(batch):
     return batch[0]
 
 def main():
-    files = glob.glob("/home/tphan/Softwares/protoplast/notebooks/competition_support_set/*.h5")
+    files = glob.glob("/mnt/hdd2/tan/tahoe100m/plate7_filt_Vevo_Tahoe100M_WServicesFrom_ParseGigalab.h5ad")
     ds = BlockBasedAnnDataset(
         file_paths=files,
         ds_batch_size=64,

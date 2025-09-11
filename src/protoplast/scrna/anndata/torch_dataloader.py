@@ -375,6 +375,13 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         mat = sp.csr_matrix(mat)
         return mat
 
+    def transform(self, X: torch.Tensor, cell_idx: np.ndarray):
+        """
+        X: torch.Tensor
+        cell_idx: np.ndarray each item is a tuple of (file_idx, cell_idx)
+        """
+        return X
+
     def __iter__(self):
         gidx = 0
 
@@ -388,6 +395,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         for i in range(0, len(self.block_ranges), self.block_group_size):
             if gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid:
                 mats = []
+                cell_idx = [] # each item is a tuple of (file_idx, cell_idx)
                 
                 # Collect block_group_size worth of data
                 for j in range(self.block_group_size):
@@ -395,6 +403,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                         break
                         
                     file_idx, start, end = self.block_ranges[i + j]
+                    cell_idx += [(file_idx, cell_idx) for cell_idx in range(start, end)]
                     
                     # Get data for each sparse key and stack them
                     block_mats = []
@@ -441,7 +450,9 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                         # Get the padding data using the first sparse key
                         k = self.sparse_keys[0]
                         X_r = self._get_mat_by_range(rfi, rstart, rstart + chunk_size, k)
-                        
+
+                        cell_idx += [(rfi, cell_idx) for cell_idx in range(rstart, rstart + chunk_size)]
+
                         padding_mats.append(X_r)
                         remaining_padding -= chunk_size
                     
@@ -455,13 +466,14 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                 # shuffle X
                 ridx = np.random.permutation(X.shape[0])
                 X = X[ridx, :]
+                cell_idx = np.array(cell_idx)[ridx]
                 n_batches = (self.block_size * self.block_group_size) // self.batch_size
                 for bi in range(n_batches):
                     start_idx = bi * self.batch_size
                     end_idx = start_idx + self.batch_size
                     
                     batch_data = X[start_idx:end_idx, :]
-                    yield batch_data
+                    yield self.transform(batch_data, cell_idx[start_idx:end_idx])
             
             gidx += 1
 
