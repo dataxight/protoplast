@@ -105,7 +105,7 @@ def save_results_to_csv(results, filepath=None):
     
     return df
 
-def run(batch_size, mini_batch_size, num_workers, prefetch_factor, paths, test_time):
+def run(batch_size, mini_batch_size, num_workers, prefetch_factor, paths, test_time, max_open_file):
     # Initialize shuffle strategy and split data
     shuffle_strategy = DefaultShuffleStrategy(
         paths,
@@ -133,6 +133,7 @@ def run(batch_size, mini_batch_size, num_workers, prefetch_factor, paths, test_t
         indices=indices.train_indices,
         metadata=indices.metadata,
         sparse_keys=["X"],
+        max_open_files=max_open_file
     )
     
     dataloader = DataLoader(
@@ -151,6 +152,7 @@ def run(batch_size, mini_batch_size, num_workers, prefetch_factor, paths, test_t
         "batch_size": batch_size,
         "mini_batch_size": mini_batch_size,
         "num_workers": num_workers,
+        "max_open_files": max_open_file,
         **results
     }
 
@@ -168,17 +170,19 @@ def main():
     else:
         paths = os.listdir(args.path)
     paths = [os.path.join(args.path, p) for p in paths if p.endswith(".h5ad")]
-    batch_size = [500, 1000, 2000]
-    mini_batch_size = [100, 200, 250]
-    num_workers = [4, 8, 16]
-    prefetch_factor = 8
+    batch_size = [1000, 2000, 4000]
+    mini_batch_size = [200, 400, 600]
+    num_workers = [2, 4, 8]
+    max_open_files = [6, 9, 12]
+    prefetch_factor = 4
     results = []
     for batch_size in batch_size:
         for mini_batch_size in mini_batch_size:
-            for num_workers in num_workers:
-                print(f"Running benchmark with batch_size={batch_size}, mini_batch_size={mini_batch_size}, num_workers={num_workers}, prefetch_factor={prefetch_factor}")
-                results.append(run(batch_size, mini_batch_size, num_workers, prefetch_factor, paths, args.test_time))
-                save_results_to_csv(results, args.output_csv)
+            for num_worker in num_workers:
+                for max_open_file in max_open_files:
+                    print(f"Running benchmark with batch_size={batch_size}, mini_batch_size={mini_batch_size}, num_workers={num_worker}, prefetch_factor={prefetch_factor}, max_open_file={max_open_file}")
+                    results.append(run(batch_size, mini_batch_size, num_worker, prefetch_factor, paths, args.test_time, max_open_file))
+                    save_results_to_csv(results, args.output_csv)
 
 if __name__ == "__main__":
     main()
