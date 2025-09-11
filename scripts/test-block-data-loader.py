@@ -29,15 +29,15 @@ def pass_through_collate_fn(batch):
     return batch[0]
 
 def main():
-    files = glob.glob("notebooks/competition_support_set/*.h5")
+    files = glob.glob("/home/tphan/Softwares/protoplast/notebooks/competition_support_set/*.h5")
     ds = BlockBasedAnnDataset(
         file_paths=files,
-        ds_batch_size=128,
+        ds_batch_size=64,
         block_size=32,
         load_factor=32,
         sparse_keys=["X"]
     )
-    dataloader = DataLoader(ds, batch_size=None, num_workers=16, prefetch_factor=16, collate_fn=pass_through_collate_fn, pin_memory=False, persistent_workers=False)
+    dataloader = DataLoader(ds, batch_size=None, num_workers=32, prefetch_factor=16, collate_fn=pass_through_collate_fn, pin_memory=False, persistent_workers=False)
     benchmark(dataloader, ds.n_cells, 64)
 
 if __name__ == "__main__":

@@ -205,6 +205,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         mode: str = "train"
     ):
         self.files = file_paths
+        self.adatas = []
         self.batch_size = ds_batch_size # use ds_ just to not collide with the batch_size argument for loader
         self.block_size = block_size
         self.sparse_keys = sparse_keys
@@ -309,10 +310,8 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         this is in case we need to create padding data
         """
         mat = None
-        # Since PyTorch seems to adopt lazy way of initializing workers, 
-        # this means that the actual file opening has to happen inside of the__getitem__function of the Dataset wrapper. 
-        # refer to https://stackoverflow.com/questions/46045512/h5py-hdf5-database-randomly-returning-nans-and-near-very-small-data-with-multi/52438133#52438133
-        adata = anndata.read_h5ad(self.files[file_idx], backed="r")
+        
+        adata = self.adatas[file_idx]
         if "." in sparse_key:
             attr, attr_k = sparse_key.split(".")
             mat = getattr(adata, attr)[attr_k][start:end]
@@ -324,7 +323,13 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         gidx = 0
-        
+
+        # Since PyTorch seems to adopt lazy way of initializing workers, 
+        # this means that the actual file opening has to happen inside of the__getitem__function of the Dataset wrapper. 
+        # refer to https://stackoverflow.com/questions/46045512/h5py-hdf5-database-randomly-returning-nans-and-near-very-small-data-with-multi/52438133#52438133
+        for file in self.files:
+            self.adatas.append(anndata.read_h5ad(file, backed="r"))
+
         # Process blocks in groups of block_group_size
         for i in range(0, len(self.block_ranges), self.block_group_size):
             if gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid:
