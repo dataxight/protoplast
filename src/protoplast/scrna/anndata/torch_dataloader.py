@@ -348,12 +348,13 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                 # Data of non-zero
                 data[indptr[i]:indptr[i+1]] = torch.from_numpy(mat_data[mat_indptr[row_num]:mat_indptr[row_num+1]])
             
-            sparse_mat = torch.sparse_csr_tensor(
-                indptr,
-                indices,
-                data,
-                shape,
-            )
+            # sparse_mat = torch.sparse_csr_tensor(
+            #     indptr,
+            #     indices,
+            #     data,
+            #     shape,
+            # )
+            sparse_mat = sp.csr_matrix((data, indices, indptr), shape = shape)
             return sparse_mat
         
         return torch.from_numpy(mat[start:end, :]).float()
