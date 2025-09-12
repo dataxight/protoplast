@@ -89,6 +89,76 @@ def ann_split_data(
     )
 
 
+def is_sparse(mat):
+    return isinstance(mat, anndata._core.sparse_dataset._CSRDataset) or sp.issparse(mat)
+
+
+def slice_sparse(mat, start, end):
+    """
+    Extracts a slice of rows from a (potentially sparse) matrix and returns it as a SciPy CSR sparse matrix.
+
+    This function efficiently slices a subset of rows from a sparse matrix (either a SciPy CSR matrix or an
+    AnnData-backed sparse dataset) and returns the result as a new CSR matrix. If the input is not sparse, it
+    slices the dense matrix and converts the result to CSR format.
+
+    Parameters
+    ----------
+    mat : scipy.sparse.csr_matrix, anndata._core.sparse_dataset._CSRDataset, or np.ndarray
+        The input matrix to slice. Can be a SciPy CSR sparse matrix, an AnnData-backed sparse dataset,
+        or a dense NumPy array.
+    start : int
+        The starting row index (inclusive) for the slice.
+    end : int
+        The ending row index (exclusive) for the slice.
+
+    Returns
+    -------
+    scipy.sparse.csr_matrix
+        A CSR sparse matrix containing the selected rows from the input matrix.
+    """
+    if is_sparse(mat):
+        sampling_indices = range(start, end)
+
+        # List of pointers to indicate number of non-zero values for each row
+        # in a sparse matrix
+        indptr = torch.zeros(len(sampling_indices) + 1).long()
+    
+        if isinstance(mat, sp._csr.csr_matrix):
+            mat_indptr = mat.indptr
+            mat_indices = mat.indices
+            mat_data = mat.data        
+        else:
+            mat_indptr = mat._indptr
+            mat_indices = mat._indices
+            mat_data = mat._data
+        
+        # First pass compute indptr of the rows for pin-point non-zero columns in that row
+        total_non_zeros = 0
+        for i, row_num in enumerate(sampling_indices):
+            # End index of the current row in indptr
+            indptr[i + 1] = indptr[i] + (mat_indptr[row_num + 1] - mat_indptr[row_num])
+        
+            total_non_zeros += (indptr[i + 1] - indptr[i])
+        
+        # List of indices of non-zero columns in the rows and the data of those columns
+        indices = torch.zeros(total_non_zeros).long()
+        data = torch.zeros(total_non_zeros).float()
+        shape = (len(sampling_indices), mat.shape[1])
+
+        for i, row_num in enumerate(sampling_indices):
+            # Column indices of non-zero val within the current row
+            indices[indptr[i]:indptr[i+1]] = torch.from_numpy(mat_indices[mat_indptr[row_num]:mat_indptr[row_num+1]])
+            
+            # Data of non-zero
+            data[indptr[i]:indptr[i+1]] = torch.from_numpy(mat_data[mat_indptr[row_num]:mat_indptr[row_num+1]])
+        
+        sparse_mat = sp.csr_matrix((data, indices, indptr), shape = shape)
+        return sparse_mat
+    
+    # If it is not a sparse matrix, slice and convert to sparse matrix
+    return sp.csr_matrix(mat[start:end, :])
+
+
 def cell_line_metadata_cb(ad: anndata.AnnData, metadata: dict):
     """
     Example callback for adding cell line metadata when you use this
