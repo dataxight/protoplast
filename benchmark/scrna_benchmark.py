@@ -54,6 +54,7 @@ if __name__ == "__main__":
             Dcl,  # replace with your own Dataset
             ["num_genes", "num_classes"],  # change according to what you need for your model
             cell_line_metadata_cb,  # include data you need for your dataset
+            max_open_files=12
         )
         trainer.train(
             paths,
