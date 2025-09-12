@@ -307,6 +307,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
 
     def _append_obs_master(self, ad: anndata.AnnData):
         if len(self.obs_keys) == 0:
+            # by default, we add the barcodes column if no obs_keys are provided
             to_append = pd.DataFrame({"barcodes": ad.obs_names})
         else:
             to_append = ad.obs[self.obs_keys]

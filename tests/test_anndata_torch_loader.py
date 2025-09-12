@@ -256,6 +256,7 @@ def test_block_based_dataset(test_even_h5ad_file: str):
         assert not X.is_sparse
         assert not X.is_sparse_csr
         assert isinstance(obs_data, dict)
+        # by default, we add the barcodes column
         assert "barcodes" in obs_data
         assert len(obs_data["barcodes"]) == 2
 
