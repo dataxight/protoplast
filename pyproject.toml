@@ -63,6 +63,9 @@ rules.TY029 = "ignore"  # Ignore invalid-return-type in tests.
 
 [tool.ruff]
 line-length = 120
+exclude = [
+  "**/*.ipynb",
+]
 
 [tool.ruff.lint]
 select = [
@@ -76,6 +79,8 @@ select = [
 
 [tool.uv]
 package = true
+
+
 
 
 [build-system]
