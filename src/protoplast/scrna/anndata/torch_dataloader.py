@@ -202,7 +202,7 @@ class DistributedCellLineAnnDataset(DistributedAnnDataset):
     """
 
     def transform(self, ad: anndata.AnnData, start: int, end: int):
-        X = super().transform(start, end)
+        X = super().transform(ad, start, end)
         if X is None:
             return None
         line_ids = ad.obs["cell_line"].iloc[start:end]
