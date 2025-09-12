@@ -1,12 +1,12 @@
-import glob
-import time
 import argparse
+import glob
+import os
+import time
 
 import anndata as ad
+import psutil
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import psutil
-import os
 
 from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset, ann_split_data
 
@@ -25,7 +25,7 @@ def get_total_memory_mb() -> float:
     return total_mem / 1024**2
 
 
-def benchmark(loader, n_samples, batch_size, max_iteration=None, warmup_iteration=100):
+def benchmark(loader, n_samples, batch_size, max_iteration=None, warmup_iteration=100, sampling_memory_step=5):
     if max_iteration is None:
         # if no max_iteration is provided, we run for the entire dataset
         max_iteration = n_samples // batch_size
@@ -40,7 +40,8 @@ def benchmark(loader, n_samples, batch_size, max_iteration=None, warmup_iteratio
     for i, _batch in tqdm(enumerate(loader_iter), total=max_iteration):
         batch_times.append(time.time() - batch_time)
         batch_time = time.time()
-        peak_memory = max(peak_memory, get_total_memory_mb())
+        if i % sampling_memory_step == 0:
+            peak_memory = max(peak_memory, get_total_memory_mb())
         if i == max_iteration:
             break
 
@@ -60,7 +61,20 @@ def main():
     parser.add_argument("data_glob", type=str, help="glob pattern of the h5 files")
     parser.add_argument("--batch_size", dest="batch_size", default=64, type=int)
     parser.add_argument("--n_workers", dest="n_workers", default=32, type=int)
-    parser.add_argument("--warmup_iter", dest="warmup_iteration", default=100, type=int, help="# of first iterations will be ignored when benchmarking")
+    parser.add_argument(
+        "--warmup_iter",
+        dest="warmup_iteration",
+        default=100,
+        type=int,
+        help="# of first iterations will be ignored when benchmarking",
+    )  # noqa: E501
+    parser.add_argument(
+        "--sampling_memory_step",
+        dest="sampling_memory_step",
+        default=5,
+        type=int,
+        help="# of iterations between sampling memory",
+    )  # noqa: E501
     args = parser.parse_args()
 
     print("=== PARAMETERS ===")
@@ -91,7 +105,12 @@ def main():
         persistent_workers=False,
     )
     samples_per_sec, time_per_sample, batch_times, peak_memory = benchmark(
-        dataloader, n_cells, args.batch_size, max_iteration=10000, warmup_iteration=args.warmup_iteration
+        dataloader,
+        n_cells,
+        args.batch_size,
+        max_iteration=10000,
+        warmup_iteration=args.warmup_iteration,
+        sampling_memory_step=args.sampling_memory_step,
     )
 
     print("=== RESULT ===")
