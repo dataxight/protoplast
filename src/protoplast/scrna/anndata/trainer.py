@@ -10,10 +10,10 @@ import ray.train.torch
 import torch
 from beartype import beartype
 from lightning.pytorch.strategies import Strategy
-from .strategy import ShuffleStrategy, DefaultShuffleStrategy
 
 import anndata
 
+from .strategy import DefaultShuffleStrategy, ShuffleStrategy
 from .torch_dataloader import AnnDataModule, DistributedAnnDataset, cell_line_metadata_cb
 
 
@@ -32,7 +32,7 @@ class RayTrainRunner:
         address: str | None = None,
         ray_trainer_strategy: Strategy | None = None,
         sparse_keys: Iterable[str] = ("X",),
-        max_open_files: int = 3
+        max_open_files: int = 3,
     ):
         self.Model = Model
         self.Ds = Ds
@@ -103,7 +103,8 @@ class RayTrainRunner:
             val_size,
             random_seed,
             metadata_cb=self.metadata_cb,
-            is_shuffled=is_shuffled,)
+            is_shuffled=is_shuffled,
+        )
         indices = shuffle_stragey.split()
         print(f"Data splitting time: {time.time() - start:.2f} seconds")
         train_config = {"indices": indices, "ckpt_path": ckpt_path, "shuffle_stragey": shuffle_stragey}
@@ -133,7 +134,13 @@ class RayTrainRunner:
             model_params = indices.metadata
             shuffle_stragey = config.get("shuffle_stragey")
             ann_dm = AnnDataModule(
-                indices, Ds, self.prefetch_factor, self.sparse_keys, shuffle_stragey, self.before_dense_cb, self.after_dense_cb
+                indices,
+                Ds,
+                self.prefetch_factor,
+                self.sparse_keys,
+                shuffle_stragey,
+                self.before_dense_cb,
+                self.after_dense_cb,
             )
             if model_keys:
                 model_params = {k: v for k, v in model_params.items() if k in model_keys}

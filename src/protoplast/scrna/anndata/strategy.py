@@ -1,11 +1,14 @@
-from typing import Callable
-import anndata
-from torch.utils.data._utils.collate import default_collate
-import torch
 import random
 import warnings
-from dataclasses import dataclass
 from abc import ABC, abstractmethod
+from collections.abc import Callable
+from dataclasses import dataclass
+
+import torch
+from torch.utils.data._utils.collate import default_collate
+
+import anndata
+
 
 def ann_split_data(
     file_paths: list[str],
@@ -86,6 +89,7 @@ def ann_split_data(
         metadata=metadata,
     )
 
+
 @dataclass
 class SplitInfo:
     files: list[str]
@@ -100,22 +104,23 @@ class SplitInfo:
             "train_indices": self.train_indices,
             "val_indices": self.val_indices,
             "test_indices": self.test_indices,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
 
 class ShuffleStrategy(ABC):
-    def __init__(self, 
-            file_paths: list[str],
-            batch_size: int,
-            mini_batch_size: int,
-            total_workers: int,
-            test_size: float | None = None,
-            validation_size: float | None = None,
-            random_seed: int | None = 42,
-            metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
-            is_shuffled: bool = True,
-        ) -> None:
+    def __init__(
+        self,
+        file_paths: list[str],
+        batch_size: int,
+        mini_batch_size: int,
+        total_workers: int,
+        test_size: float | None = None,
+        validation_size: float | None = None,
+        random_seed: int | None = 42,
+        metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
+        is_shuffled: bool = True,
+    ) -> None:
         self.file_paths = file_paths
         self.batch_size = batch_size
         self.mini_batch_size = mini_batch_size
@@ -130,22 +135,36 @@ class ShuffleStrategy(ABC):
     @abstractmethod
     def split(self) -> SplitInfo:
         pass
+
     @abstractmethod
     def mixer(self, batch: list) -> any:
         pass
-    
+
 
 class DefaultShuffleStrategy(ShuffleStrategy):
-    def __init__(self, file_paths: list[str],
-            batch_size: int,
-            mini_batch_size: int,
-            total_workers: int,
-            test_size: float | None = None,
-            validation_size: float | None = None,
-            random_seed: int | None = 42,
-            metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
-            is_shuffled: bool = True,) -> None:
-        super().__init__(file_paths, batch_size, mini_batch_size, total_workers, test_size, validation_size, random_seed, metadata_cb, is_shuffled)
+    def __init__(
+        self,
+        file_paths: list[str],
+        batch_size: int,
+        mini_batch_size: int,
+        total_workers: int,
+        test_size: float | None = None,
+        validation_size: float | None = None,
+        random_seed: int | None = 42,
+        metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
+        is_shuffled: bool = True,
+    ) -> None:
+        super().__init__(
+            file_paths,
+            batch_size,
+            mini_batch_size,
+            total_workers,
+            test_size,
+            validation_size,
+            random_seed,
+            metadata_cb,
+            is_shuffled,
+        )
 
     def split(self) -> SplitInfo:
         split_dict = ann_split_data(
@@ -156,10 +175,9 @@ class DefaultShuffleStrategy(ShuffleStrategy):
             self.validation_size,
             self.rng,
             self.metadata_cb,
-            self.is_shuffled
+            self.is_shuffled,
         )
         return SplitInfo(**split_dict)
-    
 
     def mixer(self, batch: list):
         self.rng.shuffle(batch)
@@ -180,7 +198,7 @@ class DefaultShuffleStrategy(ShuffleStrategy):
                 return {k: collate_item([d[k] for d in items]) for k in sample}
 
             # Tuple or list
-            elif isinstance(sample, (tuple, list)):
+            elif isinstance(sample, (tuple | list)):
                 return type(sample)(collate_item([b[i] for b in items]) for i in range(len(sample)))
 
             # Fallback

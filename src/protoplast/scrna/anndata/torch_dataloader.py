@@ -1,4 +1,5 @@
 import os
+from collections import Counter
 from collections.abc import Callable
 
 import lightning.pytorch as pl
@@ -8,17 +9,15 @@ import scipy.sparse as sp
 import torch
 import torch.distributed as td
 from torch.utils.data import DataLoader, get_worker_info
-from collections import Counter
 
 import anndata
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
 from protoplast.patches.anndata_remote import apply_file_backing_patch
-from .strategy import ShuffleStrategy, SplitInfo
 
+from .strategy import ShuffleStrategy, SplitInfo
 
 apply_file_backing_patch()
 apply_read_h5ad_backed_patch()
-
 
 
 def cell_line_metadata_cb(ad: anndata.AnnData, metadata: dict):
@@ -51,7 +50,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             setattr(self, k, v)
         self.metadata = metadata
         self.batches = indices
-        
+
         self.fptr = dict()
         self.sample_ptr = Counter()
         self.buf_ptr = Counter()
@@ -59,11 +58,12 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         self.file_idx = {f: i for i, f in enumerate(self.files)}
         self.current_files = set()
         self.current_fp_idx = -1
-        self.max_open_files = 6
-        
+        self.max_open_files = max_open_files
 
     @classmethod
-    def create_distributed_ds(cls, indices: SplitInfo, sparse_keys: list[str], mode: str = "train", max_open_files: int = 3):
+    def create_distributed_ds(
+        cls, indices: SplitInfo, sparse_keys: list[str], mode: str = "train", max_open_files: int = 3
+    ):
         """
         indices is in the following format
         {
@@ -77,7 +77,13 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         }
         """
         indices = indices.to_dict() if isinstance(indices, SplitInfo) else indices
-        return cls(indices["files"], indices[f"{mode}_indices"], indices["metadata"], sparse_keys, max_open_files=max_open_files)
+        return cls(
+            indices["files"],
+            indices[f"{mode}_indices"],
+            indices["metadata"],
+            sparse_keys,
+            max_open_files=max_open_files,
+        )
 
     def _init_rank(self):
         worker_info = get_worker_info()
@@ -130,11 +136,11 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
 
     @staticmethod
     def _safe_index(obj, idx):
-        if isinstance(obj, (pd.DataFrame, pd.Series)):
+        if isinstance(obj, (pd.DataFrame | pd.Series)):
             return obj.iloc[idx]
         else:
             return obj[idx]
-    
+
     def _get_data(self, idx, data):
         if (type(data) is list) or (type(data) is tuple):
             yield tuple(self._safe_index(d, idx) for d in data)
@@ -144,23 +150,20 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             yield data[idx]
         else:
             raise ValueError("Unsupported data type")
-    
 
     def __len__(self):
-        return sum(
-            end-start 
-            for i in range(len(self.files))
-            for start,end in self.batches[i]
-        )
-    
+        return sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
+
     def _init_buffer(self, f):
-        start,end = self.batches[self.file_idx[f]][self.buf_ptr[f]]
+        start, end = self.batches[self.file_idx[f]][self.buf_ptr[f]]
         self.ad = self.fptr[f]
+        # can add code to support multiple buffer if require more randomness and shard it
+        # during each iteration but for Tahoe this is good enough
         self.fptr_buf[f] = self.transform(start, end)
 
     def _get_batch_size(self, f):
-        start,end = self.batches[self.file_idx[f]][self.buf_ptr[f]]
-        return end-start
+        start, end = self.batches[self.file_idx[f]][self.buf_ptr[f]]
+        return end - start
 
     def __iter__(self):
         self._init_rank()
@@ -194,8 +197,6 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
                     self.sample_ptr[f] = 0
                     self.buf_ptr[f] += 1
                     self._init_buffer(f)
-                    
-                
 
 
 class DistributedCellLineAnnDataset(DistributedAnnDataset):
@@ -224,17 +225,17 @@ class AnnDataModule(pl.LightningDataModule):
         shuffle_stragey: ShuffleStrategy,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
-        max_open_files: int = 3
+        max_open_files: int = 3,
     ):
         super().__init__()
         self.indices = indices
         self.dataset = dataset
         num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
         self.loader_config = dict(
-            batch_size=shuffle_stragey.mini_batch_size, 
-            num_workers=num_threads, 
-            prefetch_factor=prefetch_factor, 
-            collate_fn=shuffle_stragey.mixer, 
+            batch_size=shuffle_stragey.mini_batch_size,
+            num_workers=num_threads,
+            prefetch_factor=prefetch_factor,
+            collate_fn=shuffle_stragey.mixer,
             persistent_workers=True,
             drop_last=True,
         )
@@ -246,12 +247,20 @@ class AnnDataModule(pl.LightningDataModule):
     def setup(self, stage):
         # this is not necessary but it is here in case we want to download data to local node in the future
         if stage == "fit":
-            self.train_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, max_open_files=self.max_open_files)
-            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "val", max_open_files=self.max_open_files)
+            self.train_ds = self.dataset.create_distributed_ds(
+                self.indices, self.sparse_keys, max_open_files=self.max_open_files
+            )
+            self.val_ds = self.dataset.create_distributed_ds(
+                self.indices, self.sparse_keys, "val", max_open_files=self.max_open_files
+            )
         if stage == "test":
-            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "test", max_open_files=self.max_open_files)
+            self.val_ds = self.dataset.create_distributed_ds(
+                self.indices, self.sparse_keys, "test", max_open_files=self.max_open_files
+            )
         if stage == "predict":
-            self.predict_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, max_open_files=self.max_open_files)
+            self.predict_ds = self.dataset.create_distributed_ds(
+                self.indices, self.sparse_keys, max_open_files=self.max_open_files
+            )
 
     def train_dataloader(self):
         return DataLoader(self.train_ds, **self.loader_config)
