@@ -214,7 +214,10 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         self.block_size = block_size
         self.sparse_keys = sparse_keys
         self.random_seed = random_seed
+        self.obs_keys = obs_keys
         self.mode = mode
+        self.obs_master = None
+
         if not isinstance(load_factor, int):
             raise ValueError("load_factor must be an integer")
         self.block_group_size = load_factor 
@@ -285,6 +288,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         load_factor: int,
         sparse_keys: list[str], 
         random_seed: int | None = 42,
+        obs_keys: list[str] = [],
         mode: str = "train"
     ):
         """
@@ -299,7 +303,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
             metadata: Metadata dictionary to set as instance attributes
             random_seed: Random seed for shuffling block ranges
         """
-        return cls(file_paths, ds_batch_size, block_size, load_factor, sparse_keys, random_seed, mode)
+        return cls(file_paths, ds_batch_size, block_size, load_factor, sparse_keys, random_seed, obs_keys, mode)
 
     def _append_obs_master(self, ad: anndata.AnnData):
         if len(self.obs_keys) == 0:
@@ -383,6 +387,12 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         # just in case it is a dense matrix, convert it to a sparse matrix
         mat = sp.csr_matrix(mat)
         return mat
+
+    def _process_cell_idx(self, cell_idx: np.ndarray) -> np.ndarray:
+        for i in range(len(self.adatas)):
+            where_file_i = cell_idx[:, 0] == i
+            cell_idx[where_file_i, 1] += (self.cumsum_n_cells[i])
+        return cell_idx[:, 1]
 
     def transform(self, X: torch.Tensor, cell_idx: np.ndarray):
         """
@@ -484,32 +494,17 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                     end_idx = start_idx + self.batch_size
                     
                     batch_data = X[start_idx:end_idx, :]
-                    yield self.transform(self._process_sparse(batch_data), np.array(cell_idx[start_idx:end_idx]))
+                    cell_idx = self._process_cell_idx(np.array(cell_idx[start_idx:end_idx]))
+                    yield self.transform(self._process_sparse(batch_data), cell_idx)
             
             gidx += 1
 
 class DistributedCellLineBlockBasedAnnDataset(BlockBasedAnnDataset):
 
-    def __init__(self, *args, obs_keys: list[str] = ["cell_line"], **kwargs):
-        super().__init__(*args, **kwargs)
-        self.obs_master = None
-        for file in self.files:
-            ad = anndata.read_h5ad(file, backed="r")
-            
-        # create a cumsum of the number of cells in each file
-
-    def _process_cell_idx(self, cell_idx: np.ndarray) -> np.ndarray:
-        for i in range(len(self.adatas)):
-            where_file_i = cell_idx[:, 0] == i
-            cell_idx[where_file_i, 1] += (self.cumsum_n_cells[i])
-        return cell_idx[:, 1]
-
     def transform(self, X: torch.Tensor, cell_idx: np.ndarray):
         X, cell_idx = super().transform(X, cell_idx)
         if X is None:
             return None
-        cell_idx = self._process_cell_idx(cell_idx)
-        # at this point cell_idx is the global cell index in self.obs_master
         cell_type = self.obs_master["cell_line"].iloc[cell_idx]
         return X, torch.tensor(cell_type)
 

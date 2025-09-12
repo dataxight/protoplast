@@ -256,9 +256,8 @@ def test_block_based_dataset(test_even_h5ad_file: str):
         assert not X.is_sparse
         assert not X.is_sparse_csr
         assert isinstance(cell_idx, torch.Tensor)
-        assert cell_idx.shape[0] == n
+        assert cell_idx.shape == torch.Size([2])
         assert cell_idx.dtype == torch.int64
-        assert cell_idx.shape[1] == 2
         
 def test_distributed_cell_line_block_based_dataset(test_even_h5ad_file: str):
     data_module = AnnDataModule(dataset=DistributedCellLineBlockBasedAnnDataset, 
