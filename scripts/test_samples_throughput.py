@@ -10,6 +10,7 @@ import os
 
 from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset, ann_split_data
 
+
 def get_total_memory_mb() -> float:
     """Return total memory usage of current process and all its children in MB."""
     parent = psutil.Process(os.getpid())
@@ -57,14 +58,21 @@ def pass_through_collate_fn(batch):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("data_glob", type=str, help="glob pattern the h5 files")
+    parser.add_argument("--batch_size", dest="batch_size", default=64, type=int)
+    parser.add_argument("--n_workers", dest="n_workers", default=32, type=int)
     args = parser.parse_args()
 
-    N_WORKERS = 32
+    print("=== PARAMETERS ===")
+    print(f"data_glob={args.data_glob}")
+    print(f"batch_size={args.batch_size}")
+    print(f"n_workers={args.n_workers}")
+
+    print("=== PROCESS ===")
+    N_WORKERS = args.n_workers
     PREFETCH_FACTOR = 16
     # Example how to test throughput with DistributedAnnDataset
     files = glob.glob(args.data_glob)
-    # files = glob.glob("/home/tphan/Softwares/protoplast/notebooks/competition_support_set/competition_train.h5")
-    indices = ann_split_data(files, batch_size=64, test_size=0.0, validation_size=0.0)
+    indices = ann_split_data(files, batch_size=args.batch_size, test_size=0.0, validation_size=0.0)
 
     n_cells = 0
 
@@ -80,10 +88,15 @@ def main():
         pin_memory=False,
         persistent_workers=False,
     )
-    samples_per_sec, time_per_sample, batch_times, peak_memory = benchmark(dataloader, n_cells, 64, max_iteration=10000)
+    samples_per_sec, time_per_sample, batch_times, peak_memory = benchmark(
+        dataloader, n_cells, args.batch_size, max_iteration=10000
+    )
+
+    print("=== RESULT ===")
     print(f"samples per sec: {samples_per_sec:.2f} samples/sec")
     print(f"time per sample: {time_per_sample:.2f} μs")
     print(f"peak memory: {peak_memory:.2f} MB")
+
 
 if __name__ == "__main__":
     main()
