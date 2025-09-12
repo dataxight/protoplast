@@ -38,6 +38,8 @@ def benchmark(loader, n_samples, batch_size, max_iteration=None, warmup_iteratio
     # we warmup for the first warmup_iteration iterations, then we run for max_iteration iterations
     max_iteration += warmup_iteration
     for i, _batch in tqdm(enumerate(loader_iter), total=max_iteration):
+        if i < warmup_iteration:
+            continue
         batch_times.append(time.time() - batch_time)
         batch_time = time.time()
         if i % sampling_memory_step == 0:
@@ -71,7 +73,7 @@ def main():
     parser.add_argument(
         "--sampling_memory_step",
         dest="sampling_memory_step",
-        default=5,
+        default=1000,
         type=int,
         help="# of iterations between sampling memory",
     )  # noqa: E501
