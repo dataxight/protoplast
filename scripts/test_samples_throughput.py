@@ -1,5 +1,6 @@
 import glob
 import time
+import argparse
 
 import anndata as ad
 from torch.utils.data import DataLoader
@@ -54,10 +55,15 @@ def pass_through_collate_fn(batch):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("data_glob", type=str, help="glob pattern the h5 files")
+    args = parser.parse_args()
+
     N_WORKERS = 32
     PREFETCH_FACTOR = 16
     # Example how to test throughput with DistributedAnnDataset
-    files = glob.glob("/home/tphan/Softwares/protoplast/notebooks/competition_support_set/competition_train.h5")
+    files = glob.glob(args.data_glob)
+    # files = glob.glob("/home/tphan/Softwares/protoplast/notebooks/competition_support_set/competition_train.h5")
     indices = ann_split_data(files, batch_size=64, test_size=0.0, validation_size=0.0)
 
     n_cells = 0
