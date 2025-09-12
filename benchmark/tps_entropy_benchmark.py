@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset
-from protoplast.scrna.anndata.trainer import RandomShuffleStrategy
+from protoplast.scrna.anndata.strategy import RandomShuffleStrategy, SequentialShuffleStrategy
 
 
 def get_total_memory_mb() -> float:
@@ -134,7 +134,7 @@ def save_results_to_csv(results, filepath=None):
     return df
 
 
-def run(batch_size, mini_batch_size, num_workers, prefetch_factor, paths, test_time, max_open_file):
+def run_random(batch_size, mini_batch_size, num_workers, prefetch_factor, paths, test_time, max_open_file):
     # Initialize shuffle strategy and split data
     shuffle_strategy = RandomShuffleStrategy(
         paths,
@@ -186,23 +186,53 @@ def run(batch_size, mini_batch_size, num_workers, prefetch_factor, paths, test_t
     }
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Benchmark DataLoader Performance")
-    parser.add_argument("--path", type=str, default=None, help="Path of the anndata")
-    parser.add_argument(
-        "--output_csv",
-        type=str,
-        default="dataloader_benchmark_results.csv",
-        help="Path to save the benchmark results CSV",
+def run_sequential(batch_size, num_workers, prefetch_factor, paths, test_time):
+    # Initialize shuffle strategy and split data
+    shuffle_strategy = SequentialShuffleStrategy(
+        paths,
+        batch_size,
+        total_workers=1, #the total worker here is ray worker only
+        test_size=0.0,
+        validation_size=0.0,
+        is_shuffled=True,
     )
-    parser.add_argument("--test_time", type=int, default=120, help="Duration to test each loader (in seconds)")
-    args = parser.parse_args()
 
-    if os.path.isfile(args.path):
-        paths = [args.path]
-    else:
-        paths = os.listdir(args.path)
-    paths = [os.path.join(args.path, p) for p in paths if p.endswith(".h5ad")]
+    indices = shuffle_strategy.split()
+
+    class BenchmarkDistributedAnnDataset(DistributedAnnDataset):
+        def transform(self, start: int, end: int):
+            X = super().transform(start, end)
+            plate = self.ad.obs["plate"].iloc[start:end]
+            if X is None:
+                return None
+            return X, plate
+
+    # Initialize dataset and dataloader
+    dataset = BenchmarkDistributedAnnDataset(
+        file_paths=paths,
+        indices=indices.train_indices,
+        metadata=indices.metadata,
+        sparse_keys=["X"],
+    )
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=None,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor + 1,
+        persistent_workers=True,
+        pin_memory=True,
+    )
+
+    # Evaluate the dataloader performance
+    results = evaluate_loader(dataloader, test_time_seconds=test_time, description="DataLoader Benchmark")
+    return {
+        "batch_size": batch_size,
+        "num_workers": num_workers,
+        **results,
+    }
+
+def test_random(paths, args):
     batch_sizes = [500, 1500, 2000]
     mini_batch_sizes = [50, 100, 250]
     num_workers = [2, 4]
@@ -214,12 +244,12 @@ def main():
             for num_worker in num_workers:
                 for max_open_file in max_open_files:
                     print(
-                        f"Running benchmark with batch_size={batch_size},"
+                        f"Running random benchmark with batch_size={batch_size},"
                         "mini_batch_size={mini_batch_size}, num_workers={num_worker}, "
                         "prefetch_factor={prefetch_factor}, max_open_file={max_open_file}"
                     )
                     results.append(
-                        run(
+                        run_random(
                             batch_size,
                             mini_batch_size,
                             num_worker,
@@ -230,6 +260,57 @@ def main():
                         )
                     )
                     save_results_to_csv(results, args.output_csv)
+
+
+def test_sequential(paths, args):
+    batch_sizes = [250, 500, 1500, 2000]
+    num_workers = [2, 4, 8, 16]
+    prefetch_factor = 4
+    results = []
+    for batch_size in batch_sizes:
+        for num_worker in num_workers:
+            print(
+                f"Running sequential benchmark with batch_size={batch_size},"
+                f"num_workers={num_worker}, "
+                f"prefetch_factor={prefetch_factor}"
+            )
+            results.append(
+                run_sequential(
+                    batch_size,
+                    num_worker,
+                    prefetch_factor,
+                    paths,
+                    args.test_time,
+                )
+            )
+            save_results_to_csv(results, args.output_csv)
+
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Benchmark DataLoader Performance")
+    parser.add_argument("--path", type=str, default=None, help="Path of the anndata")
+    parser.add_argument(
+        "--output_csv",
+        type=str,
+        default="dataloader_benchmark_results.csv",
+        help="Path to save the benchmark results CSV",
+    )
+    parser.add_argument("--mode", type=str, required=True)
+    parser.add_argument("--test_time", type=int, default=120, help="Duration to test each loader (in seconds)")
+    args = parser.parse_args()
+
+    if os.path.isfile(args.path):
+        paths = [args.path]
+    else:
+        paths = os.listdir(args.path)
+    paths = [os.path.join(args.path, p) for p in paths if p.endswith(".h5ad")]
+    if args.mode == "seq":
+        test_sequential(paths, args)
+    elif args.mode == "random":
+        test_random(paths, args)
+    else:
+        raise Exception("This mode is not supported")
 
 
 if __name__ == "__main__":
