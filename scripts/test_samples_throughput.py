@@ -61,6 +61,7 @@ def pass_through_collate_fn(batch):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("data_glob", type=str, help="glob pattern of the h5 files")
+    parser.add_argument("--max_iter", dest="max_iteration", default=5000, type=int)
     parser.add_argument("--batch_size", dest="batch_size", default=64, type=int)
     parser.add_argument("--n_workers", dest="n_workers", default=32, type=int)
     parser.add_argument(
@@ -84,6 +85,7 @@ def main():
     print(f"batch_size={args.batch_size}")
     print(f"n_workers={args.n_workers}")
     print(f"warmup_iterations={args.warmup_iteration}")
+    print(f"max_iterations={args.max_iteration}")
 
     print("=== PROGRESS ===")
     N_WORKERS = args.n_workers
@@ -110,7 +112,7 @@ def main():
         dataloader,
         n_cells,
         args.batch_size,
-        max_iteration=10000,
+        max_iteration=args.max_iteration,
         warmup_iteration=args.warmup_iteration,
         sampling_memory_step=args.sampling_memory_step,
     )
