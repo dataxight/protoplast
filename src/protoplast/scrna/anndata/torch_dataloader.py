@@ -40,7 +40,6 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         indices: list[list[int]],
         metadata: dict,
         sparse_keys: list[str],
-        
     ):
         # use first file as reference first
         self.files = file_paths
@@ -51,12 +50,8 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         self.metadata = metadata
         self.batches = indices
 
-        
-
     @classmethod
-    def create_distributed_ds(
-        cls, indices: SplitInfo, sparse_keys: list[str], mode: str = "train", **kwargs
-    ):
+    def create_distributed_ds(cls, indices: SplitInfo, sparse_keys: list[str], mode: str = "train", **kwargs):
         """
         indices is in the following format
         {
@@ -70,13 +65,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         }
         """
         indices = indices.to_dict() if isinstance(indices, SplitInfo) else indices
-        return cls(
-            indices["files"],
-            indices[f"{mode}_indices"],
-            indices["metadata"],
-            sparse_keys,
-            **kwargs
-        )
+        return cls(indices["files"], indices[f"{mode}_indices"], indices["metadata"], sparse_keys, **kwargs)
 
     def _init_rank(self):
         worker_info = get_worker_info()
@@ -129,7 +118,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
 
     def __len__(self):
         return sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
-    
+
     def __iter__(self):
         self._init_rank()
         gidx = 0
@@ -137,14 +126,14 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         for fidx, f in enumerate(self.files):
             self.ad = anndata.read_h5ad(f, backed="r")
             for start, end in self.batches[fidx]:
-                if (gidx % self.total_workers) == self.global_rank:    
+                if (gidx % self.total_workers) == self.global_rank:
                     yield self.transform(start, end)
                     total_iter += 1
                 gidx += 1
-        print("rank check", self.global_rank, gidx, total_iter)
+
 
 class DistributedFileSharingAnnDataset(DistributedAnnDataset):
-    def __init__(self, file_paths, indices, metadata, sparse_keys, max_open_files: int =3):
+    def __init__(self, file_paths, indices, metadata, sparse_keys, max_open_files: int = 3):
         super().__init__(file_paths, indices, metadata, sparse_keys)
         self.max_open_files = max_open_files
         self.fptr = dict()
@@ -171,6 +160,7 @@ class DistributedFileSharingAnnDataset(DistributedAnnDataset):
             yield data[idx]
         else:
             raise ValueError("Unsupported data type")
+
     def _init_buffer(self, f):
         start, end = self.batches[self.file_idx[f]][self.buf_ptr[f]]
         self.ad = self.fptr[f]
@@ -216,7 +206,6 @@ class DistributedFileSharingAnnDataset(DistributedAnnDataset):
                     self._init_buffer(f)
 
 
-
 class DistributedCellLineAnnDataset(DistributedAnnDataset):
     """
     Example of how to extend DistributedAnnDataset to adapt it for cell line linear
@@ -243,7 +232,7 @@ class AnnDataModule(pl.LightningDataModule):
         shuffle_strategy: ShuffleStrategy,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
         self.indices = indices
@@ -251,13 +240,14 @@ class AnnDataModule(pl.LightningDataModule):
         num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
         self.loader_config = dict(
             num_workers=num_threads,
-            prefetch_factor=prefetch_factor,
-            persistent_workers=True,
         )
+        if num_threads > 0:
+            self.loader_config["prefetch_factor"] = prefetch_factor
+            self.loader_config["persistent_workers"] = True
         if shuffle_strategy.is_mixer:
             self.loader_config["batch_size"] = shuffle_strategy.mini_batch_size
             self.loader_config["collate_fn"] = shuffle_strategy.mixer
-            self.loader_config["drop_last"] =True
+            self.loader_config["drop_last"] = True
         else:
             self.loader_config["batch_size"] = None
         self.sparse_keys = sparse_keys
@@ -268,20 +258,12 @@ class AnnDataModule(pl.LightningDataModule):
     def setup(self, stage):
         # this is not necessary but it is here in case we want to download data to local node in the future
         if stage == "fit":
-            self.train_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_keys, **self.kwargs
-            )
-            self.val_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_keys, "val", **self.kwargs
-            )
+            self.train_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, **self.kwargs)
+            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "val", **self.kwargs)
         if stage == "test":
-            self.val_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_keys, "test", **self.kwargs
-            )
+            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "test", **self.kwargs)
         if stage == "predict":
-            self.predict_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_keys, **self.kwargs
-            )
+            self.predict_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, **self.kwargs)
 
     def train_dataloader(self):
         return DataLoader(self.train_ds, **self.loader_config)

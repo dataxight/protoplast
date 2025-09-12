@@ -98,7 +98,7 @@ class RayTrainRunner:
             file_paths,
             batch_size,
             mini_batch_size,
-            num_workers * thread_per_worker,
+            num_workers,
             test_size,
             val_size,
             random_seed,

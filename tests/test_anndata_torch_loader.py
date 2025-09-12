@@ -1,12 +1,14 @@
 import os
 import pathlib
 from collections.abc import Iterable
+from unittest import mock
 
 import anndata as ad
 import numpy as np
 import pandas as pd
 import pytest
 import torch
+import torch.distributed as dist
 from scipy.sparse import csr_matrix
 from torch.utils.data import DataLoader
 
@@ -17,9 +19,6 @@ from protoplast.scrna.anndata.torch_dataloader import (
     DistributedFileSharingAnnDataset,
     cell_line_metadata_cb,
 )
-
-import torch.distributed as dist
-from unittest import mock
 
 
 @pytest.fixture(scope="function")
@@ -126,62 +125,64 @@ def test_h5ad_plate(tmp_path: pathlib.Path):
 
 @pytest.fixture(scope="module", autouse=True)
 def set_env_vars():
-    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["OMP_NUM_THREADS"] = "0"
+
 
 def test_same_iteration_per_ray_worker(test_h5ad_plate):
     total_plates = 6
-    paths = [test_h5ad_plate(plate_no=i+1)for i in range(total_plates)]
+    paths = [test_h5ad_plate(plate_no=i + 1) for i in range(total_plates)]
 
     total_ray_worker = 3
     thread_per_worker = 3
-    os.environ["OMP_NUM_THREADS"] = str(thread_per_worker)
     batch_size = 3
-    total_workers = total_ray_worker * thread_per_worker
 
     shuffle_strategy = SequentialShuffleStrategy(
-        paths, 
-        batch_size=batch_size,
-        total_workers=total_workers, 
-        test_size=0.0, 
-        validation_size=0.0
+        paths, batch_size=batch_size, total_workers=total_ray_worker, test_size=0.0, validation_size=0.0
     )
 
     indices = shuffle_strategy.split()
 
     data_module = AnnDataModule(
-        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"], shuffle_strategy=shuffle_strategy
+        indices=indices,
+        dataset=DistributedAnnDataset,
+        prefetch_factor=2,
+        sparse_keys=["X"],
+        shuffle_strategy=shuffle_strategy,
     )
     data_module.setup(stage="fit")
     # simulate each ray worker
     total_iters = []
     total_data = 0
     for r in range(total_ray_worker):
-        with mock.patch.object(dist, "get_rank", return_value=r), \
-            mock.patch.object(dist, "get_world_size", return_value=total_workers):
-            train_loader = data_module.train_dataloader()
-            total_iter = 0
-            for i, data in enumerate(train_loader):
-                data = data_module.on_after_batch_transfer(data, i)
-                n, m = data.shape
-                assert n > 0
-                assert m > 0
-                total_data += n
-                assert isinstance(data, torch.Tensor)
-                assert not data.is_sparse
-                assert not data.is_sparse_csr
-                total_iter += 1
-            assert total_iter > 0
-            total_iters.append(total_iter)
+        total_iter = 0
+        for wr in range(thread_per_worker):
+            with (
+                mock.patch.object(dist, "get_rank", return_value=r),
+                mock.patch.object(dist, "get_world_size", return_value=total_ray_worker),
+                mock.patch("protoplast.scrna.anndata.torch_dataloader.get_worker_info") as mock_info,
+            ):
+                mock_info.return_value = mock.Mock(
+                    id=wr,
+                    num_workers=thread_per_worker,
+                    seed=1234 + wr,
+                )
+                train_loader = data_module.train_dataloader()
+                for i, data in enumerate(train_loader):
+                    data = data_module.on_after_batch_transfer(data, i)
+                    n, m = data.shape
+                    assert n > 0
+                    assert m > 0
+                    total_data += n
+                    assert isinstance(data, torch.Tensor)
+                    assert not data.is_sparse
+                    assert not data.is_sparse_csr
+                    total_iter += 1
+        assert total_iter > 0
+        total_iters.append(total_iter)
     assert len(np.unique(total_iters)) == 1
-    assert total_iters[0] == 8
-    total_split_data = 0
-    total_batch_data = 0
-    for i in range(len(indices.files)):
-        for start, end in indices.train_indices[i]:
-            total_split_data += end-start
-        total_batch_data += len(indices.train_indices[i])
-    print(total_batch_data, total_split_data)
-    assert total_data == total_plates * 11
+    assert total_iters[0] == 6
+    # data was dropped because the batches is not divisble by number of ray worker
+    assert total_data == (total_plates * 11) - 12
 
 
 def test_entropy(test_h5ad_plate):
@@ -264,7 +265,7 @@ def test_load_simple(test_even_h5ad_file: str):
 
 def test_load_with_tuple(test_even_h5ad_file: str):
     strategy = SequentialShuffleStrategy(
-        [test_even_h5ad_file], batch_size=2,  total_workers=1, test_size=0.0, validation_size=0.0
+        [test_even_h5ad_file], batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
     )
     indices = strategy.split()
 
@@ -298,7 +299,7 @@ def test_load_with_tuple(test_even_h5ad_file: str):
 
 def test_load_with_dict(test_even_h5ad_file: str):
     strategy = SequentialShuffleStrategy(
-        [test_even_h5ad_file], batch_size=2,  total_workers=1, test_size=0.0, validation_size=0.0
+        [test_even_h5ad_file], batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
     )
     indices = strategy.split()
 
@@ -332,7 +333,7 @@ def test_load_with_dict(test_even_h5ad_file: str):
 
 def test_load_uneven(test_uneven_h5ad_file: str):
     strategy = SequentialShuffleStrategy(
-        [test_uneven_h5ad_file], batch_size=2,  total_workers=1, test_size=0.0, validation_size=0.0
+        [test_uneven_h5ad_file], batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
     )
     indices = strategy.split()
     data_module = AnnDataModule(
@@ -354,7 +355,6 @@ def test_load_multiple_files(test_even_h5ad_file: str, test_uneven_h5ad_file: st
     strategy = SequentialShuffleStrategy(
         [test_even_h5ad_file, test_uneven_h5ad_file],
         batch_size=2,
-       
         total_workers=1,
         test_size=0.0,
         validation_size=0.0,
@@ -384,7 +384,7 @@ def test_load_with_callbacks(test_even_h5ad_file: str):
         return x / (x.max() + 1)
 
     strategy = SequentialShuffleStrategy(
-        [test_even_h5ad_file], batch_size=2,  total_workers=1, test_size=0.0, validation_size=0.0
+        [test_even_h5ad_file], batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
     )
     indices = strategy.split()
     data_module = AnnDataModule(

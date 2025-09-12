@@ -48,8 +48,12 @@ def ann_split_data(
 
         # Drop per-file remainder to make divisible by total_workers
         remainder = len(batches) % total_workers
-        if remainder > 0 and len(batches) > remainder:
+        # implement rebalancing later but not that important right now
+        if remainder > 0:
+            print("Total batch dropped", i, batches[-remainder:])
             batches = batches[:-remainder]
+        if len(batches) == 0:
+            raise Exception("This data is not compatiable with this worker combination")
 
         total_batches += len(batches)
         file_batches.append(batches)
@@ -149,6 +153,7 @@ class ShuffleStrategy(ABC):
         """
         pass
 
+
 class SequentialShuffleStrategy(ShuffleStrategy):
     def __init__(
         self,
@@ -171,6 +176,7 @@ class SequentialShuffleStrategy(ShuffleStrategy):
             metadata_cb,
             is_shuffled,
         )
+
     def split(self) -> SplitInfo:
         split_dict = ann_split_data(
             self.file_paths,
@@ -183,10 +189,9 @@ class SequentialShuffleStrategy(ShuffleStrategy):
             self.is_shuffled,
         )
         return SplitInfo(**split_dict)
-    
+
     def mixer(self, batch):
         return super().mixer(batch)
-
 
 
 class RandomShuffleStrategy(ShuffleStrategy):
@@ -226,7 +231,7 @@ class RandomShuffleStrategy(ShuffleStrategy):
             self.is_shuffled,
         )
         return SplitInfo(**split_dict)
-    
+
     @property
     def is_mixer(self):
         return True
