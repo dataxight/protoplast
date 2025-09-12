@@ -35,7 +35,7 @@ def test_even_h5ad_file(tmpdir: pathlib.Path) -> str:
 
     X = csr_matrix((data, indices, indptr), shape=(n_obs, n_vars))
 
-    obs = pd.DataFrame(index=[f"cell_{i}" for i in range(n_obs)], data={"cell_line": pd.Categorical([0, 0, 1, 1])})
+    obs = pd.DataFrame(index=[f"cell_{i}" for i in range(n_obs)], data={"cell_line": pd.Categorical(["A", "A", "B", "B"])})
     var = pd.DataFrame(index=[f"gene_{i}" for i in range(n_vars)])
     adata = ad.AnnData(X=X, obs=obs, var=var)
 
@@ -247,7 +247,7 @@ def test_block_based_dataset(test_even_h5ad_file: str):
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
     for i, data in enumerate(train_loader):
-        X, cell_idx = data
+        X, obs_data = data
         X = data_module.on_after_batch_transfer(X, i)
         n, m = X.shape
         assert n == 2 # each batch has 2 cells
@@ -255,21 +255,22 @@ def test_block_based_dataset(test_even_h5ad_file: str):
         assert isinstance(X, torch.Tensor)
         assert not X.is_sparse
         assert not X.is_sparse_csr
-        assert isinstance(cell_idx, torch.Tensor)
-        assert cell_idx.shape == torch.Size([2])
-        assert cell_idx.dtype == torch.int64
-        
+        assert isinstance(obs_data, dict)
+        assert "barcodes" in obs_data
+        assert len(obs_data["barcodes"]) == 2
+
 def test_distributed_cell_line_block_based_dataset(test_even_h5ad_file: str):
     data_module = AnnDataModule(dataset=DistributedCellLineBlockBasedAnnDataset, 
                 prefetch_factor=2, sparse_keys=["X"], file_paths=[test_even_h5ad_file],
                             ds_batch_size=2,
                             block_size=1,
-                            load_factor=2
+                            load_factor=2,
+                            obs_keys=["cell_line"]
                         )
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
     for i, data in enumerate(train_loader):
-        X, cell_line = data
+        X, obs_data = data
         X = data_module.on_after_batch_transfer(X, i)
         n, m = X.shape
         assert n == 2 # each batch has 2 cells
@@ -277,7 +278,11 @@ def test_distributed_cell_line_block_based_dataset(test_even_h5ad_file: str):
         assert isinstance(X, torch.Tensor)
         assert not X.is_sparse
         assert not X.is_sparse_csr
-        assert isinstance(cell_line, torch.Tensor)
+        assert isinstance(obs_data, dict)
+        assert "cell_line" in obs_data
+        assert len(obs_data["cell_line"]) == 2
+        assert set(obs_data["cell_line"]) <= {"A", "B"}
+
         
 def test_process_sparse2(tmpdir: pathlib.Path):
     for i in range(10):

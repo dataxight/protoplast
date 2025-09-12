@@ -399,7 +399,11 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         X: torch.Tensor
         cell_idx: np.ndarray each item is a tuple of (file_idx, cell_idx)
         """
-        return X, cell_idx
+        obs = self.obs_master.iloc[cell_idx]
+        obs_data = {}
+        for k in obs.columns:
+            obs_data[k] = np.array(obs[k])
+        return X, obs_data 
 
     def __iter__(self):
         gidx = 0
@@ -502,10 +506,10 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
 class DistributedCellLineBlockBasedAnnDataset(BlockBasedAnnDataset):
 
     def transform(self, X: torch.Tensor, cell_idx: np.ndarray):
-        X, cell_idx = super().transform(X, cell_idx)
+        X, obs = super().transform(X, cell_idx)
         if X is None:
             return None
-        cell_type = self.obs_master["cell_line"].iloc[cell_idx]
+        cell_type = obs["cell_line"]
         return X, torch.tensor(cell_type)
 
 class DistributedCellLineAnnDataset(DistributedAnnDataset):
