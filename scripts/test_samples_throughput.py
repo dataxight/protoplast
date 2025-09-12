@@ -57,17 +57,19 @@ def pass_through_collate_fn(batch):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("data_glob", type=str, help="glob pattern the h5 files")
+    parser.add_argument("data_glob", type=str, help="glob pattern of the h5 files")
     parser.add_argument("--batch_size", dest="batch_size", default=64, type=int)
     parser.add_argument("--n_workers", dest="n_workers", default=32, type=int)
+    parser.add_argument("--warmup_iter", dest="warmup_iteration", default=100, type=int, help="# of first iterations will be ignored when benchmarking")
     args = parser.parse_args()
 
     print("=== PARAMETERS ===")
     print(f"data_glob={args.data_glob}")
     print(f"batch_size={args.batch_size}")
     print(f"n_workers={args.n_workers}")
+    print(f"warmup_iterations={args.warmup_iteration}")
 
-    print("=== PROCESS ===")
+    print("=== PROGRESS ===")
     N_WORKERS = args.n_workers
     PREFETCH_FACTOR = 16
     # Example how to test throughput with DistributedAnnDataset
@@ -89,7 +91,7 @@ def main():
         persistent_workers=False,
     )
     samples_per_sec, time_per_sample, batch_times, peak_memory = benchmark(
-        dataloader, n_cells, args.batch_size, max_iteration=10000
+        dataloader, n_cells, args.batch_size, max_iteration=10000, warmup_iteration=args.warmup_iteration
     )
 
     print("=== RESULT ===")
