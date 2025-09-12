@@ -4,8 +4,23 @@ import time
 import anndata as ad
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import psutil
+import os
 
 from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset, ann_split_data
+
+def get_total_memory_mb() -> float:
+    """Return total memory usage of current process and all its children in MB."""
+    parent = psutil.Process(os.getpid())
+    total_mem = parent.memory_info().rss  # main process
+
+    for child in parent.children(recursive=True):
+        try:
+            total_mem += child.memory_info().rss
+        except psutil.NoSuchProcess:
+            pass  # child may have exited
+
+    return total_mem / 1024**2
 
 
 def benchmark(loader, n_samples, batch_size, max_iteration=None, warmup_iteration=100):
@@ -14,6 +29,7 @@ def benchmark(loader, n_samples, batch_size, max_iteration=None, warmup_iteratio
         max_iteration = n_samples // batch_size
     loader_iter = loader.__iter__()
 
+    peak_memory = get_total_memory_mb()
     start_time = time.time()
     batch_times = []
     batch_time = time.time()
@@ -22,6 +38,7 @@ def benchmark(loader, n_samples, batch_size, max_iteration=None, warmup_iteratio
     for i, _batch in tqdm(enumerate(loader_iter), total=max_iteration):
         batch_times.append(time.time() - batch_time)
         batch_time = time.time()
+        peak_memory = max(peak_memory, get_total_memory_mb())
         if i == max_iteration:
             break
 
@@ -29,7 +46,7 @@ def benchmark(loader, n_samples, batch_size, max_iteration=None, warmup_iteratio
     time_per_sample = (1e6 * execution_time) / (max_iteration * batch_size)
     samples_per_sec = max_iteration * batch_size / execution_time
 
-    return samples_per_sec, time_per_sample, batch_times
+    return samples_per_sec, time_per_sample, batch_times, peak_memory
 
 
 def pass_through_collate_fn(batch):
@@ -57,10 +74,10 @@ def main():
         pin_memory=False,
         persistent_workers=False,
     )
-    samples_per_sec, time_per_sample, batch_times = benchmark(dataloader, n_cells, 64, max_iteration=10000)
+    samples_per_sec, time_per_sample, batch_times, peak_memory = benchmark(dataloader, n_cells, 64, max_iteration=10000)
     print(f"samples per sec: {samples_per_sec:.2f} samples/sec")
     print(f"time per sample: {time_per_sample:.2f} μs")
-
+    print(f"peak memory: {peak_memory:.2f} MB")
 
 if __name__ == "__main__":
     main()
