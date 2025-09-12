@@ -40,7 +40,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         indices: list[list[int]],
         metadata: dict,
         sparse_keys: list[str],
-        max_open_files: int = 3,
+        
     ):
         # use first file as reference first
         self.files = file_paths
@@ -51,18 +51,11 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         self.metadata = metadata
         self.batches = indices
 
-        self.fptr = dict()
-        self.sample_ptr = Counter()
-        self.buf_ptr = Counter()
-        self.fptr_buf = dict()
-        self.file_idx = {f: i for i, f in enumerate(self.files)}
-        self.current_files = set()
-        self.current_fp_idx = -1
-        self.max_open_files = max_open_files
+        
 
     @classmethod
     def create_distributed_ds(
-        cls, indices: SplitInfo, sparse_keys: list[str], mode: str = "train", max_open_files: int = 3
+        cls, indices: SplitInfo, sparse_keys: list[str], mode: str = "train", **kwargs
     ):
         """
         indices is in the following format
@@ -82,7 +75,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             indices[f"{mode}_indices"],
             indices["metadata"],
             sparse_keys,
-            max_open_files=max_open_files,
+            **kwargs
         )
 
     def _init_rank(self):
@@ -134,6 +127,34 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             return None
         return tuple(mats)
 
+    def __len__(self):
+        return sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
+    
+    def __iter__(self):
+        self._init_rank()
+        gidx = 0
+        total_iter = 0
+        for fidx, f in enumerate(self.files):
+            self.ad = anndata.read_h5ad(f, backed="r")
+            for start, end in self.batches[fidx]:
+                if (gidx % self.total_workers) == self.global_rank:    
+                    yield self.transform(start, end)
+                    total_iter += 1
+                gidx += 1
+        print("rank check", self.global_rank, gidx, total_iter)
+
+class DistributedFileSharingAnnDataset(DistributedAnnDataset):
+    def __init__(self, file_paths, indices, metadata, sparse_keys, max_open_files: int =3):
+        super().__init__(file_paths, indices, metadata, sparse_keys)
+        self.max_open_files = max_open_files
+        self.fptr = dict()
+        self.sample_ptr = Counter()
+        self.buf_ptr = Counter()
+        self.fptr_buf = dict()
+        self.file_idx = {f: i for i, f in enumerate(self.files)}
+        self.current_files = set()
+        self.current_fp_idx = -1
+
     @staticmethod
     def _safe_index(obj, idx):
         if isinstance(obj, (pd.DataFrame | pd.Series)):
@@ -150,10 +171,6 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             yield data[idx]
         else:
             raise ValueError("Unsupported data type")
-
-    def __len__(self):
-        return sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
-
     def _init_buffer(self, f):
         start, end = self.batches[self.file_idx[f]][self.buf_ptr[f]]
         self.ad = self.fptr[f]
@@ -199,6 +216,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
                     self._init_buffer(f)
 
 
+
 class DistributedCellLineAnnDataset(DistributedAnnDataset):
     """
     Example of how to extend DistributedAnnDataset to adapt it for cell line linear
@@ -222,44 +240,47 @@ class AnnDataModule(pl.LightningDataModule):
         dataset: DistributedAnnDataset,
         prefetch_factor: int,
         sparse_keys: list[str],
-        shuffle_stragey: ShuffleStrategy,
+        shuffle_strategy: ShuffleStrategy,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
-        max_open_files: int = 3,
+        **kwargs
     ):
         super().__init__()
         self.indices = indices
         self.dataset = dataset
         num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
         self.loader_config = dict(
-            batch_size=shuffle_stragey.mini_batch_size,
             num_workers=num_threads,
             prefetch_factor=prefetch_factor,
-            collate_fn=shuffle_stragey.mixer,
             persistent_workers=True,
-            drop_last=True,
         )
+        if shuffle_strategy.is_mixer:
+            self.loader_config["batch_size"] = shuffle_strategy.mini_batch_size
+            self.loader_config["collate_fn"] = shuffle_strategy.mixer
+            self.loader_config["drop_last"] =True
+        else:
+            self.loader_config["batch_size"] = None
         self.sparse_keys = sparse_keys
         self.before_dense_cb = before_dense_cb
         self.after_dense_cb = after_dense_cb
-        self.max_open_files = max_open_files
+        self.kwargs = kwargs
 
     def setup(self, stage):
         # this is not necessary but it is here in case we want to download data to local node in the future
         if stage == "fit":
             self.train_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_keys, max_open_files=self.max_open_files
+                self.indices, self.sparse_keys, **self.kwargs
             )
             self.val_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_keys, "val", max_open_files=self.max_open_files
+                self.indices, self.sparse_keys, "val", **self.kwargs
             )
         if stage == "test":
             self.val_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_keys, "test", max_open_files=self.max_open_files
+                self.indices, self.sparse_keys, "test", **self.kwargs
             )
         if stage == "predict":
             self.predict_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_keys, max_open_files=self.max_open_files
+                self.indices, self.sparse_keys, **self.kwargs
             )
 
     def train_dataloader(self):

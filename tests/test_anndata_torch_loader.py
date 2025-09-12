@@ -10,12 +10,16 @@ import torch
 from scipy.sparse import csr_matrix
 from torch.utils.data import DataLoader
 
-from protoplast.scrna.anndata.strategy import DefaultShuffleStrategy
+from protoplast.scrna.anndata.strategy import RandomShuffleStrategy, SequentialShuffleStrategy
 from protoplast.scrna.anndata.torch_dataloader import (
     AnnDataModule,
     DistributedAnnDataset,
+    DistributedFileSharingAnnDataset,
     cell_line_metadata_cb,
 )
+
+import torch.distributed as dist
+from unittest import mock
 
 
 @pytest.fixture(scope="function")
@@ -124,9 +128,63 @@ def test_h5ad_plate(tmp_path: pathlib.Path):
 def set_env_vars():
     os.environ["OMP_NUM_THREADS"] = "1"
 
+def test_same_iteration_per_ray_worker(test_h5ad_plate):
+    total_plates = 6
+    paths = [test_h5ad_plate(plate_no=i+1)for i in range(total_plates)]
+
+    total_ray_worker = 3
+    thread_per_worker = 3
+    os.environ["OMP_NUM_THREADS"] = str(thread_per_worker)
+    batch_size = 3
+    total_workers = total_ray_worker * thread_per_worker
+
+    shuffle_strategy = SequentialShuffleStrategy(
+        paths, 
+        batch_size=batch_size,
+        total_workers=total_workers, 
+        test_size=0.0, 
+        validation_size=0.0
+    )
+
+    indices = shuffle_strategy.split()
+
+    data_module = AnnDataModule(
+        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"], shuffle_strategy=shuffle_strategy
+    )
+    data_module.setup(stage="fit")
+    # simulate each ray worker
+    total_iters = []
+    total_data = 0
+    for r in range(total_ray_worker):
+        with mock.patch.object(dist, "get_rank", return_value=r), \
+            mock.patch.object(dist, "get_world_size", return_value=total_workers):
+            train_loader = data_module.train_dataloader()
+            total_iter = 0
+            for i, data in enumerate(train_loader):
+                data = data_module.on_after_batch_transfer(data, i)
+                n, m = data.shape
+                assert n > 0
+                assert m > 0
+                total_data += n
+                assert isinstance(data, torch.Tensor)
+                assert not data.is_sparse
+                assert not data.is_sparse_csr
+                total_iter += 1
+            assert total_iter > 0
+            total_iters.append(total_iter)
+    assert len(np.unique(total_iters)) == 1
+    assert total_iters[0] == 8
+    total_split_data = 0
+    total_batch_data = 0
+    for i in range(len(indices.files)):
+        for start, end in indices.train_indices[i]:
+            total_split_data += end-start
+        total_batch_data += len(indices.train_indices[i])
+    print(total_batch_data, total_split_data)
+    assert total_data == total_plates * 11
+
 
 def test_entropy(test_h5ad_plate):
-    # Create two test files with different plate numbers
     file1 = test_h5ad_plate(plate_no=1)
     file2 = test_h5ad_plate(plate_no=2)
     file3 = test_h5ad_plate(plate_no=3)
@@ -138,7 +196,7 @@ def test_entropy(test_h5ad_plate):
     prefetch_factor = 2
     mini_batch_size = 3
 
-    shuffle_strategy = DefaultShuffleStrategy(
+    shuffle_strategy = RandomShuffleStrategy(
         paths,
         batch_size,
         mini_batch_size=mini_batch_size,
@@ -150,7 +208,7 @@ def test_entropy(test_h5ad_plate):
 
     indices = shuffle_strategy.split()
 
-    class BenchmarkDistributedAnnDataset(DistributedAnnDataset):
+    class BenchmarkDistributedAnnDataset(DistributedFileSharingAnnDataset):
         def transform(self, start: int, end: int):
             X = super().transform(start, end)
             plate = self.ad.obs["plate"].iloc[start:end]
@@ -185,12 +243,12 @@ def test_entropy(test_h5ad_plate):
 
 
 def test_load_simple(test_even_h5ad_file: str):
-    strategy = DefaultShuffleStrategy(
-        [test_even_h5ad_file], batch_size=2, mini_batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
+    strategy = SequentialShuffleStrategy(
+        [test_even_h5ad_file], batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
     )
     indices = strategy.split()
     data_module = AnnDataModule(
-        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"], shuffle_stragey=strategy
+        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"], shuffle_strategy=strategy
     )
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
@@ -205,8 +263,8 @@ def test_load_simple(test_even_h5ad_file: str):
 
 
 def test_load_with_tuple(test_even_h5ad_file: str):
-    strategy = DefaultShuffleStrategy(
-        [test_even_h5ad_file], batch_size=2, mini_batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
+    strategy = SequentialShuffleStrategy(
+        [test_even_h5ad_file], batch_size=2,  total_workers=1, test_size=0.0, validation_size=0.0
     )
     indices = strategy.split()
 
@@ -222,7 +280,7 @@ def test_load_with_tuple(test_even_h5ad_file: str):
         dataset=DistributedAnnDatasetWithTuple,
         prefetch_factor=2,
         sparse_keys=["X"],
-        shuffle_stragey=strategy,
+        shuffle_strategy=strategy,
     )
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
@@ -239,8 +297,8 @@ def test_load_with_tuple(test_even_h5ad_file: str):
 
 
 def test_load_with_dict(test_even_h5ad_file: str):
-    strategy = DefaultShuffleStrategy(
-        [test_even_h5ad_file], batch_size=2, mini_batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
+    strategy = SequentialShuffleStrategy(
+        [test_even_h5ad_file], batch_size=2,  total_workers=1, test_size=0.0, validation_size=0.0
     )
     indices = strategy.split()
 
@@ -256,7 +314,7 @@ def test_load_with_dict(test_even_h5ad_file: str):
         dataset=DistributedAnnDatasetWithDict,
         prefetch_factor=2,
         sparse_keys=["X"],
-        shuffle_stragey=strategy,
+        shuffle_strategy=strategy,
     )
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
@@ -273,12 +331,12 @@ def test_load_with_dict(test_even_h5ad_file: str):
 
 
 def test_load_uneven(test_uneven_h5ad_file: str):
-    strategy = DefaultShuffleStrategy(
-        [test_uneven_h5ad_file], batch_size=2, mini_batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
+    strategy = SequentialShuffleStrategy(
+        [test_uneven_h5ad_file], batch_size=2,  total_workers=1, test_size=0.0, validation_size=0.0
     )
     indices = strategy.split()
     data_module = AnnDataModule(
-        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"], shuffle_stragey=strategy
+        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"], shuffle_strategy=strategy
     )
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
@@ -293,17 +351,17 @@ def test_load_uneven(test_uneven_h5ad_file: str):
 
 
 def test_load_multiple_files(test_even_h5ad_file: str, test_uneven_h5ad_file: str):
-    strategy = DefaultShuffleStrategy(
+    strategy = SequentialShuffleStrategy(
         [test_even_h5ad_file, test_uneven_h5ad_file],
         batch_size=2,
-        mini_batch_size=2,
+       
         total_workers=1,
         test_size=0.0,
         validation_size=0.0,
     )
     indices = strategy.split()
     data_module = AnnDataModule(
-        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"], shuffle_stragey=strategy
+        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"], shuffle_strategy=strategy
     )
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
@@ -325,8 +383,8 @@ def test_load_with_callbacks(test_even_h5ad_file: str):
     def after_dense_cb(x, idx):
         return x / (x.max() + 1)
 
-    strategy = DefaultShuffleStrategy(
-        [test_even_h5ad_file], batch_size=2, mini_batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
+    strategy = SequentialShuffleStrategy(
+        [test_even_h5ad_file], batch_size=2,  total_workers=1, test_size=0.0, validation_size=0.0
     )
     indices = strategy.split()
     data_module = AnnDataModule(
@@ -334,7 +392,7 @@ def test_load_with_callbacks(test_even_h5ad_file: str):
         dataset=DistributedAnnDataset,
         prefetch_factor=2,
         sparse_keys=["X"],
-        shuffle_stragey=strategy,
+        shuffle_strategy=strategy,
         before_dense_cb=before_dense_cb,
         after_dense_cb=after_dense_cb,
     )
@@ -354,10 +412,9 @@ def test_load_with_callbacks(test_even_h5ad_file: str):
 def test_custom_dataset(test_even_h5ad_file: str):
     from protoplast.scrna.anndata.torch_dataloader import DistributedCellLineAnnDataset
 
-    strategy = DefaultShuffleStrategy(
+    strategy = SequentialShuffleStrategy(
         [test_even_h5ad_file],
         batch_size=2,
-        mini_batch_size=2,
         total_workers=1,
         test_size=0.0,
         validation_size=0.0,
@@ -369,7 +426,7 @@ def test_custom_dataset(test_even_h5ad_file: str):
         dataset=DistributedCellLineAnnDataset,
         prefetch_factor=2,
         sparse_keys=["X"],
-        shuffle_stragey=strategy,
+        shuffle_strategy=strategy,
     )
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()

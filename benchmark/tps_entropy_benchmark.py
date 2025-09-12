@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset
-from protoplast.scrna.anndata.trainer import DefaultShuffleStrategy
+from protoplast.scrna.anndata.trainer import RandomShuffleStrategy
 
 
 def get_total_memory_mb() -> float:
@@ -136,7 +136,7 @@ def save_results_to_csv(results, filepath=None):
 
 def run(batch_size, mini_batch_size, num_workers, prefetch_factor, paths, test_time, max_open_file):
     # Initialize shuffle strategy and split data
-    shuffle_strategy = DefaultShuffleStrategy(
+    shuffle_strategy = RandomShuffleStrategy(
         paths,
         batch_size,
         mini_batch_size,
@@ -203,11 +203,11 @@ def main():
     else:
         paths = os.listdir(args.path)
     paths = [os.path.join(args.path, p) for p in paths if p.endswith(".h5ad")]
-    batch_sizes = [1000, 2000, 4000]
-    mini_batch_sizes = [200]
-    num_workers = [4, 8]
+    batch_sizes = [500, 1500, 2000]
+    mini_batch_sizes = [50, 100, 250]
+    num_workers = [2, 4]
     max_open_files = [6, 9, 12]
-    prefetch_factor = 4
+    prefetch_factor = 2
     results = []
     for batch_size in batch_sizes:
         for mini_batch_size in mini_batch_sizes:

@@ -13,7 +13,7 @@ from lightning.pytorch.strategies import Strategy
 
 import anndata
 
-from .strategy import DefaultShuffleStrategy, ShuffleStrategy
+from .strategy import RandomShuffleStrategy, ShuffleStrategy
 from .torch_dataloader import AnnDataModule, DistributedAnnDataset, cell_line_metadata_cb
 
 
@@ -27,7 +27,7 @@ class RayTrainRunner:
         metadata_cb: Callable[[anndata.AnnData, dict], None] = cell_line_metadata_cb,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
-        shuffle_strategy: ShuffleStrategy = DefaultShuffleStrategy,
+        shuffle_strategy: ShuffleStrategy = RandomShuffleStrategy,
         runtime_env_config: dict | None = None,
         address: str | None = None,
         ray_trainer_strategy: Strategy | None = None,

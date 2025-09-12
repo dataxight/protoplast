@@ -48,7 +48,7 @@ def ann_split_data(
 
         # Drop per-file remainder to make divisible by total_workers
         remainder = len(batches) % total_workers
-        if remainder > 0:
+        if remainder > 0 and len(batches) > remainder:
             batches = batches[:-remainder]
 
         total_batches += len(batches)
@@ -113,7 +113,6 @@ class ShuffleStrategy(ABC):
         self,
         file_paths: list[str],
         batch_size: int,
-        mini_batch_size: int,
         total_workers: int,
         test_size: float | None = None,
         validation_size: float | None = None,
@@ -123,7 +122,6 @@ class ShuffleStrategy(ABC):
     ) -> None:
         self.file_paths = file_paths
         self.batch_size = batch_size
-        self.mini_batch_size = mini_batch_size
         self.total_workers = total_workers
         self.test_size = test_size
         self.validation_size = validation_size
@@ -132,16 +130,66 @@ class ShuffleStrategy(ABC):
         self.is_shuffled = is_shuffled
         self.rng = random.Random(random_seed) if random_seed else random.Random()
 
+    @property
+    def is_mixer(self):
+        return False
+
     @abstractmethod
     def split(self) -> SplitInfo:
+        """
+        How you want to split the data in each worker must return SplitInfo
+        """
         pass
 
     @abstractmethod
     def mixer(self, batch: list) -> any:
+        """
+        If you use Dataset that return 1 sample and not prebatched
+        you need to implement this
+        """
         pass
 
+class SequentialShuffleStrategy(ShuffleStrategy):
+    def __init__(
+        self,
+        file_paths: list[str],
+        batch_size: int,
+        total_workers: int,
+        test_size: float | None = None,
+        validation_size: float | None = None,
+        random_seed: int | None = 42,
+        metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
+        is_shuffled: bool = False,
+    ) -> None:
+        super().__init__(
+            file_paths,
+            batch_size,
+            total_workers,
+            test_size,
+            validation_size,
+            random_seed,
+            metadata_cb,
+            is_shuffled,
+        )
+    def split(self) -> SplitInfo:
+        split_dict = ann_split_data(
+            self.file_paths,
+            self.batch_size,
+            self.total_workers,
+            self.test_size,
+            self.validation_size,
+            self.rng,
+            self.metadata_cb,
+            self.is_shuffled,
+        )
+        return SplitInfo(**split_dict)
+    
+    def mixer(self, batch):
+        return super().mixer(batch)
 
-class DefaultShuffleStrategy(ShuffleStrategy):
+
+
+class RandomShuffleStrategy(ShuffleStrategy):
     def __init__(
         self,
         file_paths: list[str],
@@ -157,7 +205,6 @@ class DefaultShuffleStrategy(ShuffleStrategy):
         super().__init__(
             file_paths,
             batch_size,
-            mini_batch_size,
             total_workers,
             test_size,
             validation_size,
@@ -165,6 +212,7 @@ class DefaultShuffleStrategy(ShuffleStrategy):
             metadata_cb,
             is_shuffled,
         )
+        self.mini_batch_size = mini_batch_size
 
     def split(self) -> SplitInfo:
         split_dict = ann_split_data(
@@ -178,6 +226,10 @@ class DefaultShuffleStrategy(ShuffleStrategy):
             self.is_shuffled,
         )
         return SplitInfo(**split_dict)
+    
+    @property
+    def is_mixer(self):
+        return True
 
     def mixer(self, batch: list):
         self.rng.shuffle(batch)
