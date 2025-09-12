@@ -237,21 +237,27 @@ def test_custom_dataset(test_even_h5ad_file: str):
         assert data[1].shape[0] == n
 
 def test_block_based_dataset(test_even_h5ad_file: str):
-    data_module = AnnDataModule(dataset=BlockBasedAnnDataset, prefetch_factor=2, sparse_keys=["X"], file_paths=[test_even_h5ad_file],
+    data_module = AnnDataModule(dataset=BlockBasedAnnDataset, 
+                prefetch_factor=2, sparse_keys=["X"], file_paths=[test_even_h5ad_file],
                             ds_batch_size=2,
-                            block_size=2,
+                            block_size=1,
                             load_factor=2
                         )
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
     for i, data in enumerate(train_loader):
-        data = data_module.on_after_batch_transfer(data, i)
-        n, m = data.shape
-        assert n > 0
-        assert m > 0
-        assert isinstance(data, torch.Tensor)
-        assert not data.is_sparse
-        assert not data.is_sparse_csr
+        X, cell_idx = data
+        X = data_module.on_after_batch_transfer(X, i)
+        n, m = X.shape
+        assert n == 2 # each batch has 2 cells
+        assert m == 5 # each cell has 5 features
+        assert isinstance(X, torch.Tensor)
+        assert not X.is_sparse
+        assert not X.is_sparse_csr
+        assert isinstance(cell_idx, torch.Tensor)
+        assert cell_idx.shape[0] == n
+        assert cell_idx.dtype == torch.int64
+        assert cell_idx.shape[1] == 2
         
         
 def test_process_sparse2(tmpdir: pathlib.Path):

@@ -348,12 +348,6 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                 # Data of non-zero
                 data[indptr[i]:indptr[i+1]] = torch.from_numpy(mat_data[mat_indptr[row_num]:mat_indptr[row_num+1]])
             
-            # sparse_mat = torch.sparse_csr_tensor(
-            #     indptr,
-            #     indices,
-            #     data,
-            #     shape,
-            # )
             sparse_mat = sp.csr_matrix((data, indices, indptr), shape = shape)
             return sparse_mat
         
@@ -380,7 +374,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         X: torch.Tensor
         cell_idx: np.ndarray each item is a tuple of (file_idx, cell_idx)
         """
-        return X
+        return X, cell_idx
 
     def __iter__(self):
         gidx = 0
@@ -451,6 +445,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                         k = self.sparse_keys[0]
                         X_r = self._get_mat_by_range(rfi, rstart, rstart + chunk_size, k)
 
+                        # concatenate cell_idx
                         cell_idx += [(rfi, cell_idx) for cell_idx in range(rstart, rstart + chunk_size)]
 
                         padding_mats.append(X_r)
@@ -466,6 +461,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                 # shuffle X
                 ridx = np.random.permutation(X.shape[0])
                 X = X[ridx, :]
+                # shuffle cell_idx too
                 cell_idx = np.array(cell_idx)[ridx]
                 n_batches = (self.block_size * self.block_group_size) // self.batch_size
                 for bi in range(n_batches):
@@ -473,7 +469,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                     end_idx = start_idx + self.batch_size
                     
                     batch_data = X[start_idx:end_idx, :]
-                    yield self.transform(batch_data, cell_idx[start_idx:end_idx])
+                    yield self.transform(self._process_sparse(batch_data), cell_idx[start_idx:end_idx])
             
             gidx += 1
 
