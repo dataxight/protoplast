@@ -14,6 +14,7 @@ from protoplast.scrna.anndata.torch_dataloader import (
     ann_split_data,
     cell_line_metadata_cb,
     BlockBasedAnnDataset,
+    DistributedCellLineBlockBasedAnnDataset,
 )
 
 
@@ -259,6 +260,25 @@ def test_block_based_dataset(test_even_h5ad_file: str):
         assert cell_idx.dtype == torch.int64
         assert cell_idx.shape[1] == 2
         
+def test_distributed_cell_line_block_based_dataset(test_even_h5ad_file: str):
+    data_module = AnnDataModule(dataset=DistributedCellLineBlockBasedAnnDataset, 
+                prefetch_factor=2, sparse_keys=["X"], file_paths=[test_even_h5ad_file],
+                            ds_batch_size=2,
+                            block_size=1,
+                            load_factor=2
+                        )
+    data_module.setup(stage="fit")
+    train_loader = data_module.train_dataloader()
+    for i, data in enumerate(train_loader):
+        X, cell_line = data
+        X = data_module.on_after_batch_transfer(X, i)
+        n, m = X.shape
+        assert n == 2 # each batch has 2 cells
+        assert m == 5 # each cell has 5 features
+        assert isinstance(X, torch.Tensor)
+        assert not X.is_sparse
+        assert not X.is_sparse_csr
+        assert isinstance(cell_line, torch.Tensor)
         
 def test_process_sparse2(tmpdir: pathlib.Path):
     for i in range(10):
