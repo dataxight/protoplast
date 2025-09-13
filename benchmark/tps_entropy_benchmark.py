@@ -263,8 +263,10 @@ def test_random(paths, args):
 
 
 def test_sequential(paths, args):
-    batch_sizes = [250, 500, 1500, 2000]
-    num_workers = [2, 4, 8, 16]
+    # batch_sizes = [250, 500, 1500, 2000]
+    # num_workers = [2, 4, 8, 16]
+    batch_sizes = [2500, 3000, 4000, 5000, 10000]
+    num_workers = [8, 10, 12]
     prefetch_factor = 4
     results = []
     for batch_size in batch_sizes:

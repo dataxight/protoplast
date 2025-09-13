@@ -13,7 +13,7 @@ from lightning.pytorch.strategies import Strategy
 
 import anndata
 
-from .strategy import RandomShuffleStrategy, ShuffleStrategy
+from .strategy import RandomShuffleStrategy, SequentialShuffleStrategy, ShuffleStrategy
 from .torch_dataloader import AnnDataModule, DistributedAnnDataset, cell_line_metadata_cb
 
 
@@ -27,7 +27,7 @@ class RayTrainRunner:
         metadata_cb: Callable[[anndata.AnnData, dict], None] = cell_line_metadata_cb,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
-        shuffle_strategy: ShuffleStrategy = RandomShuffleStrategy,
+        shuffle_strategy: ShuffleStrategy = SequentialShuffleStrategy,
         runtime_env_config: dict | None = None,
         address: str | None = None,
         ray_trainer_strategy: Strategy | None = None,
@@ -57,7 +57,6 @@ class RayTrainRunner:
         self,
         file_paths: list[str],
         batch_size: int,
-        mini_batch_size: int,
         test_size: float,
         val_size: float,
         prefetch_factor: int = 4,
@@ -71,10 +70,12 @@ class RayTrainRunner:
         random_seed: int | None = 42,
         resource_per_worker: dict | None = None,
         is_shuffled: bool = True,
+        **kwargs
     ):
         self.result_storage_path = result_storage_path
         self.prefetch_factor = prefetch_factor
         self.max_epochs = max_epochs
+        self.kwargs = kwargs
         if not resource_per_worker:
             if not thread_per_worker:
                 print("Setting thread_per_worker to half of the available CPUs capped at 4")
@@ -97,13 +98,13 @@ class RayTrainRunner:
         shuffle_stragey = self.shuffle_strategy(
             file_paths,
             batch_size,
-            mini_batch_size,
             num_workers,
             test_size,
             val_size,
             random_seed,
             metadata_cb=self.metadata_cb,
             is_shuffled=is_shuffled,
+            **kwargs
         )
         indices = shuffle_stragey.split()
         print(f"Data splitting time: {time.time() - start:.2f} seconds")
@@ -141,6 +142,7 @@ class RayTrainRunner:
                 shuffle_stragey,
                 self.before_dense_cb,
                 self.after_dense_cb,
+                **self.kwargs
             )
             if model_keys:
                 model_params = {k: v for k, v in model_params.items() if k in model_keys}
