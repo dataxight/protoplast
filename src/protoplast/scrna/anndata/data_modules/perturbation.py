@@ -104,7 +104,10 @@ class PerturbationDataset(DistributedAnnDataset):
     def _get_mat_by_range(self, adata: anndata.AnnData, start: int, end: int):
         """Get matrix by range."""
         if len(self.sparse_keys) == 1:
-            return getattr(adata, self.sparse_keys[0])[start:end]
+            mat = getattr(adata, self.sparse_keys[0])[start:end]
+            if not scipy.sparse.issparse(mat):
+                mat = scipy.sparse.csr_matrix(mat)
+            return mat
         else:
             raise ValueError(f"Multiple sparse keys are not supported for perturbation dataset: {self.sparse_keys}")
     
