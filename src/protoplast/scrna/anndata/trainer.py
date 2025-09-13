@@ -13,7 +13,7 @@ from lightning.pytorch.strategies import Strategy
 
 import anndata
 
-from .strategy import RandomShuffleStrategy, SequentialShuffleStrategy, ShuffleStrategy
+from .strategy import SequentialShuffleStrategy, ShuffleStrategy
 from .torch_dataloader import AnnDataModule, DistributedAnnDataset, cell_line_metadata_cb
 
 
@@ -70,7 +70,7 @@ class RayTrainRunner:
         random_seed: int | None = 42,
         resource_per_worker: dict | None = None,
         is_shuffled: bool = True,
-        **kwargs
+        **kwargs,
     ):
         self.result_storage_path = result_storage_path
         self.prefetch_factor = prefetch_factor
@@ -104,7 +104,7 @@ class RayTrainRunner:
             random_seed,
             metadata_cb=self.metadata_cb,
             is_shuffled=is_shuffled,
-            **kwargs
+            **kwargs,
         )
         indices = shuffle_stragey.split()
         print(f"Data splitting time: {time.time() - start:.2f} seconds")
@@ -142,7 +142,7 @@ class RayTrainRunner:
                 shuffle_stragey,
                 self.before_dense_cb,
                 self.after_dense_cb,
-                **self.kwargs
+                **self.kwargs,
             )
             if model_keys:
                 model_params = {k: v for k, v in model_params.items() if k in model_keys}

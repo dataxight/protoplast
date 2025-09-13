@@ -10,8 +10,8 @@ from scipy import stats
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset
 from protoplast.scrna.anndata.strategy import RandomShuffleStrategy, SequentialShuffleStrategy
+from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset
 
 
 def get_total_memory_mb() -> float:
@@ -191,7 +191,7 @@ def run_sequential(batch_size, num_workers, prefetch_factor, paths, test_time):
     shuffle_strategy = SequentialShuffleStrategy(
         paths,
         batch_size,
-        total_workers=1, #the total worker here is ray worker only
+        total_workers=1,  # the total worker here is ray worker only
         test_size=0.0,
         validation_size=0.0,
         is_shuffled=True,
@@ -231,6 +231,7 @@ def run_sequential(batch_size, num_workers, prefetch_factor, paths, test_time):
         "num_workers": num_workers,
         **results,
     }
+
 
 def test_random(paths, args):
     batch_sizes = [500, 1500, 2000]
@@ -286,7 +287,6 @@ def test_sequential(paths, args):
                 )
             )
             save_results_to_csv(results, args.output_csv)
-
 
 
 def main():
