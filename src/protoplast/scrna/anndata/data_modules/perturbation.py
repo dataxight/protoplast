@@ -358,18 +358,18 @@ class PerturbationDataset(DistributedAnnDataset):
                 
                 # Create sample dictionary
                 sample = {
-                    "pert_cell_emb": X_pert,
-                    "ctrl_cell_emb": X_ctrl,
-                    "pert_emb": pert_emb,
-                    "pert_name": target,
-                    "cell_type_onehot": cell_type_onehot,
-                    "batch_onehot": batch_onehot,
+                    "pert_cell_emb": X_pert, # scipy csr matrix [S, G]
+                    "ctrl_cell_emb": X_ctrl, # scipy csr matrix [S, G]
+                    "pert_emb": pert_emb, # tensor [5102]
+                    "pert_name": np.array([target]), 
+                    "cell_type_onehot": cell_type_onehot, # tensor [n_cell_type]
+                    "batch_onehot": batch_onehot, # tensor [n_batches]
                 }
                 
                 # Add barcodes if enabled
                 if self.barcodes:
-                    sample["pert_cell_barcode"] = pert_barcodes
-                    sample["ctrl_cell_barcode"] = ctrl_barcodes
+                    sample["pert_cell_barcode"] = pert_barcodes # np.ndarray [S]
+                    sample["ctrl_cell_barcode"] = ctrl_barcodes # np.ndarray [S]
                     
                 yield sample
                 
@@ -451,6 +451,62 @@ class PerturbationDataModule(AnnDataModule):
                 indices["train_indices"].append((file_i, target, start, end))
         return indices
 
+    @staticmethod
+    def collate_fn(batch):
+        """Collate function for perturbation dataset."""
+        if len(batch) == 0:
+            return batch
+            
+        # Initialize collated batch
+        collated = {}
+        
+        # Get keys from first sample
+        keys = batch[0].keys()
+        
+        for key in keys:
+            values = [sample[key] for sample in batch]
+            
+            if key in ['pert_cell_emb', 'ctrl_cell_emb']:
+                # Convert scipy sparse matrices to torch sparse tensors and stack
+                torch_sparse_tensors = []
+                for val in values:
+                    if scipy.sparse.issparse(val):
+                        # Convert to COO format first, as we can't stack csr tensors. "Sparse CSR tensors do not have is_contiguous"
+                        coo = val.tocoo()
+                        # Create torch sparse tensor
+                        indices = torch.from_numpy(np.vstack((coo.row, coo.col))).long()
+                        values_tensor = torch.from_numpy(coo.data).float()
+                        sparse_tensor = torch.sparse_coo_tensor(indices, values_tensor, coo.shape)
+                        torch_sparse_tensors.append(sparse_tensor)
+                    else:
+                        # If already tensor, just append
+                        torch_sparse_tensors.append(val)
+                
+                # Stack sparse tensors
+                collated[key] = torch.stack(torch_sparse_tensors)
+                
+            elif key in ['pert_emb', 'cell_type_onehot', 'batch_onehot']:
+                # Stack regular tensors
+                collated[key] = torch.stack(values)
+                
+            elif key == 'pert_name':
+                # Handle string arrays - concatenate
+                collated[key] = np.concatenate(values)
+                
+            elif key in ['pert_cell_barcode', 'ctrl_cell_barcode']:
+                # Handle barcode arrays - stack as numpy arrays
+                collated[key] = np.stack(values) if values[0] is not None else None
+                
+            else:
+                # Default: try to stack as tensors
+                try:
+                    collated[key] = torch.stack(values)
+                except:
+                    # If stacking fails, keep as list
+                    collated[key] = values
+        
+        return collated
+    
     def setup(self, stage):
         """Setup datasets for different stages."""
         dataset_kwargs = {
@@ -483,8 +539,17 @@ class PerturbationDataModule(AnnDataModule):
 
 if __name__ == "__main__":
     dm = PerturbationDataModule(
-        files=["/mnt/hdd2/tan/competition_support_set_sorted/jurkat.h5"],
+        files=["/mnt/hdd2/tan/competition_support_set_sorted/jurkat.h5",
+        "/mnt/hdd2/tan/competition_support_set_sorted/competition_train.h5"
+        ],
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt"
     )
     dm.setup(stage="fit")
-    print(next(iter(dm.train_ds)))
+    dataloader = DataLoader(dm.train_ds, batch_size=16, collate_fn=PerturbationDataModule.collate_fn, num_workers=8, pin_memory=True, persistent_workers=False)
+    for batch in dataloader:
+        print("Batch keys:", batch.keys())
+        print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
+        print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
+        print("pert_emb shape:", batch['pert_emb'].shape)
+        print("pert_name:", batch['pert_name'])
+        break
