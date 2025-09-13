@@ -326,52 +326,6 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                 mat.shape,
             )
         return torch.from_numpy(mat).float()
-
-
-    def _is_sparse(self, mat):
-        return isinstance(mat, anndata._core.sparse_dataset._CSRDataset) or sp.issparse(mat)
-
-    def _process_sparse2(self, mat, start, end):
-        if self._is_sparse(mat):
-            sampling_indices = range(start, end)
-
-            # List of pointers to indicate number of non-zero values for each row
-            # in a sparse matrix
-            indptr = torch.zeros(len(sampling_indices) + 1).long()
-        
-            if isinstance(mat, scp.sparse._csr.csr_matrix):
-                mat_indptr = mat.indptr
-                mat_indices = mat.indices
-                mat_data = mat.data        
-            else:
-                mat_indptr = mat._indptr
-                mat_indices = mat._indices
-                mat_data = mat._data
-            
-            # First pass compute indptr of the rows for pin-point non-zero columns in that row
-            total_non_zeros = 0
-            for i, row_num in enumerate(sampling_indices):
-                # End index of the current row in indptr
-                indptr[i + 1] = indptr[i] + (mat_indptr[row_num + 1] - mat_indptr[row_num])
-            
-                total_non_zeros += (indptr[i + 1] - indptr[i])
-            
-            # List of indices of non-zero columns in the rows and the data of those columns
-            indices = torch.zeros(total_non_zeros).long()
-            data = torch.zeros(total_non_zeros).float()
-            shape = (len(sampling_indices), mat.shape[1])
-
-            for i, row_num in enumerate(sampling_indices):
-                # Column indices of non-zero val within the current row
-                indices[indptr[i]:indptr[i+1]] = torch.from_numpy(mat_indices[mat_indptr[row_num]:mat_indptr[row_num+1]])
-                
-                # Data of non-zero
-                data[indptr[i]:indptr[i+1]] = torch.from_numpy(mat_data[mat_indptr[row_num]:mat_indptr[row_num+1]])
-            
-            sparse_mat = sp.csr_matrix((data, indices, indptr), shape = shape)
-            return sparse_mat
-        
-        return torch.from_numpy(mat[start:end, :]).float()
     
     def _get_mat_by_range(self, file_idx: int, start: int, end: int, sparse_key: str | None = None):
         """Helper function to get random items from a file
@@ -382,14 +336,21 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
         adata = self.adatas[file_idx]
         if "." in sparse_key:
             attr, attr_k = sparse_key.split(".")
-            mat = self._process_sparse2(getattr(adata, attr)[attr_k], start, end)
+            mat = getattr(adata, attr)[attr_k][start:end]
         else:
-            mat = self._process_sparse2(getattr(adata, sparse_key), start, end)
+            mat = getattr(adata, sparse_key)[start:end]
+
         # just in case it is a dense matrix, convert it to a sparse matrix
-        mat = sp.csr_matrix(mat)
+        if not sp.issparse(mat):
+            mat = sp.csr_matrix(mat)
+            
         return mat
 
     def _process_cell_idx(self, cell_idx: np.ndarray) -> np.ndarray:
+        """
+        cell_idx: np.ndarray each item is a tuple of (file_idx, cell_idx)
+        Convert cell_idx to global cell indices
+        """
         for i in range(len(self.adatas)):
             where_file_i = cell_idx[:, 0] == i
             cell_idx[where_file_i, 1] += (self.cumsum_n_cells[i])
@@ -398,7 +359,7 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
     def transform(self, X: torch.Tensor, cell_idx: np.ndarray):
         """
         X: torch.Tensor
-        cell_idx: np.ndarray each item is a tuple of (file_idx, cell_idx)
+        cell_idx: np.ndarray each item is an integer of global cell index
         """
         obs = self.obs_master.iloc[cell_idx]
         obs_data = {}
@@ -499,19 +460,18 @@ class BlockBasedAnnDataset(torch.utils.data.IterableDataset):
                     end_idx = start_idx + self.batch_size
                     
                     batch_data = X[start_idx:end_idx, :]
-                    cell_idx = self._process_cell_idx(np.array(cell_idx[start_idx:end_idx]))
-                    yield self.transform(self._process_sparse(batch_data), cell_idx)
+                    mini_batch_cell_idx = self._process_cell_idx(np.array(cell_idx[start_idx:end_idx]))
+                    yield self.transform(self._process_sparse(batch_data), mini_batch_cell_idx)
             
             gidx += 1
 
 class DistributedCellLineBlockBasedAnnDataset(BlockBasedAnnDataset):
-
     def transform(self, X: torch.Tensor, cell_idx: np.ndarray):
         X, obs = super().transform(X, cell_idx)
         if X is None:
             return None
         cell_type = obs["cell_line"]
-        return X, torch.tensor(cell_type)
+        return cell_type
 
 class DistributedCellLineAnnDataset(DistributedAnnDataset):
     """
@@ -524,7 +484,7 @@ class DistributedCellLineAnnDataset(DistributedAnnDataset):
         X = super().transform(start, end)
         if X is None:
             return None
-        line_ids = self.ad.obs["cell_line"].iloc[start:end]
+        line_ids = self.ad.obs["cell_line"].iloc[start:end] # NOTE: What if multiple files?
         line_idx = np.searchsorted(self.cell_lines, line_ids)
         return X, torch.tensor(line_idx)
 
