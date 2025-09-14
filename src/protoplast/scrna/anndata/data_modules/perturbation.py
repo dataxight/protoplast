@@ -3,6 +3,7 @@ from torch.utils.data import Dataset, IterableDataset, get_worker_info
 import anndata
 import numpy as np
 import pandas as pd
+from braceexpand import braceexpand
 from collections import defaultdict
 import logging
 from typing import Optional, Sequence, Union, Dict, List, Tuple
@@ -14,6 +15,9 @@ import scipy.sparse
 from line_profiler import profile
 from protoplast.scrna.anndata.data_modules.utils import make_onehot_encoding_map
 from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset, AnnDataModule
+import toml
+import glob
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -21,6 +25,68 @@ formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(messag
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
+
+
+def parse_dataset_config(config_path: str) -> Dict:
+    """
+    Parse TOML config file for dataset configuration.
+    
+    Returns:
+        Dictionary with parsed config including file paths and split assignments
+    """
+    config = toml.load(config_path)
+    
+    # Expand dataset paths using glob patterns
+    expanded_datasets = {}
+    for dataset_name, pattern in config["datasets"].items():
+        files = list(braceexpand(pattern))
+        if not files:
+            logger.warning(f"No files found for dataset {dataset_name} with pattern {pattern}")
+            continue
+        expanded_datasets[dataset_name] = files
+    
+    # Create file to split mapping and per-target splits
+    file_splits = {}
+    target_splits = {}  # {(dataset, cell_type): {target: split}}
+    
+    # Parse fewshot rules for per-target splits
+    if "fewshot" in config:
+        for fewshot_key, split_rules in config["fewshot"].items():
+            # Extract dataset and cell type from key like "replogle_h1.ARC_H1"
+            if "." in fewshot_key:
+                dataset_name, cell_type = fewshot_key.split(".", 1)
+                target_splits[(dataset_name, cell_type)] = {}
+                
+                # Parse split rules like {"val": ["target1", "target2"], "test": ["target3"]}
+                for split_name, targets in split_rules.items():
+                    for target in targets:
+                        target_splits[(dataset_name, cell_type)][target] = split_name
+    
+    # Process each dataset
+    for dataset_name, files in expanded_datasets.items():
+        for file_path in files:
+            # Extract cell type from filename (assuming format like k562.h5, rpe1.h5, etc.)
+            cell_type = Path(file_path).stem
+            
+            # Default to train
+            split = "train"
+            
+            # Check zeroshot rules (entire cell types go to val/test)
+            zeroshot_key = f"{dataset_name}.{cell_type}"
+            if "zeroshot" in config and zeroshot_key in config["zeroshot"]:
+                split = config["zeroshot"][zeroshot_key]
+            
+            file_splits[file_path] = {
+                "split": split,
+                "dataset": dataset_name,
+                "cell_type": cell_type
+            }
+    
+    return {
+        "file_splits": file_splits,
+        "target_splits": target_splits,
+        "config": config
+    }
 
 
 
@@ -321,11 +387,44 @@ class PerturbationDataModule(AnnDataModule):
     PyTorch Lightning DataModule for perturbation scRNA-seq data.
     
     Subclasses AnnDataModule to work with PerturbationDataset.
+    
+    Usage Examples:
+    
+    1. Using config file:
+        dm = PerturbationDataModule(
+            config_path="path/to/config.toml",
+            pert_embedding_file="path/to/embeddings.pt"
+        )
+    
+    2. Manual file specification:
+        dm = PerturbationDataModule(
+            files=["file1.h5", "file2.h5"],
+            pert_embedding_file="path/to/embeddings.pt",
+            cell_type_label="cell_type",
+            target_label="target_gene"
+        )
+    
+    The config file should follow this structure:
+        [datasets]
+        dataset_name = "/path/to/files/{file1,file2,file3}.h5"
+        
+        [zeroshot]
+        "dataset_name.cell_type1" = "test"
+        "dataset_name.cell_type2" = "test"
+        
+        [dataset_opts]
+        cell_type_label = "cell_type"
+        target_label = "target_gene"
+        control_label = "non-targeting"
+        batch_label = "batch_var"
+        use_batches = true
+        n_basal_samples = 32
     """
     def __init__(
         self,
-        files: list[str],
-        pert_embedding_file: str,
+        files: list[str] = None,
+        pert_embedding_file: str = None,
+        config_path: str = None,
         num_workers: int = None,
         prefetch_factor: int = 2,
         cell_type_label: str = "cell_type",
@@ -338,10 +437,39 @@ class PerturbationDataModule(AnnDataModule):
         block_size: int = 2048,
         **kwargs
     ):
+        # Handle config-based initialization
+        if config_path:
+            config_data = parse_dataset_config(config_path)
+            file_splits = config_data["file_splits"]
+            target_splits = config_data["target_splits"]
+            config = config_data["config"]
+            
+            # Extract all files from config
+            if files is None:
+                files = list(file_splits.keys())
+            
+            # Override parameters from config if available
+            if "dataset_opts" in config:
+                dataset_opts = config["dataset_opts"]
+                cell_type_label = dataset_opts.get("cell_type_label", cell_type_label)
+                target_label = dataset_opts.get("target_label", target_label)
+                control_label = dataset_opts.get("control_label", control_label)
+                batch_label = dataset_opts.get("batch_label", batch_label)
+                use_batches = dataset_opts.get("use_batches", use_batches)
+                group_size_S = dataset_opts.get("n_basal_samples", group_size_S)
+            
+            if "loader" in config:
+                loader_opts = config["loader"]
+                num_workers = loader_opts.get("num_workers", num_workers)
+                prefetch_factor = loader_opts.get("prefetch_factor", prefetch_factor)
+        else:
+            file_splits = None
+            target_splits = None
+            
         if not kwargs.get("sparse_keys", None):
             kwargs["sparse_keys"] = ["X"]
 
-        indices = self.build_indices(files, target_label, control_label, block_size)
+        indices = self.build_indices(files, target_label, control_label, block_size, group_size_S, file_splits, target_splits)
         # Initialize parent with PerturbationDataset
         super().__init__(
             indices=indices,
@@ -368,8 +496,10 @@ class PerturbationDataModule(AnnDataModule):
                       target_label: str = "target_gene", 
                       control_label: str = "non-targeting", 
                       block_size: int = 2048,
-                      group_size_S: int = 32):
-        """Build indices for perturbation dataset."""
+                      group_size_S: int = 32,
+                      file_splits: Dict = None,
+                      target_splits: Dict = None):
+        """Build indices for perturbation dataset with fewshot support."""
         indices = {
             "files": files,
             "train_indices": [],
@@ -377,43 +507,83 @@ class PerturbationDataModule(AnnDataModule):
             "test_indices": [],
             "metadata": {},
         }
-        n_items = 0
-        # more split logic will go here, but only train for now
+        
+        n_items = {"train": 0, "val": 0, "test": 0}
+        
         for file_i, file in enumerate(files):
             adata = anndata.read_h5ad(file, backed="r")
             
+            # Get file metadata
+            if file_splits and file in file_splits:
+                file_info = file_splits[file]
+                file_split = file_info["split"]
+                dataset_name = file_info["dataset"]
+                cell_type = file_info["cell_type"]
+            else:
+                file_split = "train"  # default
+                dataset_name = "unknown"
+                cell_type = Path(file).stem
+            
+            # Get target-specific splits for this file
+            target_split_map = {}
+            if target_splits and (dataset_name, cell_type) in target_splits:
+                target_split_map = target_splits[(dataset_name, cell_type)]
+                logger.info(f"File {file} ({dataset_name}.{cell_type}): Using fewshot rules {target_split_map}")
+            
             # Create regions that respect target boundaries and minimum block size
             target_counts = adata.obs.groupby(target_label, observed=True).agg({target_label: "count"})
-            # each target will be yieled at least one item, but each target has more than group_size_S items, n items = n cells // group_size_S
-            non_control_targets = target_counts[target_counts.index != control_label]
-            items = np.array(non_control_targets[target_label]) // group_size_S
-            items[items == 0] = 1
-            n_items += np.sum(items)
-
             cumsum = np.cumsum(target_counts[target_label])
             cumsum = np.insert(cumsum, 0, 0)
             
-            # Group consecutive targets into blocks of minimum size
-            current_start = 0
+            # Track regions by split
+            split_regions = {"train": [], "val": [], "test": []}
+            
+            # Process each target individually for fewshot support
             for i in range(1, len(target_counts) + 1):
+                target_start = cumsum[i-1]
                 target_end = cumsum[i]
                 current_target = target_counts.index[i-1]
 
                 if current_target == control_label:
-                    # check if we have a lagging region , then close it
-                    if current_start != indices["train_indices"][-1][2]:
-                        indices["train_indices"].append((file_i, current_start, cumsum[i-1]))
-                    # start new region
-                    current_start = target_end
+                    continue  # Skip control targets for now
+                
+                # Determine split for this target
+                if current_target in target_split_map:
+                    target_split = target_split_map[current_target]
+                else:
+                    target_split = file_split  # Use file's default split
+                
+                # Count items for this target
+                target_size = target_end - target_start
+                items = target_size // group_size_S
+                if items == 0:
+                    items = 1
+                n_items[target_split] += items
+                
+                # Add target region to appropriate split
+                split_regions[target_split].append((target_start, target_end))
+            
+            # Create consolidated regions for each split, respecting block_size
+            for split_name, regions in split_regions.items():
+                if not regions:
                     continue
-
-                # If we've reached block size or it's the last target, create a region
-                if target_end - current_start >= block_size or i == len(target_counts):
-                    indices["train_indices"].append((file_i, current_start, target_end))
-                    current_start = target_end
-        indices["train_n_items"] = n_items
-        indices["val_n_items"] = 0  
-        indices["test_n_items"] = 0
+                    
+                # Sort regions by start position
+                regions.sort()
+                
+                # Group regions into blocks
+                current_start = regions[0][0]
+                for region_start, region_end in regions:
+                    # If we've reached block size or it's the last region, create a block
+                    if (region_end - current_start >= block_size or 
+                        (region_start, region_end) == regions[-1]):
+                        indices[f"{split_name}_indices"].append((file_i, current_start, region_end))
+                        if (region_start, region_end) != regions[-1]:
+                            current_start = region_end
+                    
+        indices["train_n_items"] = n_items["train"]
+        indices["val_n_items"] = n_items["val"]
+        indices["test_n_items"] = n_items["test"]
         return indices
 
     @profile
@@ -503,29 +673,53 @@ class PerturbationDataModule(AnnDataModule):
             )
 
 if __name__ == "__main__":
-    import glob
-    files = glob.glob("/mnt/hdd2/tan/competition_support_set_sorted/*.h5")
+    # Test with fewshot config file
+    config_path = "notebooks/test-fewshot-config.toml"
+    
     dm = PerturbationDataModule(
-        files=files,
+        config_path=config_path,
         barcodes=True,
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt"
     )
     dm.setup(stage="fit")
-    dataloader = DataLoader(dm.train_ds, batch_size=16, collate_fn=PerturbationDataModule.collate_fn, num_workers=8, pin_memory=True, persistent_workers=False)
-    iter = 0
-    for batch in dm.train_ds:
-        print("Batch keys:", batch.keys())
-        print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
-        print(batch['pert_cell_emb'])
-        print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
-        print(batch['ctrl_cell_emb'])
-        print("cell_type_onehot shape:", batch['cell_type_onehot'].shape)
-        print("batch_onehot shape:", batch['batch_onehot'].shape)
-        print("pert_emb shape:", batch['pert_emb'].shape)
-        print("pert_name:", batch['pert_name'])
-        print("pert_cell_barcode shape:", batch['pert_cell_barcode'].shape)
-        print(batch['pert_cell_barcode'])
-        print("ctrl_cell_barcode shape:", batch['ctrl_cell_barcode'].shape)
-        print(batch['ctrl_cell_barcode'])
-        print("cell_type:", batch['cell_type'])
-        break
+    
+    print(f"Training samples: {dm.indices['train_n_items']}")
+    print(f"Validation samples: {dm.indices['val_n_items']}")  
+    print(f"Test samples: {dm.indices['test_n_items']}")
+    print(f"Training regions: {len(dm.indices['train_indices'])}")
+    print(f"Validation regions: {len(dm.indices['val_indices'])}")
+    print(f"Test regions: {len(dm.indices['test_indices'])}")
+    
+    # Show some sample regions
+    if dm.indices['train_indices']:
+        print(f"Sample train regions: {dm.indices['train_indices'][:3]}")
+    if dm.indices['val_indices']:
+        print(f"Sample val regions: {dm.indices['val_indices'][:3]}")
+    if dm.indices['test_indices']:
+        print(f"Sample test regions: {dm.indices['test_indices'][:3]}")
+    
+    # Test train dataloader
+    if dm.indices['train_n_items'] > 0:
+        print("\n=== Testing Training Data ===")
+        for i, batch in enumerate(dm.train_ds):
+            print("Batch keys:", batch.keys())
+            print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
+            print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
+            print("cell_type_onehot shape:", batch['cell_type_onehot'].shape)
+            print("batch_onehot shape:", batch['batch_onehot'].shape)
+            print("pert_emb shape:", batch['pert_emb'].shape)
+            print("pert_name:", batch['pert_name'])
+            print("cell_type:", batch['cell_type'])
+            if i >= 2:  # Just show first few samples
+                break
+    
+    # Test test dataloader
+    if dm.indices['val_n_items'] > 0:
+        print("\n=== Testing Val Data ===")
+        dm.setup(stage="val")
+        for i, batch in enumerate(dm.val_ds):  # val_ds is used for test stage
+            print("Val batch keys:", batch.keys())
+            print("Val pert_name:", batch['pert_name'])
+            print("Val cell_type:", batch['cell_type'])
+            if i >= 2:  # Just show first few samples
+                break
