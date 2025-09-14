@@ -53,7 +53,7 @@ def benchmark(loader, n_samples, batch_size, max_iteration=None, warmup_iteratio
     batch_time = time.time()
     # we warmup for the first warmup_iteration iterations, then we run for max_iteration iterations
     max_iteration += warmup_iteration
-    for i, _batch in tqdm(enumerate(loader_iter), total=max_iteration):
+    for i, _batch in tqdm(enumerate(loader_iter), total=min(max_iteration, len(loader) + warmup_iteration)):
         if i < warmup_iteration:
             batch_time = time.time()
             continue
@@ -136,10 +136,18 @@ def main():
         pin_memory=False,
         persistent_workers=False,
     )
+    dm.setup(stage="fit")
+    dataloader = DataLoader(dm.train_ds, 
+                            batch_size=args.batch_size, 
+                            collate_fn=PerturbationDataModule.collate_fn, 
+                            num_workers=args.n_workers, 
+                            pin_memory=True, 
+                            persistent_workers=False)
+
     samples_per_sec, time_per_sample, batch_times, peak_memory = benchmark(
         dataloader,
         n_cells,
-        args.batch_size,
+        args.batch_size * 64 * 2,
         max_iteration=args.max_iteration,
         warmup_iteration=args.warmup_iteration,
         sampling_memory_step=args.sampling_memory_step,
