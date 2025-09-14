@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset, ann_split_data
+from protoplast.scrna.anndata.data_modules.perturbation import PerturbationDataModule, PerturbationDataset
 
 
 def get_total_memory_mb() -> float:
@@ -37,7 +38,7 @@ def benchmark(loader, n_samples, batch_size, max_iteration=None, warmup_iteratio
     batch_time = time.time()
     # we warmup for the first warmup_iteration iterations, then we run for max_iteration iterations
     max_iteration += warmup_iteration
-    for i, _batch in tqdm(enumerate(loader_iter), total=max_iteration):
+    for i, _batch in tqdm(enumerate(loader_iter), total=min(max_iteration, len(loader) + warmup_iteration)):
         if i < warmup_iteration:
             continue
         batch_times.append(time.time() - batch_time)
@@ -99,19 +100,32 @@ def main():
     for file in files:
         n_cells += ad.read_h5ad(file, backed="r").n_obs
 
-    ds = DistributedAnnDataset(file_paths=files, indices=indices["train_indices"], sparse_keys=["X"], metadata={})
-    dataloader = DataLoader(
-        ds,
-        batch_size=None,
-        num_workers=N_WORKERS,
-        prefetch_factor=PREFETCH_FACTOR,
-        pin_memory=False,
-        persistent_workers=False,
+    # ds = DistributedAnnDataset(file_paths=files, indices=indices["train_indices"], sparse_keys=["X"], metadata={})
+    # dataloader = DataLoader(
+    #     ds,
+    #     batch_size=None,
+    #     num_workers=N_WORKERS,
+    #     prefetch_factor=PREFETCH_FACTOR,
+    #     pin_memory=False,
+    #     persistent_workers=False,
+    # )
+    dm = PerturbationDataModule(
+        files=files,
+        pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt",
+        group_size_S=64,
     )
+    dm.setup(stage="fit")
+    dataloader = DataLoader(dm.train_ds, 
+                            batch_size=args.batch_size, 
+                            collate_fn=PerturbationDataModule.collate_fn, 
+                            num_workers=args.n_workers, 
+                            pin_memory=True, 
+                            persistent_workers=False)
+
     samples_per_sec, time_per_sample, batch_times, peak_memory = benchmark(
         dataloader,
         n_cells,
-        args.batch_size,
+        args.batch_size * 64 * 2,
         max_iteration=args.max_iteration,
         warmup_iteration=args.warmup_iteration,
         sampling_memory_step=args.sampling_memory_step,

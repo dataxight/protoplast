@@ -1,6 +1,5 @@
 import torch
 from torch.utils.data import Dataset, IterableDataset, get_worker_info
-import scplode as sp
 import anndata
 import numpy as np
 from collections import defaultdict
@@ -8,9 +7,10 @@ import logging
 from typing import Optional, Sequence, Union, Dict, List, Tuple
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
+import torch.distributed as td
 import os
 import scipy.sparse
-
+from line_profiler import profile
 from protoplast.scrna.anndata.data_modules.utils import make_onehot_encoding_map
 from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset, AnnDataModule
 
@@ -100,6 +100,7 @@ class PerturbationDataset(DistributedAnnDataset):
         self.cell_type_ctrl_regions = defaultdict(list)  # {cell_type: [(start, end), ...]} per file
         
         self._initialize_region_mappings()
+        self._initialized_worker_info = False
 
     def _get_mat_by_range(self, adata: anndata.AnnData, start: int, end: int):
         """Get matrix by range."""
@@ -110,7 +111,29 @@ class PerturbationDataset(DistributedAnnDataset):
             return mat
         else:
             raise ValueError(f"Multiple sparse keys are not supported for perturbation dataset: {self.sparse_keys}")
-    
+
+    def _init_worker_info(self):
+        self._initialized_worker_info = True
+        worker_info = get_worker_info()
+        if worker_info is None:
+            self.wid = 0
+            self.nworkers = 1
+        else:
+            self.wid = worker_info.id
+            self.nworkers = worker_info.num_workers
+        try:
+            w_rank = td.get_rank()
+            w_size = td.get_world_size()
+        except ValueError:
+            w_rank = -1
+            w_size = -1
+        if w_rank >= 0:
+            self.ray_rank = w_rank
+            self.ray_size = w_size
+        else:
+            self.ray_rank = 0
+            self.ray_size = 1
+
     def _initialize_region_mappings(self):
         """Initialize region mappings for target genes, cell types, and controls."""
         # Load adatas to analyze structure
@@ -203,7 +226,6 @@ class PerturbationDataset(DistributedAnnDataset):
     def get_batch_onehot(self, batch: str):
         """Get onehot encoding for batch."""
         return self.batches_onehot_map[batch]
-    
     
     def _sample_cells(self, X: scipy.sparse.csr_matrix, target_number: int, barcodes: np.ndarray = None):
         """
@@ -325,22 +347,27 @@ class PerturbationDataset(DistributedAnnDataset):
                 
         return X_sampled, most_common_batch, pert_barcodes
 
+    def __len__(self):
+        return len(self.batches)
+
     def __iter__(self):
         """Iterate over perturbation samples."""
         gidx = 0
-        
+        if not self._initialized_worker_info:
+            self._init_worker_info()
         # Load anndata objects in backed mode
         if self.adatas is None:
             self.adatas = [anndata.read_h5ad(f, backed="r") for f in self.files]
             
-        for region in self.batches:
+        for region_idx, region in enumerate(self.batches):
             file_id, target, start, end = region
-            
+
+            # print("I'm in worker", self.wid, self.ray_rank, self.ray_size, self.nworkers) 
             # Skip control samples and worker/rank filtering
             if target == self.control_label or not (gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid):
                 gidx += 1
                 continue
-                
+
             try:
                 # Get perturbation cells
                 X_pert, batch, pert_barcodes = self.transform(file_id, target, start, end)
@@ -451,6 +478,7 @@ class PerturbationDataModule(AnnDataModule):
                 indices["train_indices"].append((file_i, target, start, end))
         return indices
 
+    @profile
     @staticmethod
     def collate_fn(batch):
         """Collate function for perturbation dataset."""
@@ -538,18 +566,20 @@ class PerturbationDataModule(AnnDataModule):
             )
 
 if __name__ == "__main__":
+    import glob
+    files = glob.glob("/mnt/hdd2/tan/competition_support_set_sorted/*.h5")
     dm = PerturbationDataModule(
-        files=["/mnt/hdd2/tan/competition_support_set_sorted/jurkat.h5",
-        "/mnt/hdd2/tan/competition_support_set_sorted/competition_train.h5"
-        ],
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt"
     )
     dm.setup(stage="fit")
     dataloader = DataLoader(dm.train_ds, batch_size=16, collate_fn=PerturbationDataModule.collate_fn, num_workers=8, pin_memory=True, persistent_workers=False)
+    iter = 0
     for batch in dataloader:
         print("Batch keys:", batch.keys())
         print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
         print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
         print("pert_emb shape:", batch['pert_emb'].shape)
         print("pert_name:", batch['pert_name'])
-        break
+        iter += 1
+        if iter >= 10:
+            break
