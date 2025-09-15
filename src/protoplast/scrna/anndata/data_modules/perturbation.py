@@ -10,14 +10,18 @@ from typing import Optional, Sequence, Union, Dict, List, Tuple
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 import torch.distributed as td
+from copy import deepcopy
+import h5py
 import os
 import scipy.sparse
 from line_profiler import profile
-from protoplast.scrna.anndata.data_modules.utils import make_onehot_encoding_map
+from protoplast.scrna.anndata.data_modules.utils import make_onehot_encoding_map, parse_dataset_config
 from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset, AnnDataModule
 import toml
 import glob
+import hdf5plugin
 from pathlib import Path
+from anndata._core.sparse_dataset import sparse_dataset
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -25,70 +29,6 @@ formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(messag
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
-
-
-def parse_dataset_config(config_path: str) -> Dict:
-    """
-    Parse TOML config file for dataset configuration.
-    
-    Returns:
-        Dictionary with parsed config including file paths and split assignments
-    """
-    config = toml.load(config_path)
-    
-    # Expand dataset paths using glob patterns
-    expanded_datasets = {}
-    for dataset_name, pattern in config["datasets"].items():
-        files = list(braceexpand(pattern))
-        if not files:
-            logger.warning(f"No files found for dataset {dataset_name} with pattern {pattern}")
-            continue
-        expanded_datasets[dataset_name] = files
-    
-    # Create file to split mapping and per-target splits
-    file_splits = {}
-    target_splits = {}  # {(dataset, cell_type): {target: split}}
-    
-    # Parse fewshot rules for per-target splits
-    if "fewshot" in config:
-        for fewshot_key, split_rules in config["fewshot"].items():
-            # Extract dataset and cell type from key like "replogle_h1.ARC_H1"
-            if "." in fewshot_key:
-                dataset_name, cell_type = fewshot_key.split(".", 1)
-                target_splits[(dataset_name, cell_type)] = {}
-                
-                # Parse split rules like {"val": ["target1", "target2"], "test": ["target3"]}
-                for split_name, targets in split_rules.items():
-                    for target in targets:
-                        target_splits[(dataset_name, cell_type)][target] = split_name
-    
-    # Process each dataset
-    for dataset_name, files in expanded_datasets.items():
-        for file_path in files:
-            # Extract cell type from filename (assuming format like k562.h5, rpe1.h5, etc.)
-            cell_type = Path(file_path).stem
-            
-            # Default to train
-            split = "train"
-            
-            # Check zeroshot rules (entire cell types go to val/test)
-            zeroshot_key = f"{dataset_name}.{cell_type}"
-            if "zeroshot" in config and zeroshot_key in config["zeroshot"]:
-                split = config["zeroshot"][zeroshot_key]
-            
-            file_splits[file_path] = {
-                "split": split,
-                "dataset": dataset_name,
-                "cell_type": cell_type
-            }
-    
-    return {
-        "file_splits": file_splits,
-        "target_splits": target_splits,
-        "config": config
-    }
-
-
 
 
 class PerturbationDataset(DistributedAnnDataset):
@@ -132,6 +72,8 @@ class PerturbationDataset(DistributedAnnDataset):
         self.group_size_S = group_size_S
         self.barcodes = barcodes
         self.n_items = n_items
+        self.h5files = None
+        self.adata_obs = None
 
         self.pert_embedding = torch.load(pert_embedding_file)
 
@@ -141,10 +83,13 @@ class PerturbationDataset(DistributedAnnDataset):
         self._initialize_region_mappings()
         self._initialized_worker_info = False
 
-    def _get_mat_by_range(self, adata: anndata.AnnData, start: int, end: int):
+    
+    def _get_mat_by_range(self, h5file: h5py.File, start: int, end: int):
         """Get matrix by range."""
         if len(self.sparse_keys) == 1:
-            mat = getattr(adata, self.sparse_keys[0])[start:end]
+            # mat = getattr(adata, self.sparse_keys[0])[start:end]
+            mat = sparse_dataset(h5file[self.sparse_keys[0]])
+            mat = mat[start:end]
             if not scipy.sparse.issparse(mat):
                 mat = scipy.sparse.csr_matrix(mat)
             return mat
@@ -254,11 +199,11 @@ class PerturbationDataset(DistributedAnnDataset):
         Yields:
             Tuple of (X_pert, cell_indices) for each target group
         """
-        adata = self.adatas[file_i]
-        X = self._get_mat_by_range(adata, start, end)
+        adata_obs = self.adata_obs[file_i]
+        X = self._get_mat_by_range(self.h5files[file_i], start, end)
         
         # Get targets in this region
-        targets = adata.obs[self.target_label][start:end].values
+        targets = adata_obs[self.target_label][start:end].values
         target_counts = pd.Series(targets).value_counts()
         target_cumsum = target_counts.cumsum()
         target_cumsum = np.insert(target_cumsum.values, 0, 0)
@@ -305,11 +250,11 @@ class PerturbationDataset(DistributedAnnDataset):
         if (end - start) > target_number:
             start_pos = np.random.randint(0, end - start - target_number + 1)
             end_pos = start_pos + target_number
-            X = self._get_mat_by_range(self.adatas[file_i], start_pos, end_pos)
-            barcodes = self.adatas[file_i].obs_names[start_pos:end_pos].values
+            X = self._get_mat_by_range(self.h5files[file_i], start_pos, end_pos)
+            barcodes = self.adata_obs[file_i].index[start_pos:end_pos].values
         else:
-            X = self._get_mat_by_range(self.adatas[file_i], start, end)
-            barcodes = self.adatas[file_i].obs_names[start:end].values
+            X = self._get_mat_by_range(self.h5files[file_i], start, end)
+            barcodes = self.adata_obs[file_i].index[start:end].values
 
         # if not enough cells, sample with replacement
         if X.shape[0] < target_number:
@@ -327,8 +272,10 @@ class PerturbationDataset(DistributedAnnDataset):
         if not self._initialized_worker_info:
             self._init_worker_info()
         # Load anndata objects in backed mode
-        if self.adatas is None:
-            self.adatas = [anndata.read_h5ad(f, backed="r") for f in self.files]
+        if self.adata_obs is None:
+            self.adata_obs = [deepcopy(anndata.read_h5ad(f, backed="r").obs) for f in self.files]
+        if self.h5files is None:
+            self.h5files = [h5py.File(f, 'r', libver='latest', swmr=True) for f in self.files]
             
         for region_idx, region in enumerate(self.batches):
             file_i, start, end = region
@@ -339,13 +286,13 @@ class PerturbationDataset(DistributedAnnDataset):
 
             try:
                 # Get cell type (each file is one cell type only)
-                cell_type = self.adatas[file_i].obs[self.cell_type_label].iloc[0]
+                cell_type = self.adata_obs[file_i][self.cell_type_label].iloc[0]
                 
                 # Process each target in this region
                 for X_pert, cell_indices, target in self._produce_data(file_i, start, end):
                     
                     # Get batches for perturbation cells
-                    batches = self.adatas[file_i].obs[self.batch_label].iloc[cell_indices].values
+                    batches = self.adata_obs[file_i][self.batch_label].iloc[cell_indices].values
                     
                     # Get control cells with matching covariates
                     X_ctrl, ctrl_barcodes = self.sampling_control(cell_type, file_i, self.group_size_S)
@@ -358,7 +305,7 @@ class PerturbationDataset(DistributedAnnDataset):
                     # Get barcodes for perturbation cells if needed
                     pert_barcodes = None
                     if self.barcodes:
-                        pert_barcodes = self.adatas[file_i].obs_names[cell_indices].values
+                        pert_barcodes = self.adata_obs[file_i].index[cell_indices].values
                     
                     # Create sample dictionary
                     sample = {
@@ -379,7 +326,8 @@ class PerturbationDataset(DistributedAnnDataset):
                     yield sample
                 
             except Exception as e:
-                logger.warning(f"Error processing region {region}: {e}")
+                # logger.warning(f"Error processing region {region}: {e}")
+                raise e
                 
 
 class PerturbationDataModule(AnnDataModule):
@@ -435,6 +383,7 @@ class PerturbationDataModule(AnnDataModule):
         group_size_S: int = 32,
         barcodes: bool = False,
         block_size: int = 2048,
+        batch_size: int = 64,
         **kwargs
     ):
         # Handle config-based initialization
@@ -480,6 +429,10 @@ class PerturbationDataModule(AnnDataModule):
 
         if not num_workers is None:
             self.loader_config["num_workers"] = num_workers
+
+        # set collate fn
+        self.loader_config["collate_fn"] = self.collate_fn
+        self.loader_config["batch_size"] = batch_size
         
         # Store perturbation-specific parameters
         self.pert_embedding_file = pert_embedding_file
