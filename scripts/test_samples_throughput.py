@@ -8,8 +8,8 @@ import psutil
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset
 from protoplast.scrna.anndata.strategy import ann_split_data
+from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset
 
 
 def get_total_memory_mb() -> float:
