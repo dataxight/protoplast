@@ -60,9 +60,9 @@ if __name__ == "__main__":
     )
     trainer.train(
         args.file_paths,
-        args.thread_per_worker,
         args.batch_size,
         args.test_size,
         args.val_size,
+        thread_per_worker=args.thread_per_worker,
         ckpt_path=args.ckpt_path,
     )

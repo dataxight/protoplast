@@ -206,3 +206,5 @@ __marimo__/
 
 # Emacs
 *~
+
+lightning_logs/

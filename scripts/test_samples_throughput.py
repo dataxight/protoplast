@@ -8,7 +8,8 @@ import psutil
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset, ann_split_data
+from protoplast.scrna.anndata.strategy import ann_split_data
+from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset
 
 
 def get_total_memory_mb() -> float:
@@ -92,7 +93,7 @@ def main():
     PREFETCH_FACTOR = 16
     # Example how to test throughput with DistributedAnnDataset
     files = glob.glob(args.data_glob)
-    indices = ann_split_data(files, batch_size=args.batch_size, test_size=0.0, validation_size=0.0)
+    indices = ann_split_data(files, total_workers=1, batch_size=args.batch_size, test_size=0.0, validation_size=0.0)
 
     n_cells = 0
 

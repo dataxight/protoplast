@@ -1,4 +1,5 @@
 import os
+import time
 from collections.abc import Callable, Iterable
 
 import lightning.pytorch as pl
@@ -12,7 +13,8 @@ from lightning.pytorch.strategies import Strategy
 
 import anndata
 
-from .torch_dataloader import AnnDataModule, DistributedAnnDataset, ann_split_data, cell_line_metadata_cb
+from .strategy import SequentialShuffleStrategy, ShuffleStrategy
+from .torch_dataloader import AnnDataModule, DistributedAnnDataset, cell_line_metadata_cb
 
 
 class RayTrainRunner:
@@ -25,22 +27,22 @@ class RayTrainRunner:
         metadata_cb: Callable[[anndata.AnnData, dict], None] = cell_line_metadata_cb,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
-        splitter: Callable[
-            [list[str], int, float, float, int, Callable[[anndata.AnnData, dict], None], bool], dict
-        ] = ann_split_data,
+        shuffle_strategy: ShuffleStrategy = SequentialShuffleStrategy,
         runtime_env_config: dict | None = None,
         address: str | None = None,
         ray_trainer_strategy: Strategy | None = None,
         sparse_keys: Iterable[str] = ("X",),
+        max_open_files: int = 3,
     ):
         self.Model = Model
         self.Ds = Ds
         self.model_keys = model_keys
         self.metadata_cb = metadata_cb
-        self.splitter = splitter
+        self.shuffle_strategy = shuffle_strategy
         self.sparse_keys = sparse_keys
         self.before_dense_cb = before_dense_cb
         self.after_dense_cb = after_dense_cb
+        self.max_open_files = max_open_files
         if not ray_trainer_strategy:
             self.ray_trainer_strategy = ray.train.lightning.RayDDPStrategy()
         else:
@@ -54,12 +56,12 @@ class RayTrainRunner:
     def train(
         self,
         file_paths: list[str],
-        thread_per_worker: int,
         batch_size: int,
         test_size: float,
         val_size: float,
         prefetch_factor: int = 4,
         max_epochs: int = 1,
+        thread_per_worker: int | None = None,
         num_workers: int | None = None,
         result_storage_path: str = "~/protoplast_results",
         # read more here: https://lightning.ai/docs/pytorch/stable/common/trainer.html#fit
@@ -68,21 +70,16 @@ class RayTrainRunner:
         random_seed: int | None = 42,
         resource_per_worker: dict | None = None,
         is_shuffled: bool = True,
+        **kwargs,
     ):
         self.result_storage_path = result_storage_path
         self.prefetch_factor = prefetch_factor
         self.max_epochs = max_epochs
-        indices = self.splitter(
-            file_paths,
-            batch_size,
-            test_size,
-            val_size,
-            random_seed,
-            metadata_cb=self.metadata_cb,
-            is_shuffled=is_shuffled,
-        )
-        train_config = {"indices": indices, "ckpt_path": ckpt_path}
+        self.kwargs = kwargs
         if not resource_per_worker:
+            if not thread_per_worker:
+                print("Setting thread_per_worker to half of the available CPUs capped at 4")
+                thread_per_worker = min(int(self.resources.get("CPU", 1) / 2), 4)
             resource_per_worker = {"CPU": thread_per_worker}
         if is_gpu:
             if num_workers is None:
@@ -96,6 +93,22 @@ class RayTrainRunner:
             scaling_config = ray.train.ScalingConfig(
                 num_workers=num_workers, use_gpu=False, resources_per_worker=resource_per_worker
             )
+        print(f"Using {num_workers} workers with {resource_per_worker} each")
+        start = time.time()
+        shuffle_stragey = self.shuffle_strategy(
+            file_paths,
+            batch_size,
+            num_workers,
+            test_size,
+            val_size,
+            random_seed,
+            metadata_cb=self.metadata_cb,
+            is_shuffled=is_shuffled,
+            **kwargs,
+        )
+        indices = shuffle_stragey.split()
+        print(f"Data splitting time: {time.time() - start:.2f} seconds")
+        train_config = {"indices": indices, "ckpt_path": ckpt_path, "shuffle_stragey": shuffle_stragey}
         my_train_func = self._trainer()
         par_trainer = ray.train.torch.TorchTrainer(
             my_train_func,
@@ -119,9 +132,17 @@ class RayTrainRunner:
             ckpt_path = config.get("ckpt_path")
             num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
             print(f"=========Starting the training on {rank} with num threads: {num_threads}=========")
-            model_params = indices["metadata"]
+            model_params = indices.metadata
+            shuffle_stragey = config.get("shuffle_stragey")
             ann_dm = AnnDataModule(
-                indices, Ds, self.prefetch_factor, self.sparse_keys, self.before_dense_cb, self.after_dense_cb
+                indices,
+                Ds,
+                self.prefetch_factor,
+                self.sparse_keys,
+                shuffle_stragey,
+                self.before_dense_cb,
+                self.after_dense_cb,
+                **self.kwargs,
             )
             if model_keys:
                 model_params = {k: v for k, v in model_params.items() if k in model_keys}

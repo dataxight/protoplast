@@ -1,10 +1,10 @@
 import os
-import random
-import warnings
+from collections import Counter
 from collections.abc import Callable
 
 import lightning.pytorch as pl
 import numpy as np
+import pandas as pd
 import scipy.sparse as sp
 import torch
 import torch.distributed as td
@@ -14,79 +14,10 @@ import anndata
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
 from protoplast.patches.anndata_remote import apply_file_backing_patch
 
+from .strategy import ShuffleStrategy, SplitInfo
+
 apply_file_backing_patch()
 apply_read_h5ad_backed_patch()
-
-
-def ann_split_data(
-    file_paths: list[str],
-    batch_size: int,
-    test_size: float | None = None,
-    validation_size: float | None = None,
-    random_seed: int | None = 42,
-    metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
-    is_shuffled: bool = True,
-):
-    def to_batches(n):
-        return [(i, min(i + batch_size, n)) for i in range(0, n, batch_size)]
-
-    rng = random.Random(random_seed) if random_seed else random.Random()
-
-    # First pass: compute total batches across all files
-    file_batches = []
-    total_batches = 0
-    metadata = dict()
-    for i, fp in enumerate(file_paths):
-        ad = anndata.read_h5ad(fp, backed="r")
-        if i == 0 and metadata_cb:
-            metadata_cb(ad, metadata)
-
-        n_obs = ad.n_obs
-        if batch_size > n_obs:
-            warnings.warn(
-                f"Batch size ({batch_size}) is greater than number of observations "
-                f"in file {fp} ({n_obs}). Only one batch will be created.",
-                stacklevel=2,
-            )
-
-        batches = to_batches(n_obs)
-        total_batches += len(batches)
-        file_batches.append(batches)
-
-    # Safety check
-    if (test_size or 0) + (validation_size or 0) > 1:
-        raise ValueError("test_size + validation_size must be <= 1")
-
-    # How many batches should go to validation & test globally?
-    val_total = int(total_batches * validation_size) if validation_size else 0
-    test_total = int(total_batches * test_size) if test_size else 0
-
-    train_datas, validation_datas, test_datas = [], [], []
-
-    # Second pass: allocate splits proportionally per file
-    for batches in file_batches:
-        if is_shuffled:
-            rng.shuffle(batches)
-        n = len(batches)
-
-        val_n = int(round(n / total_batches * val_total)) if validation_size else 0
-        test_n = int(round(n / total_batches * test_total)) if test_size else 0
-
-        val_split = batches[:val_n]
-        test_split = batches[val_n : val_n + test_n]
-        train_split = batches[val_n + test_n :]
-
-        validation_datas.append(val_split)
-        test_datas.append(test_split)
-        train_datas.append(train_split)
-
-    return dict(
-        files=file_paths,
-        train_indices=train_datas,
-        val_indices=validation_datas,
-        test_indices=test_datas,
-        metadata=metadata,
-    )
 
 
 def cell_line_metadata_cb(ad: anndata.AnnData, metadata: dict):
@@ -117,6 +48,26 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         for k, v in metadata.items():
             setattr(self, k, v)
         self.metadata = metadata
+        self.batches = indices
+
+    @classmethod
+    def create_distributed_ds(cls, indices: SplitInfo, sparse_keys: list[str], mode: str = "train", **kwargs):
+        """
+        indices is in the following format
+        {
+            "files": [path to anndata must correspond to indices],
+            "train_indices": [[correspond to files[0]], [correspond to files[i]] ],
+            "test_indices": [[correspond to files[0]], [correspond to files[i]] ],
+            "metadata": {
+                ...,
+                depends on metadata_cb read more on cell_line_metadata_cb
+            }
+        }
+        """
+        indices = indices.to_dict() if isinstance(indices, SplitInfo) else indices
+        return cls(indices["files"], indices[f"{mode}_indices"], indices["metadata"], sparse_keys, **kwargs)
+
+    def _init_rank(self):
         worker_info = get_worker_info()
         if worker_info is None:
             self.wid = 0
@@ -136,23 +87,8 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         else:
             self.ray_rank = 0
             self.ray_size = 1
-        self.batches = indices
-
-    @classmethod
-    def create_distributed_ds(cls, indices: dict, sparse_keys: list[str], mode: str = "train"):
-        """
-        indices is in the following format
-        {
-            "files": [path to anndata must correspond to indices],
-            "train_indices": [[correspond to files[0]], [correspond to files[i]] ],
-            "test_indices": [[correspond to files[0]], [correspond to files[i]] ],
-            "metadata": {
-                ...,
-                depends on metadata_cb read more on cell_line_metadata_cb
-            }
-        }
-        """
-        return cls(indices["files"], indices[f"{mode}_indices"], indices["metadata"], sparse_keys)
+        self.global_rank = self.ray_rank * self.nworkers + self.wid
+        self.total_workers = self.ray_size * self.nworkers
 
     def _process_sparse(self, mat) -> torch.Tensor:
         if sp.issparse(mat):
@@ -180,16 +116,94 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             return None
         return tuple(mats)
 
+    def __len__(self):
+        return sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
+
     def __iter__(self):
+        self._init_rank()
         gidx = 0
+        total_iter = 0
         for fidx, f in enumerate(self.files):
             self.ad = anndata.read_h5ad(f, backed="r")
             for start, end in self.batches[fidx]:
-                if gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid:
-                    data = self.transform(start, end)
-                    if data is not None:
-                        yield self.transform(start, end)
+                if (gidx % self.total_workers) == self.global_rank:
+                    yield self.transform(start, end)
+                    total_iter += 1
                 gidx += 1
+
+
+class DistributedFileSharingAnnDataset(DistributedAnnDataset):
+    def __init__(self, file_paths, indices, metadata, sparse_keys, max_open_files: int = 3):
+        super().__init__(file_paths, indices, metadata, sparse_keys)
+        self.max_open_files = max_open_files
+        self.fptr = dict()
+        self.sample_ptr = Counter()
+        self.buf_ptr = Counter()
+        self.fptr_buf = dict()
+        self.file_idx = {f: i for i, f in enumerate(self.files)}
+        self.current_files = set()
+        self.current_fp_idx = -1
+
+    @staticmethod
+    def _safe_index(obj, idx):
+        if isinstance(obj, (pd.DataFrame | pd.Series)):
+            return obj.iloc[idx]
+        else:
+            return obj[idx]
+
+    def _get_data(self, idx, data):
+        if (type(data) is list) or (type(data) is tuple):
+            yield tuple(self._safe_index(d, idx) for d in data)
+        elif isinstance(data, dict):
+            yield {k: self._safe_index(v, idx) for k, v in data.items()}
+        elif isinstance(data, torch.Tensor):
+            yield data[idx]
+        else:
+            raise ValueError("Unsupported data type")
+
+    def _init_buffer(self, f):
+        start, end = self.batches[self.file_idx[f]][self.buf_ptr[f]]
+        self.ad = self.fptr[f]
+        # can add code to support multiple buffer if require more randomness and shard it
+        # during each iteration but for Tahoe this is good enough
+        self.fptr_buf[f] = self.transform(start, end)
+
+    def _get_batch_size(self, f):
+        start, end = self.batches[self.file_idx[f]][self.buf_ptr[f]]
+        return end - start
+
+    def __iter__(self):
+        self._init_rank()
+        for i, f in enumerate(self.files):
+            if i < self.max_open_files:
+                self.fptr[f] = anndata.read_h5ad(f, backed="r")
+                self.current_files.add(f)
+                self.current_fp_idx = i
+                self._init_buffer(f)
+        while len(self.current_files) > 0:
+            for f in list(self.current_files):
+                if (self.sample_ptr[f] % self.total_workers) == self.global_rank:
+                    yield from self._get_data(self.sample_ptr[f], self.fptr_buf[f])
+                self.sample_ptr[f] += 1
+                if self.sample_ptr[f] >= self._get_batch_size(f):
+                    if self.buf_ptr[f] >= len(self.batches[self.file_idx[f]]) - 1:
+                        # removing current file
+                        del self.fptr[f]
+                        del self.fptr_buf[f]
+                        del self.sample_ptr[f]
+                        del self.buf_ptr[f]
+                        self.current_files.remove(f)
+                        # replacing with new file if exist
+                        if self.current_fp_idx < len(self.files):
+                            new_file = self.files[self.current_fp_idx]
+                            self.fptr[new_file] = anndata.read_h5ad(new_file, backed="r")
+                            self.current_files.add(new_file)
+                            self.current_fp_idx += 1
+                            self._init_buffer(new_file)
+                        break
+                    self.sample_ptr[f] = 0
+                    self.buf_ptr[f] += 1
+                    self._init_buffer(f)
 
 
 class DistributedCellLineAnnDataset(DistributedAnnDataset):
@@ -215,27 +229,41 @@ class AnnDataModule(pl.LightningDataModule):
         dataset: DistributedAnnDataset,
         prefetch_factor: int,
         sparse_keys: list[str],
+        shuffle_strategy: ShuffleStrategy,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
+        **kwargs,
     ):
         super().__init__()
         self.indices = indices
         self.dataset = dataset
         num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
-        self.loader_config = dict(batch_size=None, num_workers=num_threads, prefetch_factor=prefetch_factor)
+        self.loader_config = dict(
+            num_workers=num_threads,
+        )
+        if num_threads > 0:
+            self.loader_config["prefetch_factor"] = prefetch_factor
+            self.loader_config["persistent_workers"] = True
+        if shuffle_strategy.is_mixer:
+            self.loader_config["batch_size"] = shuffle_strategy.mini_batch_size
+            self.loader_config["collate_fn"] = shuffle_strategy.mixer
+            self.loader_config["drop_last"] = True
+        else:
+            self.loader_config["batch_size"] = None
         self.sparse_keys = sparse_keys
         self.before_dense_cb = before_dense_cb
         self.after_dense_cb = after_dense_cb
+        self.kwargs = kwargs
 
     def setup(self, stage):
         # this is not necessary but it is here in case we want to download data to local node in the future
         if stage == "fit":
-            self.train_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys)
-            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "val")
+            self.train_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, **self.kwargs)
+            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "val", **self.kwargs)
         if stage == "test":
-            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "test")
+            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "test", **self.kwargs)
         if stage == "predict":
-            self.predict_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys)
+            self.predict_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, **self.kwargs)
 
     def train_dataloader(self):
         return DataLoader(self.train_ds, **self.loader_config)
