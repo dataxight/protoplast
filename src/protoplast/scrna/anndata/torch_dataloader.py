@@ -110,11 +110,13 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         indices: list[list[int]],
         metadata: dict,
         sparse_keys: list[str],
+        minibatch_size: int = 64
     ):
         # use first file as reference first
         self.files = file_paths
         self.sparse_keys = sparse_keys
         self.adatas = None
+        self.minibatch_size = minibatch_size
         # map each gene to an index
         for k, v in metadata.items():
             setattr(self, k, v)
@@ -172,15 +174,17 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             if "." in k:
                 attr, attr_k = k.split(".")
                 mat = getattr(ad, attr)[attr_k][start:end]
-                mats.append(self._process_sparse(mat))
+                mats.append(mat)
             else:
                 mat = getattr(ad, k)[start:end]
-                mats.append(self._process_sparse(mat))
+                mats.append(mat)
         if len(mats) == 1:
-            return mats[0]
-        if mats[0].shape[0] == 0:
-            return None
-        return tuple(mats)
+            mat = mats[0]
+        for i in range(0, mat.shape[0], self.minibatch_size):
+            yield mat[i:i+self.minibatch_size]
+        # if mats[0].shape[0] == 0:
+        #     return None
+        # return tuple(mats)
 
     def __iter__(self):
         gidx = 0
@@ -188,9 +192,8 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             self.adatas = [anndata.read_h5ad(f, backed="r") for f in self.files]
         for fidx, start, end in self.batches:
             if gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid:
-                data = self.transform(self.adatas[fidx], start, end)
-                if data is not None:
-                    yield data
+                for data in self.transform(self.adatas[fidx], start, end):
+                    yield self._process_sparse(data)
             gidx += 1
 
 

@@ -92,14 +92,14 @@ def main():
     PREFETCH_FACTOR = 16
     # Example how to test throughput with DistributedAnnDataset
     files = glob.glob(args.data_glob)
-    indices = ann_split_data(files, batch_size=args.batch_size, test_size=0.0, validation_size=0.0)
+    indices = ann_split_data(files, batch_size=args.batch_size * 8, test_size=0.0, validation_size=0.0)
 
     n_cells = 0
 
     for file in files:
         n_cells += ad.read_h5ad(file, backed="r").n_obs
 
-    ds = DistributedAnnDataset(file_paths=files, indices=indices["train_indices"], sparse_keys=["X"], metadata={})
+    ds = DistributedAnnDataset(file_paths=files, indices=indices["train_indices"], sparse_keys=["X"], metadata={}, minibatch_size=args.batch_size)
     dataloader = DataLoader(
         ds,
         batch_size=None,
