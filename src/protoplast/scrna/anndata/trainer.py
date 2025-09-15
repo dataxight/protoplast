@@ -154,7 +154,7 @@ class RayTrainRunner:
                 strategy=self.ray_trainer_strategy,
                 plugins=[ray.train.lightning.RayLightningEnvironment()],
                 callbacks=[ray.train.lightning.RayTrainReportCallback()],
-                enable_checkpointing=False,
+                enable_checkpointing=True,
             )
             trainer = ray.train.lightning.prepare_trainer(trainer)
             trainer.fit(model, datamodule=ann_dm, ckpt_path=ckpt_path)
