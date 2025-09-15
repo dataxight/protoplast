@@ -87,6 +87,8 @@ select = [
 ]
 ignore = ["W293"]
 
+ignore = ["W293", "W291"]
+
 [tool.uv]
 package = true
 
