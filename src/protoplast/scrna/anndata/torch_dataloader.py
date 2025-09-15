@@ -27,9 +27,8 @@ def ann_split_data(
     metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
     is_shuffled: bool = True,
 ):
-    def to_batches(file_i, n):
-        # each batch is a tuple of (file_i, start, end)
-        return [(file_i, i, min(i + batch_size, n)) for i in range(0, n, batch_size)]
+    def to_batches(n):
+        return [(i, min(i + batch_size, n)) for i in range(0, n, batch_size)]
 
     rng = random.Random(random_seed) if random_seed else random.Random()
 
@@ -50,7 +49,7 @@ def ann_split_data(
                 stacklevel=2,
             )
 
-        batches = to_batches(i, n_obs)
+        batches = to_batches(n_obs)
         total_batches += len(batches)
         file_batches.append(batches)
 
@@ -77,9 +76,9 @@ def ann_split_data(
         test_split = batches[val_n : val_n + test_n]
         train_split = batches[val_n + test_n :]
 
-        validation_datas += val_split
-        test_datas += test_split
-        train_datas += train_split
+        validation_datas.append(val_split)
+        test_datas.append(test_split)
+        train_datas.append(train_split)
 
     return dict(
         files=file_paths,
@@ -114,7 +113,6 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         # use first file as reference first
         self.files = file_paths
         self.sparse_keys = sparse_keys
-        self.adatas = None
         # map each gene to an index
         for k, v in metadata.items():
             setattr(self, k, v)
@@ -166,15 +164,15 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             )
         return torch.from_numpy(mat).float()
 
-    def transform(self, ad: anndata.AnnData, start: int, end: int):
+    def transform(self, start: int, end: int):
         mats = []
         for k in self.sparse_keys:
             if "." in k:
                 attr, attr_k = k.split(".")
-                mat = getattr(ad, attr)[attr_k][start:end]
+                mat = getattr(self.ad, attr)[attr_k][start:end]
                 mats.append(self._process_sparse(mat))
             else:
-                mat = getattr(ad, k)[start:end]
+                mat = getattr(self.ad, k)[start:end]
                 mats.append(self._process_sparse(mat))
         if len(mats) == 1:
             return mats[0]
@@ -184,14 +182,14 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         gidx = 0
-        if self.adatas is None:
-            self.adatas = [anndata.read_h5ad(f, backed="r") for f in self.files]
-        for fidx, start, end in self.batches:
-            if gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid:
-                data = self.transform(self.adatas[fidx], start, end)
-                if data is not None:
-                    yield data
-            gidx += 1
+        for fidx, f in enumerate(self.files):
+            self.ad = anndata.read_h5ad(f, backed="r")
+            for start, end in self.batches[fidx]:
+                if gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid:
+                    data = self.transform(start, end)
+                    if data is not None:
+                        yield self.transform(start, end)
+                gidx += 1
 
 
 class DistributedCellLineAnnDataset(DistributedAnnDataset):
@@ -201,11 +199,11 @@ class DistributedCellLineAnnDataset(DistributedAnnDataset):
     metadata_cb correctly
     """
 
-    def transform(self, ad: anndata.AnnData, start: int, end: int):
-        X = super().transform(ad, start, end)
+    def transform(self, start: int, end: int):
+        X = super().transform(start, end)
         if X is None:
             return None
-        line_ids = ad.obs["cell_line"].iloc[start:end]
+        line_ids = self.ad.obs["cell_line"].iloc[start:end]
         line_idx = np.searchsorted(self.cell_lines, line_ids)
         return X, torch.tensor(line_idx)
 

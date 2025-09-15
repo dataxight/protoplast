@@ -95,8 +95,8 @@ def test_load_with_tuple(test_even_h5ad_file: str):
     indices = ann_split_data([test_even_h5ad_file], batch_size=2, test_size=0.0, validation_size=0.0)
 
     class DistributedAnnDatasetWithTuple(DistributedAnnDataset):
-        def transform(self, adata: ad.AnnData, start: int, end: int):
-            X = super().transform(adata, start, end)
+        def transform(self, start: int, end: int):
+            X = super().transform(start, end)
             if X is None:
                 return None
             return (X,)
@@ -122,8 +122,8 @@ def test_load_with_dict(test_even_h5ad_file: str):
     indices = ann_split_data([test_even_h5ad_file], batch_size=2, test_size=0.0, validation_size=0.0)
 
     class DistributedAnnDatasetWithDict(DistributedAnnDataset):
-        def transform(self, adata: ad.AnnData, start: int, end: int):
-            X = super().transform(adata, start, end)
+        def transform(self, start: int, end: int):
+            X = super().transform(start, end)
             if X is None:
                 return None
             return {"X": X}
