@@ -8,7 +8,7 @@ from collections import Counter
 import numpy as np
 import torch 
 
-MAX_ITERATION = 5000 # Number of batches iterated to benchmark
+MAX_ITERATION = 500 # Number of batches iterated to benchmark
 
 
 def compute_entropy(strings):
@@ -32,7 +32,7 @@ def benchmark(loader, n_samples, batch_size):
 
     entropies = []
     for i, _batch in tqdm(enumerate(loader_iter), total=num_iter):
-        all_plates = _batch
+        all_plates = _batch["plate"]
         entropies.append(compute_entropy(all_plates))
         
         if i == num_iter:
@@ -51,20 +51,28 @@ def benchmark_block_sampling_with_batch_fetch(dataset: list[str], ds_batch_size=
         """
         Control what returned by the DataLoader as a batch.
         """
-        return batch
+        return batch[1]
     
     files = dataset
-    ds = DistributedCellLineBlockBasedAnnDataset(
+    ds = BlockBasedAnnDataset(
         file_paths=files,
         ds_batch_size=ds_batch_size,
         block_size=block_size,
         load_factor=load_factor,
         sparse_keys=["X"],
-        obs_keys=["cell_line"]
+        obs_keys=["plate"]
     )
     dataloader = DataLoader(ds, batch_size=None, num_workers=num_workers, prefetch_factor=prefetch_factor, collate_fn=pass_through_collate_fn, pin_memory=False, persistent_workers=False)
     return benchmark(dataloader, ds.n_cells, 64)
 
 
 if __name__ == "__main__":
-    mean, sd = benchmark_block_sampling_with_batch_fetch(glob.glob("/mnt/hdd2/tan/tahoe100m/plate3_filt_Vevo_Tahoe100M_WServicesFrom_ParseGigalab.h5ad"))
+    mean, sd = benchmark_block_sampling_with_batch_fetch(
+        ["/mnt/hdd2/tan/tahoe100m/plate3_filt_Vevo_Tahoe100M_WServicesFrom_ParseGigalab.h5ad", 
+         "/mnt/hdd2/tan/tahoe100m/plate9_filt_Vevo_Tahoe100M_WServicesFrom_ParseGigalab.h5ad"],
+        ds_batch_size=64,
+        block_size=4,
+        load_factor=32,
+        num_workers=32,
+        prefetch_factor=None # default torch, similar to scDataset setup
+    )
