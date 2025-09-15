@@ -226,7 +226,6 @@ def test_entropy(test_h5ad_plate):
     dataloader = DataLoader(
         dataset,
         batch_size=shuffle_strategy.mini_batch_size,
-        num_workers=0,
         collate_fn=shuffle_strategy.mixer,
     )
     total_n = 0
