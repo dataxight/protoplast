@@ -58,7 +58,6 @@ if __name__ == "__main__":
         )
         trainer.train(
             paths,
-            mini_batch_size=batch_size // 10,
             thread_per_worker=thread_per_worker,
             batch_size=batch_size,
             num_workers=num_workers,

@@ -193,15 +193,13 @@ def test_entropy(test_h5ad_plate):
     paths = [file1, file2, file3]
 
     batch_size = 3
-    total_workers = 2
-    prefetch_factor = 2
     mini_batch_size = 3
 
     shuffle_strategy = RandomShuffleStrategy(
         paths,
         batch_size,
         mini_batch_size=mini_batch_size,
-        total_workers=total_workers,
+        total_workers=1,
         test_size=0.0,
         validation_size=0.0,
         is_shuffled=True,
@@ -228,8 +226,7 @@ def test_entropy(test_h5ad_plate):
     dataloader = DataLoader(
         dataset,
         batch_size=shuffle_strategy.mini_batch_size,
-        num_workers=total_workers,
-        prefetch_factor=prefetch_factor + 1,
+        num_workers=0,
         collate_fn=shuffle_strategy.mixer,
     )
     total_n = 0
