@@ -208,3 +208,6 @@ __marimo__/
 *~
 
 lightning_logs/
+.vscode
+tmp
+DS_Store

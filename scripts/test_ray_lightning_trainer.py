@@ -65,4 +65,6 @@ if __name__ == "__main__":
         args.val_size,
         thread_per_worker=args.thread_per_worker,
         ckpt_path=args.ckpt_path,
+        is_shuffled=False,
+        result_storage_path="tmp",
     )
