@@ -103,7 +103,11 @@ def main():
         n_cells += ad.read_h5ad(file, backed="r").n_obs
 
     shuffle_strategy = SequentialShuffleStrategy(
-        files, batch_size=args.batch_size, total_workers=args.n_workers, test_size=0.0, validation_size=0.0,
+        files,
+        batch_size=args.batch_size,
+        total_workers=args.n_workers,
+        test_size=0.0,
+        validation_size=0.0,
         pre_fetch_then_batch=args.pre_fetch_then_batch,
     )
 
