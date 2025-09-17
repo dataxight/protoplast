@@ -171,7 +171,7 @@ class SequentialShuffleStrategy(ShuffleStrategy):
         random_seed: int | None = 42,
         metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
         is_shuffled: bool = False,
-        pre_fetch_then_batch: int = 8,
+        pre_fetch_then_batch: int = 32,
     ) -> None:
         super().__init__(
             file_paths,
