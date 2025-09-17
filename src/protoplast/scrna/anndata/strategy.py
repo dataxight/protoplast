@@ -47,6 +47,10 @@ def ann_split_data(
 
         batches = to_batches(n_obs)
 
+        # very extreme case, that we have number of batches less than total_workers. 
+        # then we have to pad using the last range to make it divisible by total_workers
+        if len(batches) < total_workers:
+            batches += [batches[-1]] * (total_workers - len(batches))
         # Drop per-file remainder to make divisible by total_workers
         remainder = len(batches) % total_workers
         # implement rebalancing later but not that important right now

@@ -8,7 +8,7 @@ import psutil
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from protoplast.scrna.anndata.strategy import ann_split_data
+from protoplast.scrna.anndata.strategy import SequentialShuffleStrategy
 from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset
 
 
@@ -93,14 +93,18 @@ def main():
     PREFETCH_FACTOR = 16
     # Example how to test throughput with DistributedAnnDataset
     files = glob.glob(args.data_glob)
-    indices = ann_split_data(files, total_workers=1, batch_size=args.batch_size, test_size=0.0, validation_size=0.0)
 
     n_cells = 0
 
     for file in files:
         n_cells += ad.read_h5ad(file, backed="r").n_obs
 
-    ds = DistributedAnnDataset(file_paths=files, indices=indices["train_indices"], sparse_keys=["X"], metadata={})
+    shuffle_strategy = SequentialShuffleStrategy(
+        files, batch_size=args.batch_size, total_workers=args.n_workers, test_size=0.0, validation_size=0.0
+    )
+
+    indices = shuffle_strategy.split()
+    ds = DistributedAnnDataset.create_distributed_ds(indices, sparse_key="X")
     dataloader = DataLoader(
         ds,
         batch_size=None,
@@ -109,6 +113,9 @@ def main():
         pin_memory=False,
         persistent_workers=False,
     )
+    for i, data in enumerate(dataloader):
+        print(data.shape)
+        break
     samples_per_sec, time_per_sample, batch_times, peak_memory = benchmark(
         dataloader,
         n_cells,

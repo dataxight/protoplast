@@ -69,7 +69,8 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         }
         """
         indices = indices.to_dict() if isinstance(indices, SplitInfo) else indices
-        return cls(indices["files"], indices[f"{mode}_indices"], indices["metadata"], sparse_key, **kwargs)
+        return cls(indices["files"], indices[f"{mode}_indices"], indices["metadata"], sparse_key, 
+            mini_batch_size=indices["mini_batch_size"], **kwargs)
 
     def _init_rank(self):
         worker_info = get_worker_info()
@@ -123,8 +124,8 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         X = self._process_sparse(self.X)
         return X
 
-    def __len__(self):
-        return sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
+    # def __len__(self):
+        # return sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
 
     def __iter__(self):
         self._init_rank()
@@ -137,6 +138,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
                     continue
                 X = self._get_mat_by_range(self.ad, start, end)
                 self.X = X
+                print("mini_batch_size", self.mini_batch_size)
                 if self.mini_batch_size is None:
                     # not fetch-then-batch approach, we yield everything
                     yield self.transform(start, end)
@@ -235,7 +237,7 @@ class DistributedCellLineAnnDataset(DistributedAnnDataset):
     """
 
     def transform(self, start: int, end: int):
-        X = self.X
+        X = super().transform(start, end)
         line_ids = self.ad.obs["cell_line"].iloc[start:end]
         line_idx = np.searchsorted(self.cell_lines, line_ids)
         return X, torch.tensor(line_idx)

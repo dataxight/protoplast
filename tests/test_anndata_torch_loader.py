@@ -146,7 +146,7 @@ def test_same_iteration_per_ray_worker(test_h5ad_plate):
         indices=indices,
         dataset=DistributedAnnDataset,
         prefetch_factor=2,
-        sparse_keys=["X"],
+        sparse_key="X",
         shuffle_strategy=shuffle_strategy,
     )
     data_module.setup(stage="fit")
