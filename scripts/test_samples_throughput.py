@@ -40,6 +40,7 @@ def benchmark(loader, n_samples, batch_size, max_iteration=None, warmup_iteratio
     max_iteration += warmup_iteration
     for i, _batch in tqdm(enumerate(loader_iter), total=max_iteration):
         if i < warmup_iteration:
+            batch_time = time.time()
             continue
         batch_times.append(time.time() - batch_time)
         batch_time = time.time()
