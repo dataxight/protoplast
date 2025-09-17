@@ -135,13 +135,14 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             self.ad = anndata.read_h5ad(f, backed="r")
             for start, end in self.batches[fidx]:
                 if not (gidx % self.total_workers) == self.global_rank:
+                    gidx += 1
                     continue
                 X = self._get_mat_by_range(self.ad, start, end)
                 self.X = X
-                print("mini_batch_size", self.mini_batch_size)
                 if self.mini_batch_size is None:
                     # not fetch-then-batch approach, we yield everything
                     yield self.transform(start, end)
+                    total_iter += 1
                 else:
                     # fetch-then-batch approach
                     for i in range(0, X.shape[0], self.mini_batch_size):
