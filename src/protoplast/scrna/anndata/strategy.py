@@ -2,6 +2,7 @@ import random
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from typing import Optional
 from dataclasses import dataclass
 
 import torch
@@ -101,6 +102,7 @@ class SplitInfo:
     val_indices: list[int]
     test_indices: list[int]
     metadata: dict[str, any]
+    mini_batch_size: Optional[int] = None
 
     def to_dict(self) -> dict[str, any]:
         return {
@@ -109,6 +111,7 @@ class SplitInfo:
             "val_indices": self.val_indices,
             "test_indices": self.test_indices,
             "metadata": self.metadata,
+            "mini_batch_size": self.mini_batch_size,
         }
 
 
@@ -165,6 +168,7 @@ class SequentialShuffleStrategy(ShuffleStrategy):
         random_seed: int | None = 42,
         metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
         is_shuffled: bool = False,
+        pre_fetch_then_batch: int = 8
     ) -> None:
         super().__init__(
             file_paths,
@@ -176,11 +180,12 @@ class SequentialShuffleStrategy(ShuffleStrategy):
             metadata_cb,
             is_shuffled,
         )
+        self.pre_fetch_then_batch = pre_fetch_then_batch
 
     def split(self) -> SplitInfo:
         split_dict = ann_split_data(
             self.file_paths,
-            self.batch_size,
+            self.batch_size * self.pre_fetch_then_batch, # we need to pre-fetch then batch
             self.total_workers,
             self.test_size,
             self.validation_size,
@@ -188,11 +193,12 @@ class SequentialShuffleStrategy(ShuffleStrategy):
             self.metadata_cb,
             self.is_shuffled,
         )
+        # this will be passed to the dataset, inorder to know the mini batch size
+        split_dict["mini_batch_size"] = self.batch_size
         return SplitInfo(**split_dict)
-
-    def mixer(self, batch):
+    
+    def mixer(self, batch: list):
         return super().mixer(batch)
-
 
 class RandomShuffleStrategy(ShuffleStrategy):
     def __init__(
