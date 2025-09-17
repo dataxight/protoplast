@@ -65,6 +65,7 @@ def main():
     parser.add_argument("--max_iter", dest="max_iteration", default=5000, type=int)
     parser.add_argument("--batch_size", dest="batch_size", default=64, type=int)
     parser.add_argument("--n_workers", dest="n_workers", default=32, type=int)
+    parser.add_argument("--pre_fetch_then_batch", dest="pre_fetch_then_batch", default=8, type=int)
     parser.add_argument(
         "--warmup_iter",
         dest="warmup_iteration",
@@ -87,6 +88,7 @@ def main():
     print(f"n_workers={args.n_workers}")
     print(f"warmup_iterations={args.warmup_iteration}")
     print(f"max_iterations={args.max_iteration}")
+    print(f"pre_fetch_then_batch={args.pre_fetch_then_batch}")
 
     print("=== PROGRESS ===")
     N_WORKERS = args.n_workers
@@ -100,7 +102,8 @@ def main():
         n_cells += ad.read_h5ad(file, backed="r").n_obs
 
     shuffle_strategy = SequentialShuffleStrategy(
-        files, batch_size=args.batch_size, total_workers=args.n_workers, test_size=0.0, validation_size=0.0
+        files, batch_size=args.batch_size, total_workers=args.n_workers, test_size=0.0, validation_size=0.0,
+        pre_fetch_then_batch=args.pre_fetch_then_batch,
     )
 
     indices = shuffle_strategy.split()
