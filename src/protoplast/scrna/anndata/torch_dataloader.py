@@ -124,8 +124,8 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         X = self._process_sparse(self.X)
         return X
 
-    # def __len__(self):
-        # return sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
+    def __len__(self):
+        return sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
 
     def __iter__(self):
         self._init_rank()
