@@ -70,7 +70,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         """
         indices = indices.to_dict() if isinstance(indices, SplitInfo) else indices
         return cls(indices["files"], indices[f"{mode}_indices"], indices["metadata"], sparse_key, 
-            mini_batch_size=indices["mini_batch_size"], **kwargs)
+            mini_batch_size=indices.get("mini_batch_size"), **kwargs)
 
     def _init_rank(self):
         worker_info = get_worker_info()
