@@ -197,7 +197,10 @@ class SequentialShuffleStrategy(ShuffleStrategy):
             self.is_shuffled,
         )
         # this will be passed to the dataset, inorder to know the mini batch size
-        split_dict["mini_batch_size"] = self.batch_size
+        if self.pre_fetch_then_batch > 1:
+            split_dict["mini_batch_size"] = self.batch_size
+        else:
+            split_dict["mini_batch_size"] = None
         return SplitInfo(**split_dict)
 
     def mixer(self, batch: list):

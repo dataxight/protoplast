@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader, get_worker_info
 import anndata
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
 from protoplast.patches.anndata_remote import apply_file_backing_patch
+from protoplast.scrna.anndata.dropin import AnnDataGDS, read_h5ad as read_h5ad_gds
 
 from .strategy import ShuffleStrategy, SplitInfo
 
@@ -33,6 +34,18 @@ def cell_line_metadata_cb(ad: anndata.AnnData, metadata: dict):
     metadata["num_genes"] = ad.var.shape[0]
     metadata["num_classes"] = len(metadata["cell_lines"])
 
+
+def csr_row_contiguous_view(crow_indices, col_indices, values, shape, start, stop):
+    """
+    Contiguous row slice [start:stop] as a zero-copy CSR view.
+    """
+    n_rows, n_cols = shape
+    # Adjust crow to start from zero without copying col/values
+    crow_new = crow_indices[start:stop+1] - crow_indices[start]
+    col_new = col_indices   # same storage
+    vals_new = values       # same storage
+    shape_new = (stop - start, n_cols)
+    return crow_new, col_new, vals_new, shape_new
 
 class DistributedAnnDataset(torch.utils.data.IterableDataset):
     def __init__(
@@ -103,6 +116,8 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         self.total_workers = self.ray_size * self.nworkers
 
     def _process_sparse(self, mat) -> torch.Tensor:
+        if torch.is_tensor(mat):
+            return mat
         if sp.issparse(mat):
             return torch.sparse_csr_tensor(
                 torch.from_numpy(mat.indptr).long(),
@@ -112,7 +127,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             )
         return torch.from_numpy(mat).float()
 
-    def _get_mat_by_range(self, ad: anndata.AnnData, start: int, end: int) -> sp.csr_matrix:
+    def _get_mat_by_range(self, ad: anndata.AnnData | AnnDataGDS, start: int, end: int) -> sp.csr_matrix:
         if self.sparse_key == "X":
             return ad.X[start:end]
         elif "layers" in self.sparse_key:
@@ -143,7 +158,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         gidx = 0
         total_iter = 0
         for fidx, f in enumerate(self.files):
-            self.ad = anndata.read_h5ad(f, backed="r")
+            self.ad = read_h5ad_gds(f)
             for start, end in self.batches[fidx]:
                 if not (gidx % self.total_workers) == self.global_rank:
                     gidx += 1
@@ -160,8 +175,10 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
                         # index on the X coordinates
                         b_start, b_end = i, min(i + self.mini_batch_size, X.shape[0])
                         # index on the adata coordinates
+                        crow, cols, vals = X.crow_indices(), X.col_indices(), X.values()
                         global_start, global_end = start + i, min(start + i + self.mini_batch_size, end)
-                        self.X = X[b_start:b_end]
+                        new_crow, new_cols, new_vals, new_shape = csr_row_contiguous_view(crow, cols, vals, X.shape, b_start, b_end)
+                        self.X = torch.sparse_csr_tensor(new_crow, new_cols, new_vals, new_shape)
                         yield self.transform(global_start, global_end)
                         total_iter += 1
                 gidx += 1
