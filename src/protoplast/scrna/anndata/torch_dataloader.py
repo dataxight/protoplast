@@ -40,7 +40,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         indices: list[list[int]],
         metadata: dict,
         sparse_key: str,
-        mini_batch_size: int = None
+        mini_batch_size: int = None,
     ):
         # use first file as reference first
         self.files = file_paths
@@ -52,7 +52,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             setattr(self, k, v)
         self.metadata = metadata
         self.batches = indices
-        self.mini_batch_size = mini_batch_size  
+        self.mini_batch_size = mini_batch_size
 
     @classmethod
     def create_distributed_ds(cls, indices: SplitInfo, sparse_key: str, mode: str = "train", **kwargs):
@@ -69,8 +69,14 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         }
         """
         indices = indices.to_dict() if isinstance(indices, SplitInfo) else indices
-        return cls(indices["files"], indices[f"{mode}_indices"], indices["metadata"], sparse_key, 
-            mini_batch_size=indices.get("mini_batch_size"), **kwargs)
+        return cls(
+            indices["files"],
+            indices[f"{mode}_indices"],
+            indices["metadata"],
+            sparse_key,
+            mini_batch_size=indices.get("mini_batch_size"),
+            **kwargs,
+        )
 
     def _init_rank(self):
         worker_info = get_worker_info()
@@ -105,7 +111,6 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             )
         return torch.from_numpy(mat).float()
 
-
     def _get_mat_by_range(self, ad: anndata.AnnData, start: int, end: int) -> sp.csr_matrix:
         if "." in self.sparse_key:
             attr, attr_key = self.sparse_key.split(".")
@@ -116,7 +121,8 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
 
     def transform(self, start: int, end: int):
         # by default we just return the matrix
-        # sometimes, the h5ad file stores X as the dense matrix, so we have to make sure it is a sparse matrix before returning
+        # sometimes, the h5ad file stores X as the dense matrix,
+        # so we have to make sure it is a sparse matrix before returning
         # the batch item
         if self.X is None:
             # we don't have the X upstream, so we have to incurr IO to fetch it

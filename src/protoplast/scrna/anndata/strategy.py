@@ -2,7 +2,6 @@ import random
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Optional
 from dataclasses import dataclass
 
 import torch
@@ -47,7 +46,7 @@ def ann_split_data(
 
         batches = to_batches(n_obs)
 
-        # very extreme case, that we have number of batches less than total_workers. 
+        # very extreme case, that we have number of batches less than total_workers.
         # then we have to pad using the last range to make it divisible by total_workers
         if len(batches) < total_workers:
             batches += [batches[-1]] * (total_workers - len(batches))
@@ -106,7 +105,7 @@ class SplitInfo:
     val_indices: list[int]
     test_indices: list[int]
     metadata: dict[str, any]
-    mini_batch_size: Optional[int] = None
+    mini_batch_size: int | None = None
 
     def to_dict(self) -> dict[str, any]:
         return {
@@ -172,7 +171,7 @@ class SequentialShuffleStrategy(ShuffleStrategy):
         random_seed: int | None = 42,
         metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
         is_shuffled: bool = False,
-        pre_fetch_then_batch: int = 8
+        pre_fetch_then_batch: int = 8,
     ) -> None:
         super().__init__(
             file_paths,
@@ -189,7 +188,7 @@ class SequentialShuffleStrategy(ShuffleStrategy):
     def split(self) -> SplitInfo:
         split_dict = ann_split_data(
             self.file_paths,
-            self.batch_size * self.pre_fetch_then_batch, # we need to pre-fetch then batch
+            self.batch_size * self.pre_fetch_then_batch,  # we need to pre-fetch then batch
             self.total_workers,
             self.test_size,
             self.validation_size,
@@ -200,9 +199,10 @@ class SequentialShuffleStrategy(ShuffleStrategy):
         # this will be passed to the dataset, inorder to know the mini batch size
         split_dict["mini_batch_size"] = self.batch_size
         return SplitInfo(**split_dict)
-    
+
     def mixer(self, batch: list):
         return super().mixer(batch)
+
 
 class RandomShuffleStrategy(ShuffleStrategy):
     def __init__(

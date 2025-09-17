@@ -137,7 +137,12 @@ def test_same_iteration_per_ray_worker(test_h5ad_plate):
     batch_size = 3
 
     shuffle_strategy = SequentialShuffleStrategy(
-        paths, batch_size=batch_size, total_workers=total_ray_worker, test_size=0.0, validation_size=0.0, pre_fetch_then_batch=1
+        paths,
+        batch_size=batch_size,
+        total_workers=total_ray_worker,
+        test_size=0.0,
+        validation_size=0.0,
+        pre_fetch_then_batch=1,
     )
 
     indices = shuffle_strategy.split()
