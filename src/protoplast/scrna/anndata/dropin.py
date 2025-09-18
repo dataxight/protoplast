@@ -469,3 +469,15 @@ class GDSMatrixAccessor:
             return sparse_tensor
         else:
             raise TypeError(f"Unsupported index type: {type(key)}")
+
+def csr_row_contiguous_view(crow_indices, col_indices, values, shape, start, stop):
+    """
+    Contiguous row slice [start:stop] as a zero-copy CSR view.
+    """
+    n_rows, n_cols = shape
+    # Adjust crow to start from zero without copying col/values
+    crow_new = crow_indices[start:stop+1] - crow_indices[start]
+    col_new = col_indices   # same storage
+    vals_new = values       # same storage
+    shape_new = (stop - start, n_cols)
+    return crow_new, col_new, vals_new, shape_new

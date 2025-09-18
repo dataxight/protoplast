@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, get_worker_info
 import anndata
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
 from protoplast.patches.anndata_remote import apply_file_backing_patch
-from protoplast.scrna.anndata.dropin import AnnDataGDS, read_h5ad as read_h5ad_gds
+from protoplast.scrna.anndata.dropin import AnnDataGDS, csr_row_contiguous_view, read_h5ad as read_h5ad_gds
 
 from .strategy import ShuffleStrategy, SplitInfo
 
@@ -34,18 +34,6 @@ def cell_line_metadata_cb(ad: anndata.AnnData, metadata: dict):
     metadata["num_genes"] = ad.var.shape[0]
     metadata["num_classes"] = len(metadata["cell_lines"])
 
-
-def csr_row_contiguous_view(crow_indices, col_indices, values, shape, start, stop):
-    """
-    Contiguous row slice [start:stop] as a zero-copy CSR view.
-    """
-    n_rows, n_cols = shape
-    # Adjust crow to start from zero without copying col/values
-    crow_new = crow_indices[start:stop+1] - crow_indices[start]
-    col_new = col_indices   # same storage
-    vals_new = values       # same storage
-    shape_new = (stop - start, n_cols)
-    return crow_new, col_new, vals_new, shape_new
 
 class DistributedAnnDataset(torch.utils.data.IterableDataset):
     def __init__(
@@ -136,6 +124,16 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         else:
             raise Exception("Sparse key not supported")
 
+    def _slice_mat(self, mat: sp.csr_matrix | torch.Tensor | np.ndarray, start: int, end: int) -> sp.csr_matrix | torch.Tensor | np.ndarray: # noqa: N803
+        if isinstance(mat, sp.csr_matrix | np.ndarray):
+            return mat[start:end]
+        elif isinstance(mat, torch.Tensor):
+            crow, cols, vals = mat.crow_indices(), mat.col_indices(), mat.values()
+            new_crow, new_cols, new_vals, new_shape = csr_row_contiguous_view(crow, cols, vals, mat.shape, start, end)
+            return torch.sparse_csr_tensor(new_crow, new_cols, new_vals, new_shape)
+        else:
+            raise ValueError(f"Unsupported matrix type: {type(mat)}")
+
     def transform(self, start: int, end: int):
         # by default we just return the matrix
         # sometimes, the h5ad file stores X as the dense matrix,
@@ -175,10 +173,8 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
                         # index on the X coordinates
                         b_start, b_end = i, min(i + self.mini_batch_size, X.shape[0])
                         # index on the adata coordinates
-                        crow, cols, vals = X.crow_indices(), X.col_indices(), X.values()
                         global_start, global_end = start + i, min(start + i + self.mini_batch_size, end)
-                        new_crow, new_cols, new_vals, new_shape = csr_row_contiguous_view(crow, cols, vals, X.shape, b_start, b_end)
-                        self.X = torch.sparse_csr_tensor(new_crow, new_cols, new_vals, new_shape)
+                        self.X = self._slice_mat(X, b_start, b_end)
                         yield self.transform(global_start, global_end)
                         total_iter += 1
                 gidx += 1
