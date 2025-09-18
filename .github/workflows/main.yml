@@ -58,7 +58,7 @@ jobs:
       #     CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   check-docs:
-    runs-on: [self-hosted, ubuntu-latest]
+    runs-on: ubuntu-latest
     steps:
       - name: Check out
         uses: actions/checkout@v4
