@@ -28,7 +28,7 @@ runs:
         version: ${{ inputs.uv-version }}
         enable-cache: 'true'
         cache-suffix: ${{ matrix.python-version }}
-        local-cache-dir: ${{ vars.UV_CACHE_DIR }}
+        local-cache-dir: ${{ inputs.uv-cache-dir }}
 
     - name: Install Python dependencies
       run: uv sync --all-groups
