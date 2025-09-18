@@ -1,7 +1,6 @@
 import os
 from collections import Counter
 from collections.abc import Callable
-import json
 
 import lightning.pytorch as pl
 import numpy as np
@@ -132,7 +131,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         return X
 
     def __len__(self):
-        total_sample = sum(end-start for i in range(len(self.files)) for start, end in self.batches[i])
+        total_sample = sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
         return total_sample // self.mini_batch_size + 1
 
     def __iter__(self):
@@ -203,9 +202,9 @@ class DistributedFileSharingAnnDataset(DistributedAnnDataset):
     def _get_batch_size(self, f):
         start, end = self.batches[self.file_idx[f]][self.buf_ptr[f]]
         return end - start
-    
+
     def __len__(self):
-        return sum(end-start for i in range(len(self.files)) for start, end in self.batches[i])
+        return sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
 
     def __iter__(self):
         self._init_rank()
@@ -253,8 +252,6 @@ class DistributedCellLineAnnDataset(DistributedAnnDataset):
         line_ids = self.ad.obs["cell_line"].iloc[start:end]
         line_idx = np.searchsorted(self.cell_lines, line_ids)
         return X, torch.tensor(line_idx)
-    
-
 
 
 class AnnDataModule(pl.LightningDataModule):

@@ -1,8 +1,6 @@
 from protoplast.scrna.anndata.gds import save_to_gds
 from protoplast.scrna.anndata.strategy import SequentialShuffleStrategy
-from protoplast.scrna.anndata.torch_dataloader import cell_line_metadata_cb, DistributedCellLineAnnDataset
-
-    
+from protoplast.scrna.anndata.torch_dataloader import DistributedCellLineAnnDataset, cell_line_metadata_cb
 
 if __name__ == "__main__":
     save_to_gds(
@@ -10,6 +8,5 @@ if __name__ == "__main__":
         SequentialShuffleStrategy,
         DistributedCellLineAnnDataset,
         "/mnt/ham/dx_data/plate3_gpu",
-        metadata_cb=cell_line_metadata_cb
+        metadata_cb=cell_line_metadata_cb,
     )
-
