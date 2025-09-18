@@ -137,7 +137,12 @@ def test_same_iteration_per_ray_worker(test_h5ad_plate):
     batch_size = 3
 
     shuffle_strategy = SequentialShuffleStrategy(
-        paths, batch_size=batch_size, total_workers=total_ray_worker, test_size=0.0, validation_size=0.0
+        paths,
+        batch_size=batch_size,
+        total_workers=total_ray_worker,
+        test_size=0.0,
+        validation_size=0.0,
+        pre_fetch_then_batch=1,
     )
 
     indices = shuffle_strategy.split()
@@ -146,7 +151,7 @@ def test_same_iteration_per_ray_worker(test_h5ad_plate):
         indices=indices,
         dataset=DistributedAnnDataset,
         prefetch_factor=2,
-        sparse_keys=["X"],
+        sparse_key="X",
         shuffle_strategy=shuffle_strategy,
     )
     data_module.setup(stage="fit")
@@ -220,7 +225,7 @@ def test_entropy(test_h5ad_plate):
         file_paths=paths,
         indices=indices.train_indices,
         metadata=indices.metadata,
-        sparse_keys=["X"],
+        sparse_key="X",
     )
 
     dataloader = DataLoader(
@@ -247,7 +252,7 @@ def test_load_simple(test_even_h5ad_file: str):
     )
     indices = strategy.split()
     data_module = AnnDataModule(
-        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"], shuffle_strategy=strategy
+        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_key="X", shuffle_strategy=strategy
     )
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
@@ -278,7 +283,7 @@ def test_load_with_tuple(test_even_h5ad_file: str):
         indices=indices,
         dataset=DistributedAnnDatasetWithTuple,
         prefetch_factor=2,
-        sparse_keys=["X"],
+        sparse_key="X",
         shuffle_strategy=strategy,
     )
     data_module.setup(stage="fit")
@@ -312,7 +317,7 @@ def test_load_with_dict(test_even_h5ad_file: str):
         indices=indices,
         dataset=DistributedAnnDatasetWithDict,
         prefetch_factor=2,
-        sparse_keys=["X"],
+        sparse_key="X",
         shuffle_strategy=strategy,
     )
     data_module.setup(stage="fit")
@@ -335,7 +340,7 @@ def test_load_uneven(test_uneven_h5ad_file: str):
     )
     indices = strategy.split()
     data_module = AnnDataModule(
-        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"], shuffle_strategy=strategy
+        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_key="X", shuffle_strategy=strategy
     )
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
@@ -359,7 +364,7 @@ def test_load_multiple_files(test_even_h5ad_file: str, test_uneven_h5ad_file: st
     )
     indices = strategy.split()
     data_module = AnnDataModule(
-        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_keys=["X"], shuffle_strategy=strategy
+        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_key="X", shuffle_strategy=strategy
     )
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
@@ -389,7 +394,7 @@ def test_load_with_callbacks(test_even_h5ad_file: str):
         indices=indices,
         dataset=DistributedAnnDataset,
         prefetch_factor=2,
-        sparse_keys=["X"],
+        sparse_key="X",
         shuffle_strategy=strategy,
         before_dense_cb=before_dense_cb,
         after_dense_cb=after_dense_cb,
@@ -423,7 +428,7 @@ def test_custom_dataset(test_even_h5ad_file: str):
         indices=indices,
         dataset=DistributedCellLineAnnDataset,
         prefetch_factor=2,
-        sparse_keys=["X"],
+        sparse_key="X",
         shuffle_strategy=strategy,
     )
     data_module.setup(stage="fit")

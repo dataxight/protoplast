@@ -8,7 +8,7 @@ import psutil
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from protoplast.scrna.anndata.strategy import ann_split_data
+from protoplast.scrna.anndata.strategy import SequentialShuffleStrategy
 from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset
 
 
@@ -40,6 +40,7 @@ def benchmark(loader, n_samples, batch_size, max_iteration=None, warmup_iteratio
     max_iteration += warmup_iteration
     for i, _batch in tqdm(enumerate(loader_iter), total=max_iteration):
         if i < warmup_iteration:
+            batch_time = time.time()
             continue
         batch_times.append(time.time() - batch_time)
         batch_time = time.time()
@@ -65,6 +66,7 @@ def main():
     parser.add_argument("--max_iter", dest="max_iteration", default=5000, type=int)
     parser.add_argument("--batch_size", dest="batch_size", default=64, type=int)
     parser.add_argument("--n_workers", dest="n_workers", default=32, type=int)
+    parser.add_argument("--pre_fetch_then_batch", dest="pre_fetch_then_batch", default=8, type=int)
     parser.add_argument(
         "--warmup_iter",
         dest="warmup_iteration",
@@ -87,20 +89,30 @@ def main():
     print(f"n_workers={args.n_workers}")
     print(f"warmup_iterations={args.warmup_iteration}")
     print(f"max_iterations={args.max_iteration}")
+    print(f"pre_fetch_then_batch={args.pre_fetch_then_batch}")
 
     print("=== PROGRESS ===")
     N_WORKERS = args.n_workers
     PREFETCH_FACTOR = 16
     # Example how to test throughput with DistributedAnnDataset
     files = glob.glob(args.data_glob)
-    indices = ann_split_data(files, total_workers=1, batch_size=args.batch_size, test_size=0.0, validation_size=0.0)
 
     n_cells = 0
 
     for file in files:
         n_cells += ad.read_h5ad(file, backed="r").n_obs
 
-    ds = DistributedAnnDataset(file_paths=files, indices=indices["train_indices"], sparse_keys=["X"], metadata={})
+    shuffle_strategy = SequentialShuffleStrategy(
+        files,
+        batch_size=args.batch_size,
+        total_workers=args.n_workers,
+        test_size=0.0,
+        validation_size=0.0,
+        pre_fetch_then_batch=args.pre_fetch_then_batch,
+    )
+
+    indices = shuffle_strategy.split()
+    ds = DistributedAnnDataset.create_distributed_ds(indices, sparse_key="X")
     dataloader = DataLoader(
         ds,
         batch_size=None,
