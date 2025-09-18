@@ -18,6 +18,14 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
 
+    - name: Configure UV cache dir (self-hosted)
+      shell: bash
+      run: |
+        CACHE_DIR="/mnt/hdd1/github-runner-cache"
+        if mkdir -p "$CACHE_DIR"; then
+          echo "UV_CACHE_DIR=$CACHE_DIR" >> "$GITHUB_ENV"
+        fi
+
     - name: Install uv
       uses: astral-sh/setup-uv@v6
       with:
