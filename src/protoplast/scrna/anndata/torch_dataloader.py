@@ -1,3 +1,4 @@
+import math
 import os
 from collections import Counter
 from collections.abc import Callable
@@ -13,7 +14,7 @@ from torch.utils.data import DataLoader, get_worker_info
 import anndata
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
 from protoplast.patches.anndata_remote import apply_file_backing_patch
-import math
+
 from .strategy import ShuffleStrategy, SplitInfo
 
 apply_file_backing_patch()
@@ -115,7 +116,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         if self.sparse_key == "X":
             return ad.X[start:end]
         elif "layers" in self.sparse_key:
-            _,attr = self.sparse_key.split(".")
+            _, attr = self.sparse_key.split(".")
             return ad.layers[attr][start:end]
         else:
             raise Exception("Sparse key not supported")
