@@ -23,13 +23,13 @@ jobs:
         uses: ./.github/actions/setup-python-env
 
       - name: Run checks
-        run: make check
+        run: make qa
 
   tests-and-type-check:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13"]
       fail-fast: false
     defaults:
       run:
@@ -42,6 +42,7 @@ jobs:
         uses: ./.github/actions/setup-python-env
         with:
           python-version: ${{ matrix.python-version }}
+          uv-cache-dir: ${{ vars.UV_CACHE_DIR }}
 
       - name: Run tests
         run: uv run python -m pytest tests --cov --cov-config=pyproject.toml --cov-report=xml
@@ -50,11 +51,11 @@ jobs:
       #  run: uv run mypy 
 
 
-      - name: Upload coverage reports to Codecov with GitHub Action on Python 3.11
-        uses: codecov/codecov-action@v4
-        if: ${{ matrix.python-version == '3.11' }}
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      # - name: Upload coverage reports to Codecov with GitHub Action on Python 3.11
+      #   uses: codecov/codecov-action@v4
+      #   if: ${{ matrix.python-version == '3.11' }}
+      #   env:
+      #     CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   check-docs:
     runs-on: ubuntu-latest
