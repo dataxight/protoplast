@@ -26,19 +26,24 @@ def train_h5ad(files: list[str]):
     end = time.perf_counter()
     print(f"Elapsed time: {end-start:.6f} seconds")
 
-def train_gsd(gds_dir: str):
-    # example with cell line
-    ds = DistributedGdsDataset(gds_dir)
-    dataloader = DataLoader(ds, batch_size=None)
+def train_gsd(gds_dir: str, val_size=0.2):
+    # a workaround for now
+    ds = DistributedGdsDataset(gds_dir, [])
     # hard code for now we can figure this out later
-    model = LinearClassifier(ds.metadata["n_cols"], ds.metadata["n_classes"])
+    n = len(ds.metadata["offsets"])
+    n_train = int(n*(1-val_size))
+    train_offsets = ds.metadata["offsets"][:n_train]
+    val_offsets = ds.metadata["offsets"][n_train:]
+    train_ds = DistributedGdsDataset(gds_dir, train_offsets)
+    val_ds = DistributedGdsDataset(gds_dir, val_offsets)
+    model = LinearClassifier(ds.metadata["metadata"]["num_genes"], ds.metadata["metadata"]["num_classes"])
     trainer = pl.Trainer(
         max_epochs=1,
         accelerator="gpu",
         enable_checkpointing=False,
     )
     start = time.perf_counter()
-    trainer.fit(model, train_dataloaders=dataloader)
+    trainer.fit(model, train_dataloaders=DataLoader(train_ds, batch_size=None), val_dataloaders=DataLoader(val_ds, batch_size=None))
     print(trainer.callback_metrics)
     end = time.perf_counter()
     print(f"Elapsed time: {end-start:.6f} seconds")

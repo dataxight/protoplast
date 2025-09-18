@@ -11,55 +11,83 @@ from .strategy import ShuffleStrategy
 from tqdm import tqdm
 
 
-def save_to_gds(files: list[str], shuffle_strategy: type[ShuffleStrategy], Ds: type[DistributedAnnDataset], output_path: str, batch_size: int = 1000, metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None):
+def save_to_gds(files: list[str], shuffle_strategy: type[ShuffleStrategy], Ds: type[DistributedAnnDataset], output_path: str, batch_size: int = 1000, metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None, sparse_key = "X"):
     os.makedirs(output_path, exist_ok=True)
     strat = shuffle_strategy(files, batch_size, 1, 0., 0., metadata_cb=metadata_cb)
     indices = strat.split()
-    # example with cell line
-    ds = Ds(files, indices.train_indices, indices.metadata, ["X"])
-    dataloader = DataLoader(ds, batch_size=None, num_workers=min(os.cpu_count, 10))
+    ds = Ds(files, indices.train_indices, indices.metadata, [sparse_key])
+    dataloader = DataLoader(ds, batch_size=None, num_workers=min(os.cpu_count(), 10))
     gds_file_path = os.path.join(output_path, "data.gds")
     metadata_file_path = os.path.join(output_path, "metadata.json")
-    file = torch.cuda.gds.GdsFile(gds_file_path, os.O_CREAT | os.O_RDWR)
+    file = torch.cuda.gds.GdsFile(gds_file_path, os.O_CREAT | os.O_RDWR | os.O_TRUNC)
     metadata = dict(
         batch_size=batch_size,
-        n_classes=indices.metadata["num_classes"],
-        n_cols = next(iter(dataloader))[0].shape[1]
+        n_cols = next(iter(dataloader))[0].shape[1],
+        metadata=indices.metadata
     )
-    ptr = 0
-    offsets = []
-    n = 0
-    remainder_row = 0
-    for (x,y) in tqdm(dataloader, desc="Saving to gds storage", total=(len(dataloader)//batch_size) + 1):
+    # structure detection
+    first_batch = next(iter(dataloader))
+    def to_type_str(d: torch.Tensor):
+        if d.is_sparse_csr:
+            return "csr"
+        else:
+            return str(d.dtype)
+
+    if isinstance(first_batch, dict):
+        metadata["structure"] = {k: to_type_str(v) for k,v in first_batch.items()}
+    elif isinstance(first_batch, (list | tuple)):
+        metadata["structure"] = [to_type_str(d) for d in first_batch]
+    else:
+        raise Exception("Tensor structure is not supported")
+    
+    def save_csr_mat(x, ptr):
         crow_indices = x.crow_indices().to(torch.int32).contiguous().cuda()  # shape [n_rows + 1]
         col_indices = x.col_indices().to(torch.int32).contiguous().cuda()    # shape [nnz]
         values = x.values().to(torch.float16).contiguous().cuda()
-        offsets.append((ptr, len(col_indices), x.shape[0]))
+        offset = (ptr, len(col_indices), x.shape[0])
         file.save_storage(crow_indices.untyped_storage(), ptr)
         ptr += crow_indices.nbytes
         file.save_storage(col_indices.untyped_storage(), ptr)
         ptr += col_indices.nbytes
         file.save_storage(values.untyped_storage(), ptr)
         ptr += values.nbytes
-        y = y.to(torch.int32).contiguous().cuda()
+        return ptr, offset
+    def save_label(y, ptr):
+        y = y.contiguous().cuda()
         file.save_storage(y.untyped_storage(), ptr)
         ptr += y.nbytes
+        return ptr
+    ptr = 0
+    offsets = []
+    n = 0
+    for batch in tqdm(dataloader, desc="Saving to gds storage"):
+        if isinstance(metadata["structure"], dict):
+            batch = [ batch[k] for k in metadata["structure"]]
+        for d in batch:
+            # support only CSR should support COO also
+            if d.is_sparse_csr:
+                ptr, offset = save_csr_mat(d, ptr)
+                offsets.append(offset)
+            else:
+                ptr = save_label(d, ptr)
         n += 1
     metadata["offsets"] = offsets
     metadata["n"] = n
-    metadata["remainder"] = remainder_row
     with open(metadata_file_path, 'w') as f:
         json.dump(metadata, f)
 
 
 class DistributedGdsDataset(torch.utils.data.IterableDataset):
-    def __init__(self, gds_dir: str):
+    def __init__(self, gds_dir: str, offsets: list):
         super().__init__()
         metadata_path = os.path.join(gds_dir, "metadata.json")
         gds_path = os.path.join(gds_dir, "data.gds")
         self.gds_file = torch.cuda.gds.GdsFile(gds_path, os.O_RDONLY)
+        self.offsets = offsets
         with open(metadata_path, 'r') as f:
             self.metadata = json.load(f)
+        # to get len working
+        self._init_rank()
 
     def _init_rank(self):
         worker_info = get_worker_info()
@@ -85,11 +113,11 @@ class DistributedGdsDataset(torch.utils.data.IterableDataset):
         self.total_workers = self.ray_size * self.nworkers
 
     def __len__(self):
-        return self.metadata["n"]
-
-    def load_data(self, offset):
+        return len(self.offsets)
+    
+    def load_csr_matrix(self, offset, ptr):
         n_cols = self.metadata["n_cols"]
-        ptr, nnz, n_rows = offset
+        _, nnz, n_rows = offset
         crow_indices = torch.empty(n_rows + 1, dtype=torch.int32, device="cuda")
         self.gds_file.load_storage(crow_indices.untyped_storage(), ptr)
         ptr += crow_indices.nbytes
@@ -99,17 +127,40 @@ class DistributedGdsDataset(torch.utils.data.IterableDataset):
         values = torch.empty(nnz, dtype=torch.float16, device="cuda")
         self.gds_file.load_storage(values.untyped_storage(), ptr)
         ptr += values.nbytes
-        X = torch.sparse_csr_tensor(crow_indices, col_indices, values.to(torch.float32), size=(n_rows, n_cols), device="cuda")
-        # TODO: support other parameter in the future
-        y = torch.empty(n_rows, dtype=torch.int32, device="cuda")
+        return torch.sparse_csr_tensor(crow_indices, col_indices, values.to(torch.float32), size=(n_rows, n_cols), device="cuda"), ptr
+
+    def load_label(self, offset, ptr, t: str):
+        _, _, n_rows = offset
+        y = torch.empty(n_rows, dtype=eval(t), device="cuda")
         self.gds_file.load_storage(y.untyped_storage(), ptr)
-        return X,y.to(torch.long)
+        ptr += y.nbytes
+        return y, ptr
 
 
+    def load_data(self, offset):
+        structure = self.metadata["structure"]
+        ptr, _, _ = offset
+        if isinstance(structure, list | tuple):
+            d = []
+            for t in structure:
+                if t == 'csr':
+                    mat, ptr = self.load_csr_matrix(offset, ptr)
+                else:
+                    mat, ptr = self.load_label(offset, ptr, t)
+                d.append(mat)
+        elif isinstance(structure, dict):
+            d = {}
+            for k,v in structure.items():
+                if v == 'csr':
+                    mat, ptr = self.load_csr_matrix(offset, ptr)
+                else:
+                    mat, ptr = self.load_label(offset, ptr, v)
+                d[k] = mat
+        return d
+                
     def __iter__(self):
         self._init_rank()
-        offsets = self.metadata["offsets"]
-        for i, offset in enumerate(offsets):
+        for i, offset in enumerate(self.offsets):
             if (i % self.total_workers) == self.global_rank:
                 yield self.load_data(offset)
 
