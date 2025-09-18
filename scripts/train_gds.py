@@ -9,11 +9,12 @@ import time
 
 def train_h5ad(files: list[str]):
     batch_size = 1000
-    strat = SequentialShuffleStrategy(files, batch_size, 1, 0., 0., metadata_cb=cell_line_metadata_cb)
+    strat = SequentialShuffleStrategy(files, batch_size, 1, 0., 0.2, metadata_cb=cell_line_metadata_cb)
     indices = strat.split()
-    # example with cell line
-    ds = DistributedCellLineAnnDataset(files, indices.train_indices, indices.metadata, ["X"])
-    dataloader = DataLoader(ds, batch_size=None, num_workers=10)
+    train_ds = DistributedCellLineAnnDataset(files, indices.train_indices, indices.metadata, "X", mini_batch_size=batch_size)
+    train_dataloader = DataLoader(train_ds, batch_size=None, num_workers=10)
+    val_ds = DistributedCellLineAnnDataset(files, indices.val_indices, indices.metadata, "X", mini_batch_size=batch_size)
+    val_dataloader = DataLoader(val_ds, batch_size=None, num_workers=10)
     model = LinearClassifier(indices.metadata["num_genes"], indices.metadata["num_classes"])
     trainer = pl.Trainer(
         max_epochs=1,
@@ -21,7 +22,7 @@ def train_h5ad(files: list[str]):
         enable_checkpointing=False,
     )
     start = time.perf_counter()
-    trainer.fit(model, train_dataloaders=dataloader)
+    trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
     print(trainer.callback_metrics)
     end = time.perf_counter()
     print(f"Elapsed time: {end-start:.6f} seconds")
