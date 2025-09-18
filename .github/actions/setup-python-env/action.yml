@@ -10,10 +10,6 @@ inputs:
     description: "uv version to use"
     required: true
     default: "0.6.14"
-  uv-cache-dir:
-    description: "UV cache directory"
-    required: true
-    default: "/mnt/hdd1/github-runner-cache"
 
 runs:
   using: "composite"
@@ -28,7 +24,6 @@ runs:
         version: ${{ inputs.uv-version }}
         enable-cache: 'true'
         cache-suffix: ${{ matrix.python-version }}
-        local-cache-dir: ${{ inputs.uv-cache-dir }}
 
     - name: Install Python dependencies
       run: uv sync --all-groups
