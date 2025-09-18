@@ -26,11 +26,11 @@ def save_to_gds(files: list[str], output_path: str, batch_size: int = 1000):
     offsets = []
     n = 0
     remainder_row = 0
-    for (x,y) in tqdm(dataloader, desc="Saving to gds storage", total=len(dataloader)//batch_size):
+    for (x,y) in tqdm(dataloader, desc="Saving to gds storage", total=(len(dataloader)//batch_size) + 1):
         crow_indices = x.crow_indices().to(torch.int32).contiguous().cuda()  # shape [n_rows + 1]
         col_indices = x.col_indices().to(torch.int32).contiguous().cuda()    # shape [nnz]
         values = x.values().to(torch.float16).contiguous().cuda()
-        offsets.append((ptr, len(col_indices)))
+        offsets.append((ptr, len(col_indices), x.shape[0]))
         file.save_storage(crow_indices.untyped_storage(), ptr)
         ptr += crow_indices.nbytes
         file.save_storage(col_indices.untyped_storage(), ptr)
@@ -41,7 +41,6 @@ def save_to_gds(files: list[str], output_path: str, batch_size: int = 1000):
         file.save_storage(y.untyped_storage(), ptr)
         ptr += y.nbytes
         n += 1
-        remainder_row = x.shape[0]
     metadata["offsets"] = offsets
     metadata["n"] = n
     metadata["remainder"] = remainder_row

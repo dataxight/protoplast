@@ -1,4 +1,5 @@
-from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset, DistributedCellLineAnnDataset, cell_line_metadata_cb, DistributedGdsDataset
+from protoplast.scrna.anndata.torch_dataloader import DistributedCellLineAnnDataset, cell_line_metadata_cb
+from protoplast.scrna.anndata.gds import DistributedGdsDataset
 from protoplast.scrna.anndata.lightning_models import LinearClassifier
 from protoplast.scrna.anndata.strategy import SequentialShuffleStrategy
 from torch.utils.data import DataLoader
@@ -30,7 +31,7 @@ def train_gsd(gds_dir: str):
     ds = DistributedGdsDataset(gds_dir)
     dataloader = DataLoader(ds, batch_size=None)
     # hard code for now we can figure this out later
-    model = LinearClassifier(ds.metadata["n_cols"], ds.metadata["num_classes"])
+    model = LinearClassifier(ds.metadata["n_cols"], ds.metadata["n_classes"])
     trainer = pl.Trainer(
         max_epochs=1,
         accelerator="gpu",
@@ -43,6 +44,6 @@ def train_gsd(gds_dir: str):
     print(f"Elapsed time: {end-start:.6f} seconds")
 
 if __name__ == "__main__":
-    # train_gsd("/mnt/ham/dx_data/plate3_gpu")
-    train_h5ad(["/mnt/ham/dx_data/plate3_filt_Vevo_Tahoe100M_WServicesFrom_ParseGigalab.h5ad"])
+    train_gsd("/mnt/ham/dx_data/plate3_gpu")
+    # train_h5ad(["/mnt/ham/dx_data/plate3_filt_Vevo_Tahoe100M_WServicesFrom_ParseGigalab.h5ad"])
 

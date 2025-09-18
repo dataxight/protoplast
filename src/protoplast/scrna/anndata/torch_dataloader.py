@@ -225,72 +225,7 @@ class DistributedCellLineAnnDataset(DistributedAnnDataset):
         line_idx = np.searchsorted(self.cell_lines, line_ids)
         return X, torch.tensor(line_idx)
     
-class DistributedGdsDataset(torch.utils.data.IterableDataset):
-    def __init__(self, gds_dir: str):
-        super().__init__()
-        metadata_path = os.path.join(gds_dir, "metadata.json")
-        gds_path = os.path.join(gds_dir, "data.gds")
-        self.gds_file = torch.cuda.gds.GdsFile(gds_path, os.O_RDONLY)
-        with open(metadata_path, 'r') as f:
-            self.metadata = json.load(f)
 
-    def _init_rank(self):
-        worker_info = get_worker_info()
-        if worker_info is None:
-            self.wid = 0
-            self.nworkers = 1
-        else:
-            self.wid = worker_info.id
-            self.nworkers = worker_info.num_workers
-        try:
-            w_rank = td.get_rank()
-            w_size = td.get_world_size()
-        except ValueError:
-            w_rank = -1
-            w_size = -1
-        if w_rank >= 0:
-            self.ray_rank = w_rank
-            self.ray_size = w_size
-        else:
-            self.ray_rank = 0
-            self.ray_size = 1
-        self.global_rank = self.ray_rank * self.nworkers + self.wid
-        self.total_workers = self.ray_size * self.nworkers
-
-    def __len__(self):
-        return self.metadata["n"]
-
-    def load_data(self, offset, last_remainder_row=None):
-        n_rows = self.metadata["batch_size"]
-        if last_remainder_row:
-            n_rows = last_remainder_row
-        n_cols = self.metadata["n_cols"]
-        ptr, nnz = offset
-        crow_indices = torch.empty(n_rows + 1, dtype=torch.int32, device="cuda")
-        self.gds_file.load_storage(crow_indices.untyped_storage(), ptr)
-        ptr += crow_indices.nbytes
-        col_indices = torch.empty(nnz, dtype=torch.int32, device="cuda")
-        self.gds_file.load_storage(col_indices.untyped_storage(), ptr)
-        ptr += col_indices.nbytes
-        values = torch.empty(nnz, dtype=torch.float16, device="cuda")
-        self.gds_file.load_storage(values.untyped_storage(), ptr)
-        ptr += values.nbytes
-        X = torch.sparse_csr_tensor(crow_indices, col_indices, values.to(torch.float32), size=(n_rows, n_cols), device="cuda")
-        # TODO: support other parameter in the future
-        y = torch.empty(n_rows, dtype=torch.int32, device="cuda")
-        self.gds_file.load_storage(y.untyped_storage(), ptr)
-        return X,y.to(torch.long)
-
-
-    def __iter__(self):
-        self._init_rank()
-        offsets = self.metadata["offsets"]
-        for i, offset in enumerate(offsets):
-            if (i % self.total_workers) == self.global_rank:
-                if i == len(offsets) - 1:
-                    yield self.load_data(offset, self.metadata["remainder"])
-                else:
-                    yield self.load_data(offset)
 
 
 class AnnDataModule(pl.LightningDataModule):
