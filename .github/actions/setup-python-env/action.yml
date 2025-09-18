@@ -10,6 +10,10 @@ inputs:
     description: "uv version to use"
     required: true
     default: "0.6.14"
+  uv-cache-dir:
+    description: "UV cache directory"
+    required: true
+    default: "/mnt/hdd1/github-runner-cache"
 
 runs:
   using: "composite"
