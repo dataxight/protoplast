@@ -15,7 +15,7 @@ def save_to_gds(files: list[str], shuffle_strategy: type[ShuffleStrategy], Ds: t
     os.makedirs(output_path, exist_ok=True)
     strat = shuffle_strategy(files, batch_size, 1, 0., 0., metadata_cb=metadata_cb)
     indices = strat.split()
-    ds = Ds(files, indices.train_indices, indices.metadata, [sparse_key])
+    ds = Ds(files, indices.train_indices, indices.metadata, sparse_key, mini_batch_size=batch_size)
     dataloader = DataLoader(ds, batch_size=None, num_workers=min(os.cpu_count(), 10))
     gds_file_path = os.path.join(output_path, "data.gds")
     metadata_file_path = os.path.join(output_path, "metadata.json")
