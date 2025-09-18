@@ -14,7 +14,8 @@ from torch.utils.data import DataLoader, get_worker_info
 import anndata
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
 from protoplast.patches.anndata_remote import apply_file_backing_patch
-from protoplast.scrna.anndata.dropin import AnnDataGDS, csr_row_contiguous_view, read_h5ad as read_h5ad_gds
+from protoplast.scrna.anndata.dropin import AnnDataGDS, csr_row_contiguous_view
+from protoplast.scrna.anndata.dropin import read_h5ad as read_h5ad_gds
 
 from .strategy import ShuffleStrategy, SplitInfo
 
@@ -124,7 +125,9 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         else:
             raise Exception("Sparse key not supported")
 
-    def _slice_mat(self, mat: sp.csr_matrix | torch.Tensor | np.ndarray, start: int, end: int) -> sp.csr_matrix | torch.Tensor | np.ndarray: # noqa: N803
+    def _slice_mat(
+        self, mat: sp.csr_matrix | torch.Tensor | np.ndarray, start: int, end: int
+    ) -> sp.csr_matrix | torch.Tensor | np.ndarray:  # noqa: E501
         if isinstance(mat, sp.csr_matrix | np.ndarray):
             return mat[start:end]
         elif isinstance(mat, torch.Tensor):

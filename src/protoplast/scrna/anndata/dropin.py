@@ -24,7 +24,7 @@ if not logger.handlers:
     logger.setLevel(logging.INFO)
 
 
-def read_h5ad(adata_path: str | Path) -> "AnnDataGDS":
+def read_h5ad(adata_path: str | Path) -> AnnDataGDS:
     """
     Reads a `.h5ad` file and returns an `AnnDataGDS` object. If the index files
     (.obs, .var, .gds, .metadata) do not exist, they are created.
@@ -52,7 +52,7 @@ def read_h5ad(adata_path: str | Path) -> "AnnDataGDS":
 
 
 def save_csr_to_gds(
-    adata: "ad.AnnData",
+    adata: ad.AnnData,
     filename: str | Path,
     batch_rows: int | None = None,
 ) -> dict[str, Any]:
@@ -82,7 +82,7 @@ def save_csr_to_gds(
     indptr_path = filename.with_suffix(".indptr.npy")
 
     # Helper to obtain a CSR slice for adata rows [start:end)
-    def _slice_to_csr(adata_obj: "ad.AnnData", start: int, end: int) -> sparse.csr_matrix:
+    def _slice_to_csr(adata_obj: ad.AnnData, start: int, end: int) -> sparse.csr_matrix:
         X_slice = adata_obj.X[start:end]
         if hasattr(X_slice, "tocsr"):
             return X_slice.tocsr()
@@ -96,18 +96,16 @@ def save_csr_to_gds(
 
     adata_obj: ad.AnnData = adata
     n_rows, n_cols = adata_obj.shape
-    batch_rows = (
-        batch_rows
-        if batch_rows is not None
-        else int(os.environ.get("PROTOPLAST_GDS_BATCH_ROWS", 65536))
-    )
+    batch_rows = batch_rows if batch_rows is not None else int(os.environ.get("PROTOPLAST_GDS_BATCH_ROWS", 65536))
 
     # Optional progress bars via tqdm, with safe fallback
     try:
         from tqdm import tqdm as _tqdm
+
         _has_tqdm = True
     except Exception:
         _has_tqdm = False
+
         def _tqdm(iterable=None, **kwargs):
             return iterable if iterable is not None else None
 
@@ -168,15 +166,9 @@ def save_csr_to_gds(
     }
     return metadata
 
-    
-
 
 def load_range_from_gds(
-    filename: str | Path,
-    metadata: dict[str, Any], 
-    start_row: int, 
-    end_row: int,
-    format: str = "csr"
+    filename: str | Path, metadata: dict[str, Any], start_row: int, end_row: int, format: str = "csr"
 ) -> torch.Tensor:
     """
     Load a range of rows [start_row:end_row, :] from matrix stored in GDS-backed files.
@@ -212,9 +204,7 @@ def load_range_from_gds(
         num_rows = end_row - start_row
         empty_indices = torch.empty((2, 0), dtype=torch.int64, device="cuda")
         empty_values = torch.empty(0, dtype=torch.float32, device="cuda")
-        return torch.sparse_coo_tensor(
-            empty_indices, empty_values, size=(num_rows, metadata["n_cols"])
-        )
+        return torch.sparse_coo_tensor(empty_indices, empty_values, size=(num_rows, metadata["n_cols"]))
 
     # Load column indices slice
     indices_file = torch.cuda.gds.GdsFile(str(indices_path), os.O_RDONLY)
@@ -244,19 +234,18 @@ def load_range_from_gds(
         row_repeated = row_ids.repeat_interleave(torch.from_numpy(row_counts).to(device="cuda"))
 
         indices = torch.stack([row_repeated, cols_tensor.long()], dim=0)
-        coo_tensor = torch.sparse_coo_tensor(
-            indices, data_tensor, size=(end_row - start_row, metadata["n_cols"]) 
-            )
+        coo_tensor = torch.sparse_coo_tensor(indices, data_tensor, size=(end_row - start_row, metadata["n_cols"]))
         return coo_tensor.coalesce()
     elif format == "csr":
         return torch.sparse_csr_tensor(
             torch.from_numpy(indptr_slice).long().to(device="cuda"),
             cols_tensor.long(),
             data_tensor,
-            size=(end_row - start_row, metadata["n_cols"])
+            size=(end_row - start_row, metadata["n_cols"]),
         )
     else:
         raise ValueError(f"Unsupported format: {format}")
+
 
 class AnnDataGDS:
     """
@@ -387,6 +376,7 @@ class AnnDataGDS:
         Delete the `.obs`, `.var`, `.gds`, and `.metadata` files created by AnnDataGDS.
         """
         import shutil
+
         if self.gds_dir.exists():
             shutil.rmtree(self.gds_dir)
             logger.info(f"Deleted: {self.gds_dir}")
@@ -400,18 +390,19 @@ class AnnDataGDS:
         self._matrix_format = value
 
     @property
-    def X(self) -> "GDSMatrixAccessor":
+    def X(self) -> GDSMatrixAccessor:
         """
         Provide access to the sparse matrix data via GDS.
         Returns a GDSMatrixAccessor that supports slicing.
         """
         return GDSMatrixAccessor(self.gds_base, self.gds_metadata, self._matrix_format)
 
-    def __getitem__(self, indices: list[int]) -> "ad.AnnData":
+    def __getitem__(self, indices: list[int]) -> ad.AnnData:
         """
         Get an AnnData subset for specific cell indices.
         """
         raise NotImplementedError("__getitem__ is not implemented for this class")
+
 
 class GDSMatrixAccessor:
     """
@@ -470,14 +461,15 @@ class GDSMatrixAccessor:
         else:
             raise TypeError(f"Unsupported index type: {type(key)}")
 
+
 def csr_row_contiguous_view(crow_indices, col_indices, values, shape, start, stop):
     """
     Contiguous row slice [start:stop] as a zero-copy CSR view.
     """
     n_rows, n_cols = shape
     # Adjust crow to start from zero without copying col/values
-    crow_new = crow_indices[start:stop+1] - crow_indices[start]
-    col_new = col_indices   # same storage
-    vals_new = values       # same storage
+    crow_new = crow_indices[start : stop + 1] - crow_indices[start]
+    col_new = col_indices  # same storage
+    vals_new = values  # same storage
     shape_new = (stop - start, n_cols)
     return crow_new, col_new, vals_new, shape_new
