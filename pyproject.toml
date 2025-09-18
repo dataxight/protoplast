@@ -76,6 +76,7 @@ select = [
     "B",   # flake8-bugbear
     "UP",  # pyupgrade
 ]
+ignore = ["W293"]
 
 [tool.uv]
 package = true

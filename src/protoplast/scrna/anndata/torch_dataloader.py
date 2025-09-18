@@ -40,19 +40,23 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         file_paths: list[str],
         indices: list[list[int]],
         metadata: dict,
-        sparse_keys: list[str],
+        sparse_key: str,
+        mini_batch_size: int = None,
     ):
         # use first file as reference first
         self.files = file_paths
-        self.sparse_keys = sparse_keys
+        self.sparse_key = sparse_key
+        self.X = None
+        self.ad = None
         # map each gene to an index
         for k, v in metadata.items():
             setattr(self, k, v)
         self.metadata = metadata
         self.batches = indices
+        self.mini_batch_size = mini_batch_size
 
     @classmethod
-    def create_distributed_ds(cls, indices: SplitInfo, sparse_keys: list[str], mode: str = "train", **kwargs):
+    def create_distributed_ds(cls, indices: SplitInfo, sparse_key: str, mode: str = "train", **kwargs):
         """
         indices is in the following format
         {
@@ -66,7 +70,14 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         }
         """
         indices = indices.to_dict() if isinstance(indices, SplitInfo) else indices
-        return cls(indices["files"], indices[f"{mode}_indices"], indices["metadata"], sparse_keys, **kwargs)
+        return cls(
+            indices["files"],
+            indices[f"{mode}_indices"],
+            indices["metadata"],
+            sparse_key,
+            mini_batch_size=indices.get("mini_batch_size"),
+            **kwargs,
+        )
 
     def _init_rank(self):
         worker_info = get_worker_info()
@@ -101,21 +112,24 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             )
         return torch.from_numpy(mat).float()
 
+    def _get_mat_by_range(self, ad: anndata.AnnData, start: int, end: int) -> sp.csr_matrix:
+        if "." in self.sparse_key:
+            attr, attr_key = self.sparse_key.split(".")
+            X = getattr(ad, attr)[attr_key][start:end]
+        else:
+            X = getattr(ad, self.sparse_key)[start:end]
+        return X
+
     def transform(self, start: int, end: int):
-        mats = []
-        for k in self.sparse_keys:
-            if "." in k:
-                attr, attr_k = k.split(".")
-                mat = getattr(self.ad, attr)[attr_k][start:end]
-                mats.append(self._process_sparse(mat))
-            else:
-                mat = getattr(self.ad, k)[start:end]
-                mats.append(self._process_sparse(mat))
-        if len(mats) == 1:
-            return mats[0]
-        if mats[0].shape[0] == 0:
-            return None
-        return tuple(mats)
+        # by default we just return the matrix
+        # sometimes, the h5ad file stores X as the dense matrix,
+        # so we have to make sure it is a sparse matrix before returning
+        # the batch item
+        if self.X is None:
+            # we don't have the X upstream, so we have to incurr IO to fetch it
+            self.X = self._get_mat_by_range(self.ad, start, end)
+        X = self._process_sparse(self.X)
+        return X
 
     def __len__(self):
         return sum(1 for i in range(len(self.files)) for start, end in self.batches[i])
@@ -127,15 +141,31 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         for fidx, f in enumerate(self.files):
             self.ad = anndata.read_h5ad(f, backed="r")
             for start, end in self.batches[fidx]:
-                if (gidx % self.total_workers) == self.global_rank:
+                if not (gidx % self.total_workers) == self.global_rank:
+                    gidx += 1
+                    continue
+                X = self._get_mat_by_range(self.ad, start, end)
+                self.X = X
+                if self.mini_batch_size is None:
+                    # not fetch-then-batch approach, we yield everything
                     yield self.transform(start, end)
                     total_iter += 1
+                else:
+                    # fetch-then-batch approach
+                    for i in range(0, X.shape[0], self.mini_batch_size):
+                        # index on the X coordinates
+                        b_start, b_end = i, min(i + self.mini_batch_size, X.shape[0])
+                        # index on the adata coordinates
+                        global_start, global_end = start + i, min(start + i + self.mini_batch_size, end)
+                        self.X = X[b_start:b_end]
+                        yield self.transform(global_start, global_end)
+                        total_iter += 1
                 gidx += 1
 
 
 class DistributedFileSharingAnnDataset(DistributedAnnDataset):
-    def __init__(self, file_paths, indices, metadata, sparse_keys, max_open_files: int = 3):
-        super().__init__(file_paths, indices, metadata, sparse_keys)
+    def __init__(self, file_paths, indices, metadata, sparse_key, max_open_files: int = 3):
+        super().__init__(file_paths, indices, metadata, sparse_key)
         self.max_open_files = max_open_files
         self.fptr = dict()
         self.sample_ptr = Counter()
@@ -219,8 +249,6 @@ class DistributedCellLineAnnDataset(DistributedAnnDataset):
 
     def transform(self, start: int, end: int):
         X = super().transform(start, end)
-        if X is None:
-            return None
         line_ids = self.ad.obs["cell_line"].iloc[start:end]
         line_idx = np.searchsorted(self.cell_lines, line_ids)
         return X, torch.tensor(line_idx)
@@ -234,7 +262,7 @@ class AnnDataModule(pl.LightningDataModule):
         indices: dict,
         dataset: DistributedAnnDataset,
         prefetch_factor: int,
-        sparse_keys: list[str],
+        sparse_key: str,
         shuffle_strategy: ShuffleStrategy,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
@@ -256,7 +284,7 @@ class AnnDataModule(pl.LightningDataModule):
             self.loader_config["drop_last"] = True
         else:
             self.loader_config["batch_size"] = None
-        self.sparse_keys = sparse_keys
+        self.sparse_key = sparse_key
         self.before_dense_cb = before_dense_cb
         self.after_dense_cb = after_dense_cb
         self.kwargs = kwargs
@@ -264,12 +292,12 @@ class AnnDataModule(pl.LightningDataModule):
     def setup(self, stage):
         # this is not necessary but it is here in case we want to download data to local node in the future
         if stage == "fit":
-            self.train_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, **self.kwargs)
-            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "val", **self.kwargs)
+            self.train_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_key, **self.kwargs)
+            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_key, "val", **self.kwargs)
         if stage == "test":
-            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, "test", **self.kwargs)
+            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_key, "test", **self.kwargs)
         if stage == "predict":
-            self.predict_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_keys, **self.kwargs)
+            self.predict_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_key, **self.kwargs)
 
     def train_dataloader(self):
         return DataLoader(self.train_ds, **self.loader_config)
