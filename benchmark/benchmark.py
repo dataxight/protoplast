@@ -411,7 +411,7 @@ class ProtoplastRunner(BenchmarkRunner):
             batch_size=self.params.batch_size,
             test_size=0.0,
             val_size=0.0,
-            thread_per_worker=self.params.num_workers,
+            thread_per_worker=self.params.num_workers - 1, # Ray will +1 (https://dataxight.atlassian.net/browse/PROTO-22)
             is_shuffled=False,
             max_epochs=1,
             prefetch_factor=self.params.fetch_factor,
