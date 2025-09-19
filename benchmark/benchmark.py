@@ -405,7 +405,6 @@ class ProtoplastRunner(BenchmarkRunner):
             MyDataset,
             ["input_dim", "hidden_dim", "num_classes"],
             my_callback,
-            pre_fetch_then_batch=self.params.fetch_factor
         )
         trainer.train(
             file_paths=self.adata_paths,
@@ -415,6 +414,7 @@ class ProtoplastRunner(BenchmarkRunner):
             thread_per_worker=self.params.num_workers - 1, # Ray will +1 (https://dataxight.atlassian.net/browse/PROTO-22)
             is_shuffled=False,
             max_epochs=1,
+            pre_fetch_then_batch=self.params.fetch_factor,
             prefetch_factor=self.params.fetch_factor + 1,
         )
 
