@@ -32,6 +32,7 @@ dependencies = [
   "beartype>=0.21.0",
   "scdataset>=0.2.0",
   "scikit-learn>=1.7.1",
+  "braceexpand"
 ]
 requires-python = ">= 3.10"
 
@@ -66,7 +67,6 @@ line-length = 120
 exclude = [
   "**/*.ipynb",
 ]
-
 [tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
@@ -77,6 +77,8 @@ select = [
     "UP",  # pyupgrade
 ]
 ignore = ["W293"]
+
+ignore = ["W293", "W291"]
 
 [tool.uv]
 package = true
