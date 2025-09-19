@@ -20,6 +20,7 @@ import csv
 from pathlib import Path
 from threading import Thread, Event
 import os
+import pynvml
 
 # Data structure
 import anndata as ad
@@ -146,7 +147,8 @@ class BenchmarkRunner(ABC):
                         "# workers",
                         "Task",
                         "Elapsed (seconds)",
-                        "Peak RAM usage (bytes)",
+                        "Peak RAM usage (MB)",
+                        "Peak GPU usage (MB)",
                     ]
                 )
 
@@ -158,11 +160,28 @@ class BenchmarkRunner(ABC):
         stop_event = Event()
         peak = {"rss": proc.memory_info().rss}
 
+        # Start recording GPU usage
+        pynvml.nvmlInit()
+        gpu_count = pynvml.nvmlDeviceGetCount()
+        peak["gpu"] = 0
+        
         def monitor():
+            """Monitor both GPU and RAM usage"""
             while not stop_event.is_set():
+                # RAM
                 rss = proc.memory_info().rss
                 if rss > peak["rss"]:
                     peak["rss"] = rss
+
+                # GPU
+                gpu_used = 0
+                for i in range(gpu_count):
+                    handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                    meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                    gpu_used += meminfo.used
+                if gpu_used > peak["gpu"]:
+                    peak["gpu"] = gpu_used
+
                 time.sleep(0.5)
 
         thread = Thread(target=monitor, daemon=True)
@@ -178,9 +197,10 @@ class BenchmarkRunner(ABC):
             end = time.perf_counter()
             elapsed = end - start
 
-            # Stop recoding RAM usage
+            # Stop monitoring RAM and GPU
             stop_event.set()
             thread.join()
+            pynvml.nvmlShutdown()
 
             with self.logfile.open("a", newline="") as f:
                 writer = csv.writer(f, delimiter="\t")
@@ -195,11 +215,13 @@ class BenchmarkRunner(ABC):
                         self.params.num_workers,
                         msg,
                         elapsed,
-                        peak["rss"],
+                        peak['rss'] / 1024**2,
+                        peak["gpu"] / 1024**2,
                     ]
                 )
             print(f"{msg} took {elapsed:.2f}s")
-            print(f"{msg} peak memory: {peak['rss'] / 1024**2:.2f} MB")
+            print(f"{msg} peak RAM: {peak['rss'] / 1024**2:.2f} MB")
+            print(f"{msg} peak GPU: {peak['gpu'] / 1024**2:.2f} MB")
 
     def run(self):
         with self.record("End-to-end"):
