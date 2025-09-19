@@ -120,6 +120,9 @@ class BenchmarkRunner(ABC):
         self.params = params
         self.adata_paths = glob.glob(params.glob)
 
+        if len(self.adata_paths) == 0:
+            raise FileNotFoundError(f"Invalid glob: {self.params.glob}")
+
         self.data_name = os.path.basename(params.glob)
         if self.data_name.startswith("*"):
             self.data_name = os.path.join(os.path.dirname(params.glob), self.data_name)
