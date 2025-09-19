@@ -14,6 +14,8 @@ from torch.utils.data import DataLoader, get_worker_info
 import anndata
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
 from protoplast.patches.anndata_remote import apply_file_backing_patch
+from protoplast.scrna.anndata.dropin import AnnDataGDS, csr_row_contiguous_view
+from protoplast.scrna.anndata.dropin import read_h5ad as read_h5ad_gds
 
 from .strategy import ShuffleStrategy, SplitInfo
 
@@ -103,6 +105,8 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         self.total_workers = self.ray_size * self.nworkers
 
     def _process_sparse(self, mat) -> torch.Tensor:
+        if torch.is_tensor(mat):
+            return mat
         if sp.issparse(mat):
             return torch.sparse_csr_tensor(
                 torch.from_numpy(mat.indptr).long(),
@@ -112,7 +116,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             )
         return torch.from_numpy(mat).float()
 
-    def _get_mat_by_range(self, ad: anndata.AnnData, start: int, end: int) -> sp.csr_matrix:
+    def _get_mat_by_range(self, ad: anndata.AnnData | AnnDataGDS, start: int, end: int) -> sp.csr_matrix:
         if self.sparse_key == "X":
             return ad.X[start:end]
         elif "layers" in self.sparse_key:
@@ -120,6 +124,18 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             return ad.layers[attr][start:end]
         else:
             raise Exception("Sparse key not supported")
+
+    def _slice_mat(
+        self, mat: sp.csr_matrix | torch.Tensor | np.ndarray, start: int, end: int
+    ) -> sp.csr_matrix | torch.Tensor | np.ndarray:  # noqa: E501
+        if isinstance(mat, sp.csr_matrix | np.ndarray):
+            return mat[start:end]
+        elif isinstance(mat, torch.Tensor):
+            crow, cols, vals = mat.crow_indices(), mat.col_indices(), mat.values()
+            new_crow, new_cols, new_vals, new_shape = csr_row_contiguous_view(crow, cols, vals, mat.shape, start, end)
+            return torch.sparse_csr_tensor(new_crow, new_cols, new_vals, new_shape)
+        else:
+            raise ValueError(f"Unsupported matrix type: {type(mat)}")
 
     def transform(self, start: int, end: int):
         # by default we just return the matrix
@@ -143,7 +159,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         gidx = 0
         total_iter = 0
         for fidx, f in enumerate(self.files):
-            self.ad = anndata.read_h5ad(f, backed="r")
+            self.ad = read_h5ad_gds(f)
             for start, end in self.batches[fidx]:
                 if not (gidx % self.total_workers) == self.global_rank:
                     gidx += 1
@@ -161,7 +177,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
                         b_start, b_end = i, min(i + self.mini_batch_size, X.shape[0])
                         # index on the adata coordinates
                         global_start, global_end = start + i, min(start + i + self.mini_batch_size, end)
-                        self.X = X[b_start:b_end]
+                        self.X = self._slice_mat(X, b_start, b_end)
                         yield self.transform(global_start, global_end)
                         total_iter += 1
                 gidx += 1
