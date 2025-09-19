@@ -1,3 +1,4 @@
+import math
 import os
 from collections import Counter
 from collections.abc import Callable
@@ -112,12 +113,13 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         return torch.from_numpy(mat).float()
 
     def _get_mat_by_range(self, ad: anndata.AnnData, start: int, end: int) -> sp.csr_matrix:
-        if "." in self.sparse_key:
-            attr, attr_key = self.sparse_key.split(".")
-            X = getattr(ad, attr)[attr_key][start:end]
+        if self.sparse_key == "X":
+            return ad.X[start:end]
+        elif "layers" in self.sparse_key:
+            _, attr = self.sparse_key.split(".")
+            return ad.layers[attr][start:end]
         else:
-            X = getattr(ad, self.sparse_key)[start:end]
-        return X
+            raise Exception("Sparse key not supported")
 
     def transform(self, start: int, end: int):
         # by default we just return the matrix
@@ -131,8 +133,10 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         return X
 
     def __len__(self):
-        total_sample = sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
-        return total_sample // self.mini_batch_size + 1
+        if self.mini_batch_size:
+            total_sample = sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
+            return math.ceil(total_sample / self.mini_batch_size)
+        return sum(1 for i in range(len(self.files)) for start, end in self.batches[i])
 
     def __iter__(self):
         self._init_rank()
@@ -174,6 +178,9 @@ class DistributedFileSharingAnnDataset(DistributedAnnDataset):
         self.file_idx = {f: i for i, f in enumerate(self.files)}
         self.current_files = set()
         self.current_fp_idx = -1
+
+    def __len__(self):
+        return sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
 
     @staticmethod
     def _safe_index(obj, idx):
