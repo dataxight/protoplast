@@ -127,8 +127,8 @@ class BenchmarkRunner(ABC):
         if self.data_name.startswith("*"):
             self.data_name = os.path.join(os.path.dirname(params.glob), self.data_name)
 
-        self.adatas = [ad.read_h5ad(p) for p in self.adata_paths]
-        self.cell_count = sum(x.obs.shape[0] for x in self.adatas)
+        adatas = [ad.read_h5ad(p, backed="r") for p in self.adata_paths]
+        self.cell_count = sum(x.obs.shape[0] for x in adatas)
 
         self.logfile = Path(params.logfile)
         # create header if file does not exist
@@ -228,7 +228,7 @@ class ScDatasetRunner(BenchmarkRunner):
             y = torch.tensor(batch.obs[self.params.label].cat.codes.to_numpy(), dtype=torch.long)
             return X, y
 
-        collection = AnnCollection(self.adatas)
+        collection = AnnCollection([ad.read_h5ad(p, backed="r") for p in self.adata_paths])
         strategy = Streaming(indices=np.arange(collection.n_obs), shuffle=False)
         ds = scDataset(
             data_collection=collection,
@@ -314,8 +314,8 @@ class AnnLoaderRunner(BenchmarkRunner):
             )
             return X, y[0]
 
-        collection = AnnCollection(self.adatas)
-        dataloader = ad.experimental.AnnLoader(
+        collection = AnnCollection([ad.read_h5ad(p, backed="r") for p in self.adata_paths])
+        dataloader = AnnLoader(
             collection,
             batch_size=self.params.batch_size,
             shuffle=False,
