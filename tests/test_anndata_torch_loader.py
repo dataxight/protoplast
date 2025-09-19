@@ -256,6 +256,7 @@ def test_load_simple(test_even_h5ad_file: str):
     )
     data_module.setup(stage="fit")
     train_loader = data_module.train_dataloader()
+    total_n = 0
     for i, data in enumerate(train_loader):
         data = data_module.on_after_batch_transfer(data, i)
         n, m = data.shape
@@ -264,6 +265,8 @@ def test_load_simple(test_even_h5ad_file: str):
         assert isinstance(data, torch.Tensor)
         assert not data.is_sparse
         assert not data.is_sparse_csr
+        total_n += 1
+    assert total_n == len(train_loader)
 
 
 def test_load_with_tuple(test_even_h5ad_file: str):
