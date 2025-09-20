@@ -4,9 +4,9 @@ from protoplast.scrna.anndata.torch_dataloader import DistributedCellLineAnnData
 
 if __name__ == "__main__":
     save_to_gds(
-        ["/mnt/ham/dx_data/plate3_filt_Vevo_Tahoe100M_WServicesFrom_ParseGigalab.h5ad"],
+        [f"/ephemeral/tahoe100m/plate{i+1}_filt_Vevo_Tahoe100M_WServicesFrom_ParseGigalab.h5ad" for i in range(13)],
         SequentialShuffleStrategy,
         DistributedCellLineAnnDataset,
-        "/mnt/ham/dx_data/plate3_gpu",
+        "/ephemeral/gds/all_plates",
         metadata_cb=cell_line_metadata_cb,
     )

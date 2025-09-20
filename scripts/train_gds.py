@@ -34,14 +34,22 @@ def train_h5ad(files: list[str]):
     print(f"Elapsed time: {end - start:.6f} seconds")
 
 
+def divisble_array(ar, n):
+    remainder = len(ar) % n > 0 
+    if remainder > 0:
+        return arr[:-remainder]
+    return ar
+
+
 def train_gsd(gds_dir: str, val_size=0.2):
     # a workaround for now
     ds = DistributedGdsDataset(gds_dir, [])
     # hard code for now we can figure this out later
     n = len(ds.metadata["offsets"])
     n_train = int(n * (1 - val_size))
-    train_offsets = ds.metadata["offsets"][:n_train]
-    val_offsets = ds.metadata["offsets"][n_train:]
+    devices = 2
+    train_offsets = divisble_array(ds.metadata["offsets"][:n_train], devices)
+    val_offsets = divisble_array(ds.metadata["offsets"][n_train:], devices)
     train_ds = DistributedGdsDataset(gds_dir, train_offsets)
     val_ds = DistributedGdsDataset(gds_dir, val_offsets)
     model = LinearClassifier(ds.metadata["metadata"]["num_genes"], ds.metadata["metadata"]["num_classes"])
@@ -49,6 +57,7 @@ def train_gsd(gds_dir: str, val_size=0.2):
         max_epochs=1,
         accelerator="gpu",
         enable_checkpointing=False,
+        devices=devices
     )
     start = time.perf_counter()
     trainer.fit(
@@ -62,5 +71,6 @@ def train_gsd(gds_dir: str, val_size=0.2):
 
 
 if __name__ == "__main__":
-    train_gsd("/mnt/ham/dx_data/plate3_gpu")
+    train_gsd("/ephemeral/gds/all_plates")
+    # train_gsd("/mnt/ham/dx_data/plate3_gpu")
     # train_h5ad(["/mnt/ham/dx_data/plate3_filt_Vevo_Tahoe100M_WServicesFrom_ParseGigalab.h5ad"])
