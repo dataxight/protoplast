@@ -10,6 +10,7 @@
 # General
 import argparse
 from pydantic import BaseModel
+import traceback
 from typing import Literal, get_args
 import time
 from abc import ABC, abstractmethod
@@ -195,8 +196,9 @@ class BenchmarkRunner(ABC):
 
         try:
             yield
-        except:
+        except Exception:
             success = False
+            traceback.print_exc()
         finally:
             # Stop counting time
             end = time.perf_counter()
