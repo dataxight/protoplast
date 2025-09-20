@@ -111,6 +111,7 @@ class BenchmarkRunnerParams(BaseModel):
     num_workers: int
     class_name: RunnerClass
     logfile: str
+    ray_workers: int
 
 
 # === BENCHMARKING FUNCTIONS ===
@@ -434,6 +435,7 @@ class ProtoplastRunner(BenchmarkRunner):
             test_size=0.0,
             val_size=0.0,
             thread_per_worker=self.params.num_workers - 1, # Ray will +1 (https://dataxight.atlassian.net/browse/PROTO-22)
+            num_workers=self.params.ray_workers,
             is_shuffled=False,
             max_epochs=1,
             pre_fetch_then_batch=self.params.fetch_factor,
@@ -450,6 +452,7 @@ if __name__ == "__main__":
     parser.add_argument("--workers", dest="num_workers", type=int, default=12)
     parser.add_argument("--label", dest="label", type=str, default="cell_line")
     parser.add_argument("--logfile", dest="logfile", type=str, default="benchmark_log.tsv")
+    parser.add_argument("--ray-workers", dest="ray_workers", type=str, default=1)
     params: BenchmarkRunnerParams = parser.parse_args()
 
     print("=== PARAMS ===")
