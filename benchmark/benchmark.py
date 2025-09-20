@@ -155,6 +155,8 @@ class BenchmarkRunner(ABC):
 
     @contextmanager
     def record(self, msg: str):
+        success = True
+
         # Start recording RAM usage
         pid = os.getpid()
         proc = psutil.Process(pid)
@@ -193,6 +195,8 @@ class BenchmarkRunner(ABC):
 
         try:
             yield
+        except:
+            success = False
         finally:
             # Stop counting time
             end = time.perf_counter()
@@ -215,12 +219,15 @@ class BenchmarkRunner(ABC):
                         self.params.fetch_factor,
                         self.params.num_workers,
                         msg,
-                        elapsed,
+                        elapsed if success else -1,
                         peak['rss'] / 1024**2,
                         peak["gpu"] / 1024**2,
                     ]
                 )
-            print(f"{msg} took {elapsed:.2f}s")
+            if success:
+                print(f"{msg} took {elapsed:.2f}s")
+            else:
+                print(f"{msg} failed after {elapsed:.2f}s")
             print(f"{msg} peak RAM: {peak['rss'] / 1024**2:.2f} MB")
             print(f"{msg} peak GPU: {peak['gpu'] / 1024**2:.2f} MB")
 
