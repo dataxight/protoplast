@@ -4,8 +4,8 @@
 # that expands into multiple h5ad files.
 # ===============================
 [datasets]
-#replogle_h1 = "/mnt/hdd2/tan/competition_support_set_sorted/{competition_train,hepg2,jurkat,k562_gwps,k562,rpe1}.h5"
-replogle_h1 = "/ephemeral/vcc/competition_support_set_sorted/{competition_train,k562}.h5"
+replogle_h1 = "/ephemeral/vcc/competition_support_set_sorted/{competition_train,hepg2,jurkat,k562_gwps,k562,rpe1}.h5"
+#replogle_h1 = "/ephemeral/vcc/competition_support_set_sorted/{competition_train,k562}.h5"
 
 # ===============================
 # Training specs
@@ -26,10 +26,10 @@ replogle_h1 = "train"
 # Fewshot specs
 # Route specific perturbations within a given cell type
 # to train/val/test. Others fall back to train.
-replogle_h1.k562 = "test"
+replogle_h1.k562 = "val"
 # ===============================
 [fewshot]
 # Example: for cell type ARC_H1 in dataset replogle_h1,
 # send the listed perturbations to val split.
 [fewshot."replogle_h1.competition_train"]
-val = [ "TMSB4X", "PRCP", "TADA1", "HIRA", "IGF2R", "NCK2", "MED13", "MED12", "STAT1" ]
+val = [ "HIRA", "IGF2R" ]

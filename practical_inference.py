@@ -150,12 +150,12 @@ def vcc_inference():
     """
     VCC inference.
     """
-    checkpoint_path = "/ephemeral/vcc-models/checkpoints/perturbation-transformer-epoch=25-train_loss=0.77.ckpt"
+    checkpoint_path = "/ephemeral/vcc-models/checkpoints/perturbation-transformer-epoch=39-train_loss=0.79.ckpt"
     # Define our path
     pert_counts_path = "./pert_counts_Validation.csv"
     pert_counts = pd.read_csv(pert_counts_path)
-    gene_names = pd.read_csv("./gene_names.csv")
-    gene_names = gene_names["gene_name"].tolist()
+    gene_names = pd.read_csv("./gene_names.csv", header=None)
+    gene_names = gene_names[0].tolist()
 
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
@@ -226,7 +226,7 @@ def main():
     print("🧬 Perturbation Transformer Inference Example")
     print("=" * 50)
 
-    checkpoint_path = "/ephemeral/vcc-models/checkpoints/perturbation-transformer-epoch=25-train_loss=0.77.ckpt"
+    checkpoint_path = "/ephemeral/vcc-models/checkpoints/perturbation-transformer-epoch=98-train_loss=0.90.ckpt"
 
     dm = PerturbationDataModule(
         config_path="configs/data.toml",

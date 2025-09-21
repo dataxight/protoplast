@@ -63,7 +63,7 @@ def main():
     if checkpoint_files:
         # Sort by modification time to get the latest checkpoint
         latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
-        checkpoint_to_load = "checkpoints/perturbation-transformer-epoch=50-train_loss=0.87.ckpt"
+        checkpoint_to_load = "checkpoints/perturbation-transformer-epoch=25-train_loss=0.77.ckpt"
         print(f"Found checkpoint: {checkpoint_to_load}")
         
         # Load and analyze checkpoint to detect architecture
@@ -105,7 +105,7 @@ def main():
         dropout=0.1,
         d_ff=d_ff,
         d_x=2260,  # Bottleneck dimension
-        lr=1e-4,
+        lr=3e-4,
         wd=1e-5,
         lr_scheduler_freq=1,
         lr_scheduler_patience=10,
