@@ -5,6 +5,7 @@ This avoids import issues with relative imports.
 
 import torch
 import lightning as L
+import numpy as np
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import CSVLogger
 
@@ -41,6 +42,10 @@ def main():
     pert_emb_dim = sample_batch["pert_emb"].shape[-1]
     n_cell_types = sample_batch["cell_type_onehot"].shape[-1]
     n_batches = sample_batch["batch_onehot"].shape[-1]
+
+    gene_names = open("gene_names.csv", "r").read().splitlines()
+    hvg_mask = np.isin(gene_names, open("hvg.txt", "r").read().splitlines())
+    hvg_mask = torch.tensor(hvg_mask)
     
     print(f"Data dimensions:")
     print(f"  n_genes: {n_genes}")
@@ -60,41 +65,42 @@ def main():
     d_ff = int(672 * 2.67)    # Default
     checkpoint_to_load = None
     
-    if checkpoint_files:
-        # Sort by modification time to get the latest checkpoint
-        latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
-        checkpoint_to_load = "checkpoints/perturbation-transformer-epoch=25-train_loss=0.77.ckpt"
-        print(f"Found checkpoint: {checkpoint_to_load}")
+    # if checkpoint_files:
+    #     # Sort by modification time to get the latest checkpoint
+    #     latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
+    #     checkpoint_to_load = "checkpoints/perturbation-transformer-epoch=25-train_loss=0.77.ckpt"
+    #     print(f"Found checkpoint: {checkpoint_to_load}")
         
-        # Load and analyze checkpoint to detect architecture
-        try:
-            checkpoint = torch.load(checkpoint_to_load, map_location='cpu')
-            state_dict = checkpoint['state_dict']
+    #     # Load and analyze checkpoint to detect architecture
+    #     try:
+    #         checkpoint = torch.load(checkpoint_to_load, map_location='cpu')
+    #         state_dict = checkpoint['state_dict']
             
-            # Detect architecture
-            max_layer = -1
-            detected_d_ff = None
+    #         # Detect architecture
+    #         max_layer = -1
+    #         detected_d_ff = None
             
-            for key in state_dict.keys():
-                if 'transformer.layers.' in key:
-                    layer_num = int(key.split('.')[2])
-                    max_layer = max(max_layer, layer_num)
-                if 'transformer.layers.0.mlp.gate_proj.weight' in key:
-                    detected_d_ff = state_dict[key].shape[0]
+    #         for key in state_dict.keys():
+    #             if 'transformer.layers.' in key:
+    #                 layer_num = int(key.split('.')[2])
+    #                 max_layer = max(max_layer, layer_num)
+    #             if 'transformer.layers.0.mlp.gate_proj.weight' in key:
+    #                 detected_d_ff = state_dict[key].shape[0]
             
-            if max_layer >= 0:
-                n_transformer_layers = max_layer + 1
-            if detected_d_ff is not None:
-                d_ff = detected_d_ff
+    #         if max_layer >= 0:
+    #             n_transformer_layers = max_layer + 1
+    #         if detected_d_ff is not None:
+    #             d_ff = detected_d_ff
                 
-            print(f"Detected architecture: {n_transformer_layers} layers, d_ff={d_ff}")
-        except Exception as e:
-            print(f"Could not analyze checkpoint: {e}")
-            print("Using default architecture")
+    #         print(f"Detected architecture: {n_transformer_layers} layers, d_ff={d_ff}")
+    #     except Exception as e:
+    #         print(f"Could not analyze checkpoint: {e}")
+    #         print("Using default architecture")
 
     # Initialize model with detected/default architecture
     model = PerturbationTransformerModel(
         datamodule=dm,
+        hvg_mask=hvg_mask,
         d_h=672,  # Hidden dimension
         n_genes=n_genes,
         pert_emb_dim=pert_emb_dim,
@@ -161,40 +167,40 @@ def main():
         deterministic=True,  # For reproducibility
     )
     
-    # Manually load checkpoint weights if available (avoiding optimizer state issues)
-    if checkpoint_to_load and os.path.exists(checkpoint_to_load):
-        print(f"Manually loading model weights from: {checkpoint_to_load}")
+    # # Manually load checkpoint weights if available (avoiding optimizer state issues)
+    # if checkpoint_to_load and os.path.exists(checkpoint_to_load):
+    #     print(f"Manually loading model weights from: {checkpoint_to_load}")
         
-        try:
-            checkpoint = torch.load(checkpoint_to_load, map_location='cpu')
-            state_dict = checkpoint['state_dict']
+    #     try:
+    #         checkpoint = torch.load(checkpoint_to_load, map_location='cpu')
+    #         state_dict = checkpoint['state_dict']
             
-            # Filter state dict to match current model
-            model_state_dict = model.state_dict()
-            filtered_state_dict = {}
+    #         # Filter state dict to match current model
+    #         model_state_dict = model.state_dict()
+    #         filtered_state_dict = {}
             
-            for key, value in state_dict.items():
-                if key in model_state_dict:
-                    if model_state_dict[key].shape == value.shape:
-                        filtered_state_dict[key] = value
-                    else:
-                        print(f"⚠️  Shape mismatch for {key}: {model_state_dict[key].shape} vs {value.shape}")
-                else:
-                    if not key.startswith(('batch_embedding', 'cell_type_embedding')):
-                        print(f"⚠️  Key not in model: {key}")
+    #         for key, value in state_dict.items():
+    #             if key in model_state_dict:
+    #                 if model_state_dict[key].shape == value.shape:
+    #                     filtered_state_dict[key] = value
+    #                 else:
+    #                     print(f"⚠️  Shape mismatch for {key}: {model_state_dict[key].shape} vs {value.shape}")
+    #             else:
+    #                 if not key.startswith(('batch_embedding', 'cell_type_embedding')):
+    #                     print(f"⚠️  Key not in model: {key}")
             
-            # Load the filtered weights
-            missing_keys, unexpected_keys = model.load_state_dict(filtered_state_dict, strict=False)
+    #         # Load the filtered weights
+    #         missing_keys, unexpected_keys = model.load_state_dict(filtered_state_dict, strict=False)
             
-            if missing_keys:
-                print(f"🔧 Missing keys (will be randomly initialized): {len(missing_keys)} keys")
+    #         if missing_keys:
+    #             print(f"🔧 Missing keys (will be randomly initialized): {len(missing_keys)} keys")
             
-            print(f"✅ Loaded {len(filtered_state_dict)} parameters from checkpoint")
-            print("🚀 Starting training with loaded weights (fresh optimizer state)")
+    #         print(f"✅ Loaded {len(filtered_state_dict)} parameters from checkpoint")
+    #         print("🚀 Starting training with loaded weights (fresh optimizer state)")
             
-        except Exception as e:
-            print(f"❌ Error loading checkpoint manually: {e}")
-            print("🔄 Starting training from scratch")
+    #     except Exception as e:
+    #         print(f"❌ Error loading checkpoint manually: {e}")
+    #         print("🔄 Starting training from scratch")
     
     # Train the model (always start fresh training, no checkpoint resume)
     trainer.fit(model, dm)

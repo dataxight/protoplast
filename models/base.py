@@ -39,31 +39,49 @@ class PerturbationModel(L.LightningModule, ABC):
         self.n_input_features = None
 
     def configure_optimizers(self):
-        """Configure optimizer and learning rate scheduler."""
-        optimizer = torch.optim.Adam(
-            self.parameters(),
-            lr=self.lr,
-            weight_decay=self.wd
+        """Configure optimizer and learning rate scheduler with parameter group separation."""
+        import math
+        import torch
+        from torch.optim import AdamW
+        from torch.optim.lr_scheduler import LambdaLR
+
+        # separate param groups so LayerNorm / bias get no weight decay
+        decay, no_decay = [], []
+        for n, p in self.named_parameters():
+            if not p.requires_grad:
+                continue
+            if any(nd in n.lower() for nd in ["bias", "norm", "layernorm", "rmsnorm"]):
+                no_decay.append(p)
+            else:
+                decay.append(p)
+
+        optimizer = AdamW(
+            [
+                {"params": decay, "weight_decay": 3e-4},
+                {"params": no_decay, "weight_decay": 0.0},
+            ],
+            lr=1e-3,  # peak LR
+            betas=(0.9, 0.95),
+            eps=1e-8,
         )
 
-        if self.lr_scheduler_freq is not None:
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer,
-                mode='min',
-                factor=self.lr_scheduler_factor,
-                patience=self.lr_scheduler_patience
-            )
-            return {
-                'optimizer': optimizer,
-                'lr_scheduler': {
-                    'scheduler': scheduler,
-                    'monitor': 'train_loss',
-                    'frequency': self.lr_scheduler_freq,
-                    'interval': self.lr_scheduler_interval
-                }
-            }
+        # define warmup + cosine decay
+        warmup_steps = 2000
+        max_steps = 50000  # you can also set dynamically in trainer
 
-        return optimizer
+        def lr_lambda(step):
+            if step < warmup_steps:
+                return float(step) / float(max(1, warmup_steps))
+            progress = float(step - warmup_steps) / float(max(1, max_steps - warmup_steps))
+            return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+        scheduler = {
+            "scheduler": LambdaLR(optimizer, lr_lambda),
+            "interval": "step",   # update every step
+            "frequency": 1,
+        }
+
+        return [optimizer], [scheduler]
 
     def unpack_batch(self, batch: dict[str, Any]):
         """

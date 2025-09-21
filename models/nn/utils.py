@@ -3,6 +3,7 @@ from typing import Union
 import torch
 import torch.nn as nn
 from transformers import GPT2Config, GPT2Model, LlamaConfig, LlamaModel, PreTrainedModel
+from transformers.models.llama.modeling_llama import LlamaAttention
 
 # LoRA / PEFT
 try:
@@ -98,7 +99,43 @@ def get_loss_fn(loss: Union[str, nn.Module]) -> nn.Module:
         raise ValueError(f"Unsupported loss function: {loss}")
 
 
-def get_transformer_backbone(key, kwargs) -> PreTrainedModel:
+class LlamaAttentionNoRoPE(LlamaAttention):
+    """LlamaAttention with RoPE disabled."""
+    def apply_rotary_pos_emb(self, q, k, cos, sin, position_ids):
+        return q, k  # disable RoPE
+
+
+def make_llama_encoder(config_kwargs, input_dim):
+    """Create a bidirectional Llama encoder with RoPE disabled."""
+    cfg = LlamaConfig(**config_kwargs)
+    cfg.is_decoder = False
+    cfg.use_cache = False
+    # cfg.attn_implementation = "flash_attention_2"  # if available
+
+    model = LlamaModel(cfg)
+
+    # Make bidirectional and disable RoPE
+    for blk in model.layers:
+        if hasattr(blk.self_attn, "is_causal"):
+            blk.self_attn.is_causal = False
+        blk.self_attn.__class__ = LlamaAttentionNoRoPE  # nuke RoPE
+
+    # Project external inputs
+    model.input_proj = nn.Linear(input_dim, cfg.hidden_size)
+
+    def forward_inputs(self, x, attn_mask=None, **kwargs):
+        return super(LlamaModel, self).forward(
+            inputs_embeds=self.input_proj(x),
+            attention_mask=attn_mask,
+            use_cache=False,
+            **kwargs,
+        )
+
+    model.forward_inputs = forward_inputs.__get__(model, LlamaModel)
+    return model
+
+
+def get_transformer_backbone(key, kwargs, input_dim=None) -> PreTrainedModel:
     if key == "GPT2":
         config = GPT2Config(**kwargs)
         model = GPT2BidirectionalModel(config)
@@ -111,12 +148,12 @@ def get_transformer_backbone(key, kwargs) -> PreTrainedModel:
 
         model_dim = config.n_embd
     elif key == "llama":
-        config = LlamaConfig(**kwargs)
-        config._attn_implementation = "flash_attention_2"
-        # Let mixed precision handle dtype conversion automatically
-        model = LlamaBidirectionalModel(config)
-        model_dim = config.hidden_size
-
+        if input_dim is None:
+            raise ValueError("input_dim is required for llama backbone")
+        model = make_llama_encoder(kwargs, input_dim)
+        model_dim = LlamaConfig(**kwargs).hidden_size
+        
+        # Zero out embedding weights and freeze them
         model.embed_tokens.weight.requires_grad = False
         model.embed_tokens.weight.zero_()
     else:
@@ -191,80 +228,6 @@ def apply_lora(model: PreTrainedModel, backbone_key: str, lora_cfg: dict | None)
     return peft_model
 
 
-class NoRoPE(nn.Module):
-    """
-    A drop-in replacement for LlamaRotaryEmbedding that always returns:
-      cos = all ones, sin = all zeros
-    of shape (batch_size, seq_len, head_dim), so rotary has no effect.
-    """
-
-    def __init__(self, num_attention_heads: int, hidden_size: int):
-        super().__init__()
-        self.num_heads = num_attention_heads
-        self.hidden_size = hidden_size
-
-    def forward(self, hidden_states: torch.Tensor, position_ids: torch.LongTensor):
-        # hidden_states: (batch_size, seq_len, hidden_dim)
-        batch_size, seq_len, hidden_dim = hidden_states.shape
-
-        # Create cos = ones, sin = zeros
-        #   shape --> (batch_size, seq_len, head_dim)
-        cos = hidden_states.new_ones(batch_size, seq_len, self.num_heads)
-        sin = hidden_states.new_zeros(batch_size, seq_len, self.num_heads)
-        return cos, sin
-
-
-class LlamaBidirectionalModel(LlamaModel):
-    """
-    A drop-in replacement for LlamaModel with bidirectional attention.
-    By overriding _update_causal_mask to return None, all tokens attend to each other.
-    """
-
-    def __init__(self, config: LlamaConfig):
-        config._attn_implementation = "flash_attention_2"
-        super().__init__(config)
-
-        self.rotary_emb = NoRoPE(
-            num_attention_heads=config.head_dim,
-            hidden_size=config.hidden_size,
-        )
-
-    def _update_causal_mask(
-        self,
-        attention_mask: torch.Tensor,
-        input_tensor: torch.Tensor,
-    ):
-        # By returning None, we disable any causal‐(look‐ahead) masking.
-        # The only mask that remains is whatever "attention_mask" the user has passed
-        # (e.g. padding‐mask), which will be handled by Flash Attention 2 internally as non‐causal.
-        return None
-
-    def forward(
-        self,
-        input_ids: torch.LongTensor = None,
-        attention_mask: torch.Tensor = None,
-        position_ids: torch.LongTensor = None,
-        past_key_values=None,
-        inputs_embeds: torch.FloatTensor = None,
-        use_cache: bool = None,
-        output_attentions: bool = None,
-        output_hidden_states: bool = None,
-        cache_position: torch.LongTensor = None,
-        **kwargs,
-    ):
-        # With flash_attention_2, the is_causal behavior is controlled by _update_causal_mask
-        # No need to pass flash attention specific parameters
-        return super().forward(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            cache_position=cache_position,
-        )
 
 
 class GPT2BidirectionalModel(GPT2Model):

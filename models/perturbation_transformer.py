@@ -33,6 +33,7 @@ class PerturbationTransformerModel(PerturbationModel):
     
     def __init__(
         self,
+        hvg_mask: torch.Tensor,
         d_h: int = 672,  # Hidden dimension
         n_genes: int = 18080,  # Number of genes (G)
         pert_emb_dim: int = 5120,  # Perturbation embedding dimension
@@ -48,8 +49,8 @@ class PerturbationTransformerModel(PerturbationModel):
         **kwargs
     ):
         super().__init__(**kwargs)
-        
         self.d_h = d_h
+        self.hvg_mask = hvg_mask
         self.n_genes = n_genes
         self.pert_emb_dim = pert_emb_dim
         self.n_cell_types = n_cell_types
@@ -82,7 +83,7 @@ class PerturbationTransformerModel(PerturbationModel):
             "max_position_embeddings": 2048,  # Max sequence length
             "rms_norm_eps": 1e-6,
         }
-        self.transformer, self.model_dim = get_transformer_backbone("llama", transformer_kwargs)
+        self.transformer, self.model_dim = get_transformer_backbone("llama", transformer_kwargs, input_dim=n_genes)
         
         # Projection layers (as specified)
         self.project_out = MLP(d_h, d_h, n_genes, dropout=dropout, n_layers=4)
@@ -186,7 +187,8 @@ class PerturbationTransformerModel(PerturbationModel):
         B, S, G = X_pert_hat.shape
         X_pert_hat = X_pert_hat.reshape(-1, S, G).contiguous()
         pert_cell_emb = pert_cell_emb.reshape(-1, S, G).contiguous()
-        
+        X_pert_hat = X_pert_hat[:, :, self.hvg_mask]
+        pert_cell_emb = pert_cell_emb[:, :, self.hvg_mask]
         # MMD loss
         dist_loss = self.mmd_loss(X_pert_hat, pert_cell_emb).nanmean()
         sparsity_loss = self._sparsity_loss(X_pert_hat, pert_cell_emb)

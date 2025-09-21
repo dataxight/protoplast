@@ -4,8 +4,8 @@
 # that expands into multiple h5ad files.
 # ===============================
 [datasets]
-replogle_h1 = "/ephemeral/vcc/competition_support_set_sorted/{competition_train,hepg2,jurkat,k562_gwps,k562,rpe1}.h5"
-#replogle_h1 = "/ephemeral/vcc/competition_support_set_sorted/{competition_train,k562}.h5"
+#replogle_h1 = "/ephemeral/vcc/competition_support_set_sorted/{competition_train,hepg2,jurkat,k562_gwps,k562,rpe1}.h5"
+replogle_h1 = "/ephemeral/vcc/competition_support_set_sorted/competition_train.h5"
 
 # ===============================
 # Training specs
@@ -26,7 +26,7 @@ replogle_h1 = "train"
 # Fewshot specs
 # Route specific perturbations within a given cell type
 # to train/val/test. Others fall back to train.
-replogle_h1.k562 = "val"
+#replogle_h1.k562 = "val"
 # ===============================
 [fewshot]
 # Example: for cell type ARC_H1 in dataset replogle_h1,
