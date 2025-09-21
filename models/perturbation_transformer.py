@@ -15,6 +15,7 @@ from geomloss import SamplesLoss
 
 from .base import PerturbationModel
 from .llama_components import LlamaModel
+from .nn.utils import get_transformer_backbone
 
 from .nn.mlp import MLP, MaskNet
 
@@ -70,29 +71,27 @@ class PerturbationTransformerModel(PerturbationModel):
         # Cell type embedding layer (will be initialized when we know n_cell_types)
         self.cell_type_embedding = None
         
-        # Llama backbone
-        self.transformer = LlamaModel(
-            hidden_size=d_h,
-            num_hidden_layers=n_transformer_layers,
-            num_attention_heads=n_heads,
-            intermediate_size=d_ff,
-            dropout=dropout,
-            max_position_embeddings=2048,  # Max sequence length
-            rms_norm_eps=1e-6,
-        )
+        # Transformer backbone using utility function
+        transformer_kwargs = {
+            "hidden_size": d_h,
+            "num_hidden_layers": n_transformer_layers,
+            "num_attention_heads": n_heads,
+            "head_dim": d_h // n_heads,
+            "intermediate_size": d_ff,
+            "dropout": dropout,
+            "max_position_embeddings": 2048,  # Max sequence length
+            "rms_norm_eps": 1e-6,
+        }
+        self.transformer, self.model_dim = get_transformer_backbone("llama", transformer_kwargs)
         
         # Projection layers (as specified)
         self.project_out = MLP(d_h, d_h, n_genes, dropout=dropout, n_layers=4)
-        
-        self.final_down_then_up = nn.Sequential(
-            nn.Linear(n_genes, d_x),
-            nn.GELU(),
-            nn.Linear(d_x, n_genes),
-            nn.Softplus()  # Ensures output >= 0
-        )
+
+        # build mlp for final down-then-up projection
+        self.final_down_then_up = MLP(n_genes, d_x, n_genes, dropout=dropout, n_layers=4)
         
         # MMD loss
-        self.mmd_loss = SamplesLoss(loss=mmd_kernel, p=2, blur=mmd_blur)
+        self.mmd_loss = SamplesLoss(loss=mmd_kernel, blur=mmd_blur)
 
     def _sparsity_loss(self, pred, target) -> torch.Tensor:
         """
@@ -155,7 +154,13 @@ class PerturbationTransformerModel(PerturbationModel):
         
         # Apply Llama transformer to learn residual effects
         # H is already in the right shape [B, S, d_h] for Llama
-        ft_H = self.transformer(H)  # [B, S, d_h]
+        # Create cache_position for the sequence
+        cache_position = torch.arange(H.size(1), device=H.device)
+        transformer_output = self.transformer(
+            inputs_embeds=H, 
+            cache_position=cache_position
+        )  # [B, S, d_h]
+        ft_H = transformer_output.last_hidden_state  # Extract hidden states
         
         # Compute final representation: O = H + ft(H)
         O = H + ft_H  # [B, S, d_h]
@@ -163,6 +168,8 @@ class PerturbationTransformerModel(PerturbationModel):
         # Project to gene space
         gene_proj = self.project_out(O)  # [B, S, G]
         X_pert_hat = self.final_down_then_up(gene_proj)  # [B, S, G]
+        # clip X_pert_hat to be non-negative
+        X_pert_hat = torch.clamp(X_pert_hat, min=0)
         
         return X_pert_hat
     
