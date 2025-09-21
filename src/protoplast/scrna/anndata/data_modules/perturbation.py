@@ -52,6 +52,8 @@ class PerturbationDataset(DistributedAnnDataset):
         group_size_S: int = 32,
         barcodes: bool = False,
         n_items: int = None,
+        cell_noise: float = 0.3,
+        gene_noise: float = 0.3,
         *args,
         **kwargs
     ):
@@ -67,6 +69,8 @@ class PerturbationDataset(DistributedAnnDataset):
         self.n_items = n_items
         self.h5files = None
         self.adata_obs = None
+        self.cell_noise = cell_noise
+        self.gene_noise = gene_noise
 
         self.pert_embedding = torch.load(pert_embedding_file)
 
@@ -272,6 +276,8 @@ class PerturbationDataset(DistributedAnnDataset):
         if self.h5files is None:
             self.h5files = [h5py.File(f, 'r', libver='latest', swmr=True) for f in self.files]
 
+        import random
+        random.shuffle(self.batches)
         for region_idx, region in enumerate(self.batches):
             file_i, start, end = region
 
@@ -428,6 +434,7 @@ class PerturbationDataModule(AnnDataModule):
             prefetch_factor=prefetch_factor,
             **kwargs
         )
+        # shuffle batches
 
         if num_workers is not None:
             self.loader_config["num_workers"] = num_workers

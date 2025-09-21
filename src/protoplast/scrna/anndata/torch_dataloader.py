@@ -137,6 +137,9 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             self.ray_rank = 0
             self.ray_size = 1
         self.batches = indices
+        # shuffle batches
+        import random
+        random.shuffle(self.batches)
 
     @classmethod
     def create_distributed_ds(cls, indices: dict, sparse_keys: list[str], mode: str = "train"):
