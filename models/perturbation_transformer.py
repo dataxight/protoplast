@@ -259,7 +259,7 @@ class PerturbationTransformerModel(PerturbationModel):
                 'optimizer': optimizer,
                 'lr_scheduler': {
                     'scheduler': scheduler,
-                    'monitor': 'val_loss',
+                    'monitor': 'train_loss',
                     'frequency': self.lr_scheduler_freq,
                     'interval': self.lr_scheduler_interval
                 }
