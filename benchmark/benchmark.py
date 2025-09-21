@@ -126,9 +126,13 @@ class BenchmarkRunner(ABC):
         if len(self.adata_paths) == 0:
             raise FileNotFoundError(f"Invalid glob: {self.params.glob}")
 
+        # Get data name
         self.data_name = os.path.basename(params.glob)
         if self.data_name.startswith("*"):
-            self.data_name = os.path.join(os.path.dirname(params.glob), self.data_name)
+            self.data_name = os.path.join(
+                os.path.basename(os.path.dirname(params.glob)),
+                self.data_name
+            )
 
         adatas = [ad.read_h5ad(p, backed="r") for p in self.adata_paths]
         self.cell_count = sum(x.obs.shape[0] for x in adatas)
@@ -461,7 +465,7 @@ if __name__ == "__main__":
     parser.add_argument("--workers", dest="num_workers", type=int, default=12)
     parser.add_argument("--label", dest="label", type=str, default="cell_line")
     parser.add_argument("--logfile", dest="logfile", type=str, default="benchmark_log.tsv")
-    parser.add_argument("--ray-workers", dest="ray_workers", type=str, default=1)
+    parser.add_argument("--ray-workers", dest="ray_workers", type=int, default=1)
     params: BenchmarkRunnerParams = parser.parse_args()
 
     print("=== PARAMS ===")
