@@ -1,0 +1,34 @@
+# ===============================
+# Dataset paths
+# Each entry maps a dataset name to a brace-glob pattern
+# that expands into multiple h5ad files.
+# ===============================
+[datasets]
+#replogle_h1 = "/mnt/hdd2/tan/competition_support_set_sorted/{competition_train,hepg2,jurkat,k562_gwps,k562,rpe1}.h5"
+replogle_h1 = "/mnt/hdd2/tan/competition_support_set_sorted/{competition_train,k562}.h5"
+
+# ===============================
+# Training specs
+# All cell types in a dataset automatically go to training
+# unless overridden by zeroshot/fewshot rules.
+# ===============================
+[training]
+replogle_h1 = "train"
+# xaira = "train"
+
+# ===============================
+# Zeroshot specs
+# Move *entire cell types* to val/test.
+# Key format: "dataset.celltype" = "split"
+# ===============================
+[zeroshot]
+# ===============================
+# Fewshot specs
+# Route specific perturbations within a given cell type
+# to train/val/test. Others fall back to train.
+# ===============================
+[fewshot]
+# Example: for cell type ARC_H1 in dataset replogle_h1,
+# send the listed perturbations to val split.
+[fewshot."replogle_h1.competition_train"]
+val = [ "TMSB4X", "PRCP", "TADA1", "HIRA", "IGF2R", "NCK2", "MED13", "MED12", "STAT1" ]
