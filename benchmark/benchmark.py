@@ -164,20 +164,19 @@ class BenchmarkRunner(ABC):
 
         # Start recording RAM usage
         pid = os.getpid()
-        proc = psutil.Process(pid)
         stop_event = Event()
-        peak = {"rss": proc.memory_info().rss}
+        peak = {"rss": psutil.virtual_memory().used}
 
         # Start recording GPU usage
         pynvml.nvmlInit()
         gpu_count = pynvml.nvmlDeviceGetCount()
         peak["gpu"] = 0
-        
+
         def monitor():
             """Monitor both GPU and RAM usage"""
             while not stop_event.is_set():
                 # RAM
-                rss = proc.memory_info().rss
+                rss = psutil.virtual_memory().used
                 if rss > peak["rss"]:
                     peak["rss"] = rss
 
