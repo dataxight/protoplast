@@ -135,14 +135,13 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
     def __len__(self):
         if self.mini_batch_size:
             total_sample = sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
-            return math.ceil(total_sample / self.mini_batch_size)
+            return math.ceil(total_sample / self.mini_batch_size / td.get_world_size())
         return sum(1 for i in range(len(self.files)) for start, end in self.batches[i])
 
     def __iter__(self):
         self._init_rank()
         gidx = 0
         total_iter = 0
-        print(f"I'm in thread/worker that has global rank {self.global_rank}, total workers {self.total_workers}, len of self.batches[0] {len(self.batches[0])}, mini_batch_size {self.mini_batch_size}")
         for fidx, f in enumerate(self.files):
             self.ad = anndata.read_h5ad(f, backed="r")
             for start, end in self.batches[fidx]:

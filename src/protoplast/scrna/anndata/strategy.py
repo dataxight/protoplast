@@ -25,7 +25,7 @@ def ann_split_data(
     def to_batches(n):
         batches = []
         for i in range(0, n, batch_size):
-            if i + batch_size > n and drop_last:
+            if i + batch_size > n:
                 continue
             batches.append((i, i + batch_size))
         return batches
@@ -34,10 +34,16 @@ def ann_split_data(
         n = sum(end - start for start, end in batches)
         remainder = len(batches) % total_workers
         if remainder > 0:
-            dropped_n = sum(end - start for start, end in batches[-remainder:])
-            if dropped_n / n > drop_remainder_warning_pct:
-                print(f"=========Warning: {dropped_n / n} of data is dropped")
-            batches = batches[:-remainder]
+            if drop_last:
+                dropped_n = sum(end - start for start, end in batches[-remainder:])
+                if dropped_n / n > drop_remainder_warning_pct:
+                    print(f"=========Warning: {dropped_n / n} of data is dropped")
+                batches = batches[:-remainder]
+            else:
+                pad = total_workers - remainder
+                print("Duplicating data with", pad)
+                batches.extend(batches[-remainder:] * (pad // remainder))
+                batches.extend(batches[-(pad % remainder) :])
         return batches
 
     if not rng:
@@ -95,11 +101,25 @@ def ann_split_data(
         val_split = batches[:val_n]
         test_split = batches[val_n : val_n + test_n]
         train_split = batches[val_n + test_n :]
-        print("=========Length of val_split", len(val_split), "length of test_split", len(test_split), "length of train_split", len(train_split))
+        print(
+            "=========Length of val_split",
+            len(val_split),
+            "length of test_split",
+            len(test_split),
+            "length of train_split",
+            len(train_split),
+        )
         val_split = drop_remainder(val_split)
         test_split = drop_remainder(test_split)
         train_split = drop_remainder(train_split)
-        print("=========Length of after dropping remainder val_split", len(val_split), "length of test_split", len(test_split), "length of train_split", len(train_split))
+        print(
+            "=========Length of after dropping remainder val_split",
+            len(val_split),
+            "length of test_split",
+            len(test_split),
+            "length of train_split",
+            len(train_split),
+        )
 
         validation_datas.append(val_split)
         test_datas.append(test_split)
@@ -187,7 +207,7 @@ class SequentialShuffleStrategy(ShuffleStrategy):
         random_seed: int | None = 42,
         metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
         is_shuffled: bool = False,
-        pre_fetch_then_batch: int | None = 32,
+        pre_fetch_then_batch: int | None = 16,
         drop_last: bool = True,
     ) -> None:
         super().__init__(
@@ -200,7 +220,7 @@ class SequentialShuffleStrategy(ShuffleStrategy):
             metadata_cb,
             is_shuffled,
         )
-        self.pre_fetch_then_batch = pre_fetch_then_batch 
+        self.pre_fetch_then_batch = pre_fetch_then_batch
         self.drop_last = drop_last
 
     def split(self) -> SplitInfo:
@@ -217,13 +237,14 @@ class SequentialShuffleStrategy(ShuffleStrategy):
             self.rng,
             self.metadata_cb,
             self.is_shuffled,
+            self.drop_last,
         )
         # this will be passed to the dataset, inorder to know the mini batch size
         if self.pre_fetch_then_batch:
             split_dict["mini_batch_size"] = self.batch_size
         else:
             # yield everything we read
-            split_dict["mini_batch_size"] = None 
+            split_dict["mini_batch_size"] = None
         return SplitInfo(**split_dict)
 
     def mixer(self, batch: list):
@@ -265,6 +286,7 @@ class RandomShuffleStrategy(ShuffleStrategy):
             self.rng,
             self.metadata_cb,
             self.is_shuffled,
+            self.drop_last,
         )
         return SplitInfo(**split_dict)
 

@@ -1,6 +1,6 @@
 import os
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 
 import lightning.pytorch as pl
 import ray
@@ -106,6 +106,8 @@ class RayTrainRunner:
             is_shuffled=is_shuffled,
             **kwargs,
         )
+        kwargs.pop("drop_last", None)
+        kwargs.pop("pre_fetch_then_batch", None)
         indices = shuffle_stragey.split()
         print(f"Data splitting time: {time.time() - start:.2f} seconds")
         train_config = {"indices": indices, "ckpt_path": ckpt_path, "shuffle_stragey": shuffle_stragey}
