@@ -240,31 +240,31 @@ class PerturbationTransformerModel(PerturbationModel):
         
         return val_loss
     
-    def configure_optimizers(self):
-        """Configure optimizer with custom settings for transformer."""
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.lr,
-            weight_decay=self.wd,
-            betas=(0.9, 0.999),
-            eps=1e-8
-        )
+    # def configure_optimizers(self):
+    #     """Configure optimizer with custom settings for transformer."""
+    #     optimizer = torch.optim.AdamW(
+    #         self.parameters(),
+    #         lr=self.lr,
+    #         weight_decay=self.wd,
+    #         betas=(0.9, 0.999),
+    #         eps=1e-8
+    #     )
         
-        if self.lr_scheduler_freq is not None:
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer,
-                mode='min',
-                factor=self.lr_scheduler_factor,
-                patience=self.lr_scheduler_patience
-            )
-            return {
-                'optimizer': optimizer,
-                'lr_scheduler': {
-                    'scheduler': scheduler,
-                    'monitor': 'train_loss',
-                    'frequency': self.lr_scheduler_freq,
-                    'interval': self.lr_scheduler_interval
-                }
-            }
+    #     if self.lr_scheduler_freq is not None:
+    #         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    #             optimizer,
+    #             mode='min',
+    #             factor=self.lr_scheduler_factor,
+    #             patience=self.lr_scheduler_patience
+    #         )
+    #         return {
+    #             'optimizer': optimizer,
+    #             'lr_scheduler': {
+    #                 'scheduler': scheduler,
+    #                 'monitor': 'train_loss',
+    #                 'frequency': self.lr_scheduler_freq,
+    #                 'interval': self.lr_scheduler_interval
+    #             }
+    #         }
         
-        return optimizer
+    #     return optimizer

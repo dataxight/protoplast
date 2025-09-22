@@ -46,9 +46,12 @@ class PerturbationPredictor:
                 d_ff = state_dict[key].shape[0]
         
         n_transformer_layers = max_layer + 1
-        
+        gene_names = open("gene_names.csv", "r").read().splitlines()
+        hvg_mask = np.isin(gene_names, open("hvg.txt", "r").read().splitlines())
+        hvg_mask = torch.tensor(hvg_mask)
         # Create model
         model = PerturbationTransformerModel(
+            hvg_mask=hvg_mask,
             d_h=672,
             n_genes=18080,
             pert_emb_dim=5120,
@@ -150,13 +153,12 @@ def vcc_inference():
     """
     VCC inference.
     """
-    checkpoint_path = "/ephemeral/vcc-models/checkpoints/perturbation-transformer-epoch=39-train_loss=0.79.ckpt"
+    checkpoint_path = "/ephemeral/vcc-models/checkpoints/perturbation-transformer-epoch=98-train_loss=0.38.ckpt"
     # Define our path
     pert_counts_path = "./pert_counts_Validation.csv"
     pert_counts = pd.read_csv(pert_counts_path)
     gene_names = pd.read_csv("./gene_names.csv", header=None)
     gene_names = gene_names[0].tolist()
-
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
         pert_embedding_file="/ephemeral/vcc/competition_support_set_sorted/ESM2_pert_features.pt",
