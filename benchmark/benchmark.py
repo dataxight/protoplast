@@ -100,7 +100,7 @@ class Classifier(pl.LightningModule):
 
 # === TYPES ===
 
-RunnerClass = Literal["anndata", "protoplast", "scvi", "scdataset", "annloader"]
+RunnerClass = Literal["anndata", "protoplast", "scvi", "scvi2", "scdataset", "annloader"]
 
 
 class BenchmarkRunnerParams(BaseModel):
@@ -370,6 +370,7 @@ class AnnLoaderRunner(BenchmarkRunner):
 
 class SCVIAnnLoaderRunner(BenchmarkRunner):
     def __init__(self, *args, **kwargs):
+        """This runner uses SCVI with `load_sparse_tensor=False`"""
         super().__init__(*args, **kwargs)
 
         if len(self.adata_paths) > 1:
@@ -398,6 +399,49 @@ class SCVIAnnLoaderRunner(BenchmarkRunner):
             pin_memory=False,
             persistent_workers=False,
             load_sparse_tensor=False, # dense matrix are used for all data loader
+            collate_fn=collate_fn,
+        )
+
+        model = Classifier(
+            input_dim=adata.n_vars,
+            hidden_dim=128,
+            num_classes=adata.obs[self.params.label].nunique(),
+        )
+        trainer = pl.Trainer(max_epochs=1, accelerator="auto", devices=self.params.num_gpus)
+        trainer.fit(model, dataloader)
+
+
+class SCVIAnnLoader2Runner(BenchmarkRunner):
+    """This runner uses SCVI with `load_sparse_tensor=True`"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        if len(self.adata_paths) > 1:
+            raise RuntimeError("This class cannot handle multiple H5 files")
+
+    def _run(self):
+        def collate_fn(batch):
+            y = torch.tensor(batch["label"], dtype=torch.long).view(-1)
+            X = batch["count"].to_dense()
+            return X, y
+
+        adata_manager = AnnDataManager(
+            fields=[
+                LayerField("counts", layer=None),
+                CategoricalObsField("label", self.params.label),
+            ]
+        )
+        adata = ad.read_h5ad(self.adata_paths[0], backed="r")
+        adata_manager.register_fields(adata)
+        dataloader = AnnDataLoader(
+            adata_manager=adata_manager,
+            batch_size=self.params.batch_size,
+            shuffle=False,
+            num_workers=self.params.num_workers,
+            prefetch_factor=self.params.fetch_factor + 1,
+            pin_memory=False,
+            persistent_workers=False,
+            load_sparse_tensor=True,
             collate_fn=collate_fn,
         )
 
@@ -478,6 +522,8 @@ if __name__ == "__main__":
             Runner = ProtoplastRunner
         case "scvi":
             Runner = SCVIAnnLoaderRunner
+        case "scvi2":
+            Runner = SCVIAnnLoader2Runner
         case "scdataset":
             Runner = ScDatasetRunner
         case "annloader":
