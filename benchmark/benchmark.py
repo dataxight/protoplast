@@ -345,7 +345,7 @@ class AnnLoaderRunner(BenchmarkRunner):
         def collate_fn(batch) -> torch.Tensor:
             X = torch.stack([b.X.view(-1) for b in batch])
             y = torch.stack(
-                [torch.tensor(b.obs[self.params.label].cat.codes.to_numpy(), dtype=torch.long).view(-1) for b in batch],
+                [torch.tensor(b.obs[self.params.label].astype('category').cat.codes.to_numpy(), dtype=torch.long).view(-1) for b in batch],
                 axis=1,
             )
             return X, y[0]
