@@ -261,7 +261,7 @@ class ScDatasetRunner(BenchmarkRunner):
             if sparse.issparse(X):
                 X = X.toarray()
             X = torch.from_numpy(X)
-            y = torch.tensor(batch.obs[self.params.label].cat.codes.to_numpy(), dtype=torch.long)
+            y = torch.tensor(batch.obs[self.params.label].astype('category').cat.codes.to_numpy(), dtype=torch.long)
             return X, y
 
         collection = AnnCollection([ad.read_h5ad(p, backed="r") for p in self.adata_paths])
