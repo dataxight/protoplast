@@ -129,10 +129,7 @@ class BenchmarkRunner(ABC):
         # Get data name
         self.data_name = os.path.basename(params.glob)
         if self.data_name.startswith("*"):
-            self.data_name = os.path.join(
-                os.path.basename(os.path.dirname(params.glob)),
-                self.data_name
-            )
+            self.data_name = os.path.join(os.path.basename(os.path.dirname(params.glob)), self.data_name)
 
         adatas = [ad.read_h5ad(p, backed="r") for p in self.adata_paths]
         self.cell_count = sum(x.obs.shape[0] for x in adatas)
@@ -225,7 +222,7 @@ class BenchmarkRunner(ABC):
                         self.params.num_workers,
                         msg,
                         elapsed if success else -1,
-                        peak['rss'] / 1024**2,
+                        peak["rss"] / 1024**2,
                         peak["gpu"] / 1024**2,
                     ]
                 )
@@ -260,7 +257,7 @@ class ScDatasetRunner(BenchmarkRunner):
             if sparse.issparse(X):
                 X = X.toarray()
             X = torch.from_numpy(X)
-            y = torch.tensor(batch.obs[self.params.label].astype('category').cat.codes.to_numpy(), dtype=torch.long)
+            y = torch.tensor(batch.obs[self.params.label].astype("category").cat.codes.to_numpy(), dtype=torch.long)
             return X, y
 
         collection = AnnCollection([ad.read_h5ad(p, backed="r") for p in self.adata_paths])
@@ -344,7 +341,12 @@ class AnnLoaderRunner(BenchmarkRunner):
         def collate_fn(batch) -> torch.Tensor:
             X = torch.stack([b.X.view(-1) for b in batch])
             y = torch.stack(
-                [torch.tensor(b.obs[self.params.label].astype('category').cat.codes.to_numpy(), dtype=torch.long).view(-1) for b in batch],
+                [
+                    torch.tensor(
+                        b.obs[self.params.label].astype("category").cat.codes.to_numpy(), dtype=torch.long
+                    ).view(-1)
+                    for b in batch
+                ],
                 axis=1,
             )
             return X, y[0]
@@ -398,7 +400,7 @@ class SCVIAnnLoaderRunner(BenchmarkRunner):
             prefetch_factor=self.params.fetch_factor + 1,
             pin_memory=False,
             persistent_workers=False,
-            load_sparse_tensor=False, # dense matrix are used for all data loader
+            load_sparse_tensor=False,  # dense matrix are used for all data loader
             collate_fn=collate_fn,
         )
 
@@ -413,6 +415,7 @@ class SCVIAnnLoaderRunner(BenchmarkRunner):
 
 class SCVIAnnLoader2Runner(BenchmarkRunner):
     """This runner uses SCVI with `load_sparse_tensor=True`"""
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -491,7 +494,8 @@ class ProtoplastRunner(BenchmarkRunner):
             batch_size=self.params.batch_size,
             test_size=0.0,
             val_size=0.0,
-            thread_per_worker=self.params.num_workers - 1, # Ray will +1 (https://dataxight.atlassian.net/browse/PROTO-22)
+            thread_per_worker=self.params.num_workers
+            - 1,  # Ray will +1 (https://dataxight.atlassian.net/browse/PROTO-22)
             num_workers=self.params.num_gpus,
             is_shuffled=False,
             max_epochs=1,
