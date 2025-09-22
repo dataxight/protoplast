@@ -141,7 +141,7 @@ class BenchmarkRunner(ABC):
         # create header if file does not exist
         if not self.logfile.exists():
             with self.logfile.open("w", newline="") as f:
-                writer = csv.writer(f, delimiter="\t")
+                writer = csv.writer(f)
                 writer.writerow(
                     [
                         "Timestamp",
@@ -213,7 +213,7 @@ class BenchmarkRunner(ABC):
             pynvml.nvmlShutdown()
 
             with self.logfile.open("a", newline="") as f:
-                writer = csv.writer(f, delimiter="\t")
+                writer = csv.writer(f)
                 writer.writerow(
                     [
                         round(time.time()),
@@ -464,7 +464,7 @@ if __name__ == "__main__":
     parser.add_argument("--fetch-factor", dest="fetch_factor", type=int, default=16)
     parser.add_argument("--workers", dest="num_workers", type=int, default=12)
     parser.add_argument("--label", dest="label", type=str, default="cell_line")
-    parser.add_argument("--logfile", dest="logfile", type=str, default="benchmark_log.tsv")
+    parser.add_argument("--logfile", dest="logfile", type=str, default="benchmark_log.csv")
     parser.add_argument("--gpus", dest="num_gpus", type=int, default=1)
     params: BenchmarkRunnerParams = parser.parse_args()
 
