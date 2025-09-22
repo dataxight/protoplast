@@ -71,6 +71,7 @@ class PerturbationDataset(DistributedAnnDataset):
         self.adata_obs = None
         self.cell_noise = cell_noise
         self.gene_noise = gene_noise
+        self.adatas = None
 
         self.pert_embedding = torch.load(pert_embedding_file)
 
@@ -275,6 +276,8 @@ class PerturbationDataset(DistributedAnnDataset):
             self.adata_obs = [deepcopy(anndata.read_h5ad(f, backed="r").obs) for f in self.files]
         if self.h5files is None:
             self.h5files = [h5py.File(f, 'r', libver='latest', swmr=True) for f in self.files]
+        if self.adatas is None:
+            self.adatas = [anndata.read_h5ad(f, backed="r") for f in self.files]
 
         import random
         random.shuffle(self.batches)
@@ -295,8 +298,13 @@ class PerturbationDataset(DistributedAnnDataset):
                     # Get batches for perturbation cells
                     batches = self.adata_obs[file_i][self.batch_label].iloc[cell_indices].values
 
+                    # Get pert embedding
+                    X_pert_emb = self.adatas[file_i].obsm["X_state"][cell_indices]
+
                     # Get control cells with matching covariates
                     X_ctrl, ctrl_barcodes = self.sampling_control(cell_type, file_i, self.group_size_S)
+                    ctrl_indices = np.where(self.adata_obs[file_i].index.isin(ctrl_barcodes))[0]
+                    X_ctrl_emb = self.adatas[file_i].obsm["X_state"][ctrl_indices]
 
                     # Get embeddings and onehot encodings
                     pert_emb = self._get_pert_embedding(target)
@@ -310,8 +318,10 @@ class PerturbationDataset(DistributedAnnDataset):
 
                     # Create sample dictionary
                     sample = {
-                        "pert_cell_emb": X_pert, # scipy csr matrix [S, G]
-                        "ctrl_cell_emb": X_ctrl, # scipy csr matrix [S, G]
+                        "pert_cell_g": X_pert, # scipy csr matrix [S, G]
+                        "ctrl_cell_g": X_ctrl, # scipy csr matrix [S, G]
+                        "pert_cell_emb": torch.from_numpy(X_pert_emb), # tensor [S, 2058]
+                        "ctrl_cell_emb": torch.from_numpy(X_ctrl_emb), # tensor [S, 2058]
                         "pert_emb": pert_emb, # tensor [5102]
                         "pert_name": np.array([target]),
                         "cell_type": np.array([cell_type]), # str
@@ -564,7 +574,9 @@ class PerturbationDataModule(AnnDataModule):
         for key in keys:
             values = [sample[key] for sample in batch]
 
-            if key in ['pert_cell_emb', 'ctrl_cell_emb']:
+            
+
+            if key in ['pert_cell_g', 'ctrl_cell_g']:
                 # Convert scipy sparse matrices to torch sparse tensors and stack
                 torch_sparse_tensors = []
                 for val in values:
@@ -584,6 +596,9 @@ class PerturbationDataModule(AnnDataModule):
                 # Stack sparse tensors
                 collated[key] = torch.stack(torch_sparse_tensors)
 
+            elif key in ['pert_cell_emb', 'ctrl_cell_emb']:
+                # concat tensors
+                collated[key] = torch.stack(values)
             elif key in ['pert_emb', 'cell_type_onehot', 'batch_onehot']:
                 # Stack regular tensors
                 collated[key] = torch.stack(values)
@@ -637,12 +652,12 @@ class PerturbationDataModule(AnnDataModule):
 
 if __name__ == "__main__":
     # Test with fewshot config file
-    config_path = "notebooks/test-fewshot-config.toml"
+    config_path = "/ephemeral/vcc-models/configs/data.toml"
 
     dm = PerturbationDataModule(
         config_path=config_path,
         barcodes=True,
-        pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt"
+        pert_embedding_file="/ephemeral/vcc/competition_support_set_sorted/ESM2_pert_features.pt"
     )
     dm.setup(stage="fit")
 
@@ -668,21 +683,12 @@ if __name__ == "__main__":
             print("Batch keys:", batch.keys())
             print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
             print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
+            print("pert_cell_g shape:", batch['pert_cell_g'].shape)
+            print("ctrl_cell_g shape:", batch['ctrl_cell_g'].shape)
             print("cell_type_onehot shape:", batch['cell_type_onehot'].shape)
             print("batch_onehot shape:", batch['batch_onehot'].shape)
             print("pert_emb shape:", batch['pert_emb'].shape)
             print("pert_name:", batch['pert_name'])
             print("cell_type:", batch['cell_type'])
-            if i >= 2:  # Just show first few samples
-                break
-
-    # Test test dataloader
-    if dm.indices['val_n_items'] > 0:
-        print("\n=== Testing Val Data ===")
-        dm.setup(stage="val")
-        for i, batch in enumerate(dm.val_ds):  # val_ds is used for test stage
-            print("Val batch keys:", batch.keys())
-            print("Val pert_name:", batch['pert_name'])
-            print("Val cell_type:", batch['cell_type'])
-            if i >= 2:  # Just show first few samples
+            if i >= 1:  # Just show first few samples
                 break
