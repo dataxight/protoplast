@@ -397,7 +397,7 @@ class SCVIAnnLoaderRunner(BenchmarkRunner):
             prefetch_factor=self.params.fetch_factor + 1,
             pin_memory=False,
             persistent_workers=False,
-            load_sparse_tensor=True,
+            load_sparse_tensor=False, # dense matrix are used for all data loader
             collate_fn=collate_fn,
         )
 
