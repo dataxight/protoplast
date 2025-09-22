@@ -87,6 +87,8 @@ class Classifier(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, y = batch
+        if x.is_sparse or x.is_sparse_csr:
+            x = x.to_dense()
         logits = self(x)
         loss = F.cross_entropy(logits, y)
         acc = (logits.argmax(dim=1) == y).float().mean()
@@ -425,8 +427,7 @@ class SCVIAnnLoader2Runner(BenchmarkRunner):
     def _run(self):
         def collate_fn(batch):
             y = torch.tensor(batch["label"], dtype=torch.long).view(-1)
-            X = batch["counts"].to_dense()
-            return X, y
+            return batch["counts"], y
 
         adata_manager = AnnDataManager(
             fields=[
