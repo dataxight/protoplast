@@ -21,7 +21,22 @@ def ann_split_data(
     is_shuffled: bool = True,
 ):
     def to_batches(n):
-        return [(i, min(i + batch_size, n)) for i in range(0, n, batch_size)]
+        batches = []
+        for i in range(0, n, batch_size):
+            # drop the last batch if it is less than batch_size
+            # TODO: control this behavior via a drop_last flag
+            if i + batch_size > n:
+                break
+            batches.append((i, i + batch_size))
+        return batches
+
+    def drop_remainder(batches):
+        remainder = len(batches) % total_workers
+        print(f"=========Remainder: {remainder}, batches: len {len(batches)}, total_workers: {total_workers}")
+        if remainder > 0:
+            print("=========Total batch dropped", remainder, batches[-remainder:])
+            batches = batches[:-remainder]
+        return batches
 
     if not rng:
         rng = random.Random()
@@ -50,12 +65,6 @@ def ann_split_data(
         # then we have to pad using the last range to make it divisible by total_workers
         if len(batches) < total_workers:
             batches += [batches[-1]] * (total_workers - len(batches))
-        # Drop per-file remainder to make divisible by total_workers
-        remainder = len(batches) % total_workers
-        # implement rebalancing later but not that important right now
-        if remainder > 0:
-            print("Total batch dropped", i, batches[-remainder:])
-            batches = batches[:-remainder]
         if len(batches) == 0:
             raise Exception("This data is not compatiable with this worker combination")
 
@@ -84,6 +93,11 @@ def ann_split_data(
         val_split = batches[:val_n]
         test_split = batches[val_n : val_n + test_n]
         train_split = batches[val_n + test_n :]
+        print("=========Length of val_split", len(val_split), "length of test_split", len(test_split), "length of train_split", len(train_split))
+        val_split = drop_remainder(val_split)
+        test_split = drop_remainder(test_split)
+        train_split = drop_remainder(train_split)
+        print("=========Length of after dropping remainder val_split", len(val_split), "length of test_split", len(test_split), "length of train_split", len(train_split))
 
         validation_datas.append(val_split)
         test_datas.append(test_split)

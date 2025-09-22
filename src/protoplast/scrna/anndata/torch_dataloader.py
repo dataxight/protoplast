@@ -142,12 +142,14 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         self._init_rank()
         gidx = 0
         total_iter = 0
+        print(f"I'm in thread/worker that has global rank {self.global_rank}, total workers {self.total_workers}, len of self.batches[0] {len(self.batches[0])}, mini_batch_size {self.mini_batch_size}")
         for fidx, f in enumerate(self.files):
             self.ad = anndata.read_h5ad(f, backed="r")
             for start, end in self.batches[fidx]:
                 if not (gidx % self.total_workers) == self.global_rank:
                     gidx += 1
                     continue
+                print(f"==========Worker {self.global_rank} is processing global index {gidx}")
                 X = self._get_mat_by_range(self.ad, start, end)
                 self.X = X
                 if self.mini_batch_size is None:

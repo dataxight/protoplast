@@ -98,7 +98,7 @@ class RayTrainRunner:
         shuffle_stragey = self.shuffle_strategy(
             file_paths,
             batch_size,
-            num_workers,
+            num_workers * thread_per_worker,
             test_size,
             val_size,
             random_seed,
