@@ -248,7 +248,7 @@ def test_entropy(test_h5ad_plate):
 
 def test_load_simple(test_even_h5ad_file: str):
     strategy = SequentialShuffleStrategy(
-        [test_even_h5ad_file], batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
+        [test_even_h5ad_file], batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0, pre_fetch_then_batch=1
     )
     indices = strategy.split()
     data_module = AnnDataModule(
@@ -271,7 +271,7 @@ def test_load_simple(test_even_h5ad_file: str):
 
 def test_load_with_tuple(test_even_h5ad_file: str):
     strategy = SequentialShuffleStrategy(
-        [test_even_h5ad_file], batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
+        [test_even_h5ad_file], batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0, pre_fetch_then_batch=1
     )
     indices = strategy.split()
 
@@ -305,7 +305,7 @@ def test_load_with_tuple(test_even_h5ad_file: str):
 
 def test_load_with_dict(test_even_h5ad_file: str):
     strategy = SequentialShuffleStrategy(
-        [test_even_h5ad_file], batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
+        [test_even_h5ad_file], batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0, pre_fetch_then_batch=1
     )
     indices = strategy.split()
 
@@ -339,7 +339,12 @@ def test_load_with_dict(test_even_h5ad_file: str):
 
 def test_load_uneven(test_uneven_h5ad_file: str):
     strategy = SequentialShuffleStrategy(
-        [test_uneven_h5ad_file], batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
+        [test_uneven_h5ad_file],
+        batch_size=2,
+        total_workers=1,
+        test_size=0.0,
+        validation_size=0.0,
+        pre_fetch_then_batch=1,
     )
     indices = strategy.split()
     data_module = AnnDataModule(
@@ -364,6 +369,7 @@ def test_load_multiple_files(test_even_h5ad_file: str, test_uneven_h5ad_file: st
         total_workers=1,
         test_size=0.0,
         validation_size=0.0,
+        pre_fetch_then_batch=1,
     )
     indices = strategy.split()
     data_module = AnnDataModule(
@@ -390,7 +396,7 @@ def test_load_with_callbacks(test_even_h5ad_file: str):
         return x / (x.max() + 1)
 
     strategy = SequentialShuffleStrategy(
-        [test_even_h5ad_file], batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0
+        [test_even_h5ad_file], batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0, pre_fetch_then_batch=1
     )
     indices = strategy.split()
     data_module = AnnDataModule(
@@ -424,6 +430,7 @@ def test_custom_dataset(test_even_h5ad_file: str):
         total_workers=1,
         test_size=0.0,
         validation_size=0.0,
+        pre_fetch_then_batch=1,
         metadata_cb=cell_line_metadata_cb,
     )
     indices = strategy.split()

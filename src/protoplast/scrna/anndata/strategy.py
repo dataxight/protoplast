@@ -263,6 +263,7 @@ class RandomShuffleStrategy(ShuffleStrategy):
         random_seed: int | None = 42,
         metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
         is_shuffled: bool = True,
+        drop_last: bool = True,
     ) -> None:
         super().__init__(
             file_paths,
@@ -275,6 +276,7 @@ class RandomShuffleStrategy(ShuffleStrategy):
             is_shuffled,
         )
         self.mini_batch_size = mini_batch_size
+        self.drop_last = drop_last
 
     def split(self) -> SplitInfo:
         split_dict = ann_split_data(
