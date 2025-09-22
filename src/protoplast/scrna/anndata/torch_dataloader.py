@@ -136,7 +136,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         if self.mini_batch_size:
             total_sample = sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
             return math.ceil(total_sample / self.mini_batch_size / td.get_world_size())
-        return sum(1 for i in range(len(self.files)) for start, end in self.batches[i])
+        return sum(1 for i in range(len(self.files)) for _ in self.batches[i]) / td.get_world_size()
 
     def __iter__(self):
         self._init_rank()
