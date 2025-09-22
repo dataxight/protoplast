@@ -11,7 +11,7 @@ from lightning.pytorch.loggers import CSVLogger
 
 # Import the data module and model
 from protoplast.scrna.anndata.data_modules.perturbation import PerturbationDataModule
-from models.perturbation_transformer import PerturbationTransformerModel
+from models.perturbation_transformer import PerturbationTransformerModel, PerturbationTransformerWithEmbeddingModel
 
 # Set tensor core precision for better performance
 torch.set_float32_matmul_precision('medium')
@@ -25,8 +25,8 @@ def main():
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
         pert_embedding_file="/ephemeral/vcc/competition_support_set_sorted/ESM2_pert_features.pt",
-        batch_size=8,
-        group_size_S=256,
+        batch_size=16,
+        group_size_S=64,
         num_workers=4  # Set to 0 to avoid multiprocessing issues
     )
     dm.setup(stage="fit")
@@ -38,17 +38,19 @@ def main():
     print("len train_loader", len(train_loader))
     print("len val_loader", len(dm.val_dataloader()))
     sample_batch = next(iter(train_loader))
-    n_genes = sample_batch["pert_cell_emb"].shape[-1]
+    n_genes = sample_batch["pert_cell_g"].shape[-1]
+    d_emb = sample_batch["pert_cell_emb"].shape[-1]
     pert_emb_dim = sample_batch["pert_emb"].shape[-1]
     n_cell_types = sample_batch["cell_type_onehot"].shape[-1]
     n_batches = sample_batch["batch_onehot"].shape[-1]
 
     gene_names = open("gene_names.csv", "r").read().splitlines()
-    hvg_mask = np.isin(gene_names, open("hvg.txt", "r").read().splitlines())
+    hvg_mask = np.isin(gene_names, open("hvg-4000.txt", "r").read().splitlines())
     hvg_mask = torch.tensor(hvg_mask)
     
     print(f"Data dimensions:")
     print(f"  n_genes: {n_genes}")
+    print(f"  d_emb: {d_emb}")
     print(f"  pert_emb_dim: {pert_emb_dim}")
     print(f"  n_cell_types: {n_cell_types}")
     print(f"  n_batches: {n_batches}")
@@ -59,10 +61,6 @@ def main():
     
     checkpoint_dir = "checkpoints/"
     checkpoint_files = glob.glob(os.path.join(checkpoint_dir, "*.ckpt"))
-    
-    # Architecture parameters
-    n_transformer_layers = 6  # Default
-    d_ff = int(672 * 2.67)    # Default
     checkpoint_to_load = None
     
     # if checkpoint_files:
@@ -98,18 +96,19 @@ def main():
     #         print("Using default architecture")
 
     # Initialize model with detected/default architecture
-    model = PerturbationTransformerModel(
+    model = PerturbationTransformerWithEmbeddingModel(
         datamodule=dm,
         hvg_mask=hvg_mask,
         d_h=672,  # Hidden dimension
+        d_emb=d_emb,
         n_genes=n_genes,
         pert_emb_dim=pert_emb_dim,
         n_cell_types=n_cell_types,
         n_batches=n_batches,
-        n_transformer_layers=n_transformer_layers,
+        n_transformer_layers=4,
         n_heads=8,
         dropout=0.1,
-        d_ff=d_ff,
+        d_ff=int(672 * 2.67),
         d_x=2260,  # Bottleneck dimension
         lr=3e-4,
         wd=1e-5,
@@ -134,7 +133,7 @@ def main():
     checkpoint_callback = ModelCheckpoint(
         monitor="train_loss",
         dirpath="checkpoints/",
-        filename="perturbation-transformer-{epoch:02d}-{train_loss:.2f}",
+        filename="perturbation-transformer-emb-{epoch:02d}-{train_loss:.2f}",
         save_top_k=3,
         mode="min"
     )
@@ -149,7 +148,7 @@ def main():
     # Set up logger
     logger = CSVLogger(
         save_dir="logs/",
-        name="transformer-model"
+        name="transformer-emb-model"
     )
     
     # Initialize trainer

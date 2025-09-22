@@ -5,7 +5,7 @@
 # ===============================
 [datasets]
 #replogle_h1 = "/ephemeral/vcc/competition_support_set_sorted/{competition_train,hepg2,jurkat,k562_gwps,k562,rpe1}.h5"
-replogle_h1 = "/ephemeral/vcc/competition_support_set_sorted/competition_train.h5"
+replogle_h1 = "/ephemeral/vcc/competition_support_set_sorted/competition_train_emb.h5"
 
 # ===============================
 # Training specs

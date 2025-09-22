@@ -170,6 +170,7 @@ def vcc_inference():
     predictor = PerturbationPredictor(checkpoint_path)
     adata = ad.read_h5ad("/ephemeral/vcc/competition_support_set_sorted/competition_train.h5", backed="r")
     control_adata = adata[adata.obs["target_gene"] == "non-targeting"]
+    batch_data = control_adata.obs["batch_var"]
     cell_type = "ARC_H1"
 
     X = None
@@ -179,17 +180,17 @@ def vcc_inference():
         print(f"Processing gene {i} / {len(pert_counts)}: {gene}")
         n_cells = row.n_cells
         # randomly select n_cells from control_adata
-        X_ctrl = control_adata.X[np.random.choice(range(len(control_adata)), size=n_cells, replace=False)]
+        control_indices = np.random.choice(range(len(control_adata)), size=n_cells, replace=False)
+        X_ctrl = control_adata.X[control_indices]
         X_ctrl = X_ctrl.toarray()
         X_ctrl = torch.from_numpy(X_ctrl).float().to("cuda")
         X_ctrl = X_ctrl.unsqueeze(0)
-        print(f"X_ctrl shape: {X_ctrl.shape}")
+        batch_onehot = [dm.train_ds.get_batch_onehot(batch) for batch in batch_data[control_indices]]
         pert_emb = dm.train_ds._get_pert_embedding(gene).unsqueeze(0)
-        print(f"pert_emb shape: {pert_emb.shape}")
         pert_emb = pert_emb.to("cuda")
         covariates = {
             "cell_type_onehot": dm.train_ds.get_celltype_onehot(cell_type).unsqueeze(0).to("cuda"),
-            "batch_onehot": torch.zeros(1,n_cells, 98).to("cuda")
+            "batch_onehot": torch.stack(batch_onehot).unsqueeze(0).to("cuda")
         }
         predictions = predictor.predict(X_ctrl, pert_emb, covariates)
         pert_names += list(np.repeat(gene, X_ctrl.shape[1]))
