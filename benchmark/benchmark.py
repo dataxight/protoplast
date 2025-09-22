@@ -379,7 +379,8 @@ class SCVIAnnLoaderRunner(BenchmarkRunner):
     def _run(self):
         def collate_fn(batch):
             y = torch.tensor(batch["label"], dtype=torch.long).view(-1)
-            return batch["counts"], y
+            X = batch["counts"].to_dense()
+            return X, y
 
         adata_manager = AnnDataManager(
             fields=[
