@@ -19,22 +19,24 @@ def ann_split_data(
     rng: random.Random | None = None,
     metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
     is_shuffled: bool = True,
+    drop_last: bool = True,
+    drop_remainder_warning_pct: float = 0.05,
 ):
     def to_batches(n):
         batches = []
         for i in range(0, n, batch_size):
-            # drop the last batch if it is less than batch_size
-            # TODO: control this behavior via a drop_last flag
-            if i + batch_size > n:
-                break
+            if i + batch_size > n and drop_last:
+                continue
             batches.append((i, i + batch_size))
         return batches
 
     def drop_remainder(batches):
+        n = sum(end - start for start, end in batches)
         remainder = len(batches) % total_workers
-        print(f"=========Remainder: {remainder}, batches: len {len(batches)}, total_workers: {total_workers}")
         if remainder > 0:
-            print("=========Total batch dropped", remainder, batches[-remainder:])
+            dropped_n = sum(end - start for start, end in batches[-remainder:])
+            if dropped_n / n > drop_remainder_warning_pct:
+                print(f"=========Warning: {dropped_n / n} of data is dropped")
             batches = batches[:-remainder]
         return batches
 
@@ -185,7 +187,8 @@ class SequentialShuffleStrategy(ShuffleStrategy):
         random_seed: int | None = 42,
         metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
         is_shuffled: bool = False,
-        pre_fetch_then_batch: int = 32,
+        pre_fetch_then_batch: int | None = 32,
+        drop_last: bool = True,
     ) -> None:
         super().__init__(
             file_paths,
@@ -197,12 +200,17 @@ class SequentialShuffleStrategy(ShuffleStrategy):
             metadata_cb,
             is_shuffled,
         )
-        self.pre_fetch_then_batch = pre_fetch_then_batch
+        self.pre_fetch_then_batch = pre_fetch_then_batch 
+        self.drop_last = drop_last
 
     def split(self) -> SplitInfo:
+        if self.pre_fetch_then_batch:
+            batch_size = self.batch_size * self.pre_fetch_then_batch
+        else:
+            batch_size = self.batch_size
         split_dict = ann_split_data(
             self.file_paths,
-            self.batch_size * self.pre_fetch_then_batch,  # we need to pre-fetch then batch
+            batch_size,
             self.total_workers,
             self.test_size,
             self.validation_size,
@@ -211,7 +219,11 @@ class SequentialShuffleStrategy(ShuffleStrategy):
             self.is_shuffled,
         )
         # this will be passed to the dataset, inorder to know the mini batch size
-        split_dict["mini_batch_size"] = self.batch_size
+        if self.pre_fetch_then_batch:
+            split_dict["mini_batch_size"] = self.batch_size
+        else:
+            # yield everything we read
+            split_dict["mini_batch_size"] = None 
         return SplitInfo(**split_dict)
 
     def mixer(self, batch: list):

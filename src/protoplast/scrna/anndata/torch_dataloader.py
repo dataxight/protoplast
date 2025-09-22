@@ -149,7 +149,6 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
                 if not (gidx % self.total_workers) == self.global_rank:
                     gidx += 1
                     continue
-                print(f"==========Worker {self.global_rank} is processing global index {gidx}")
                 X = self._get_mat_by_range(self.ad, start, end)
                 self.X = X
                 if self.mini_batch_size is None:
