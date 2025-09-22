@@ -31,7 +31,7 @@ class RayTrainRunner:
         runtime_env_config: dict | None = None,
         address: str | None = None,
         ray_trainer_strategy: Strategy | None = None,
-        sparse_keys: Iterable[str] = ("X",),
+        sparse_key: str = "X",
         max_open_files: int = 3,
     ):
         self.Model = Model
@@ -39,7 +39,7 @@ class RayTrainRunner:
         self.model_keys = model_keys
         self.metadata_cb = metadata_cb
         self.shuffle_strategy = shuffle_strategy
-        self.sparse_keys = sparse_keys
+        self.sparse_key = sparse_key
         self.before_dense_cb = before_dense_cb
         self.after_dense_cb = after_dense_cb
         self.max_open_files = max_open_files
@@ -138,7 +138,7 @@ class RayTrainRunner:
                 indices,
                 Ds,
                 self.prefetch_factor,
-                self.sparse_keys,
+                self.sparse_key,
                 shuffle_stragey,
                 self.before_dense_cb,
                 self.after_dense_cb,
