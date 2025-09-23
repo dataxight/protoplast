@@ -1,6 +1,7 @@
 import time
 
 import lightning.pytorch as pl
+from lightning.pytorch.profilers import SimpleProfiler, AdvancedProfiler
 from torch.utils.data import DataLoader
 
 from protoplast.scrna.anndata.gds import DistributedGdsDataset
@@ -16,16 +17,18 @@ def train_h5ad(files: list[str]):
     train_ds = DistributedCellLineAnnDataset(
         files, indices.train_indices, indices.metadata, "X", mini_batch_size=batch_size
     )
-    train_dataloader = DataLoader(train_ds, batch_size=None, num_workers=10)
+    train_dataloader = DataLoader(train_ds, batch_size=None, num_workers=0)
+    profiler = AdvancedProfiler(dirpath="advance_profiler", filename="result", dump_stats=True)
     val_ds = DistributedCellLineAnnDataset(
-        files, indices.val_indices, indices.metadata, "X", mini_batch_size=batch_size
+        files, indices.val_indices, indices.metadata, "X", mini_batch_size=batch_size, profiler=profiler
     )
-    val_dataloader = DataLoader(val_ds, batch_size=None, num_workers=10)
+    val_dataloader = DataLoader(val_ds, batch_size=None, num_workers=0)
     model = LinearClassifier(indices.metadata["num_genes"], indices.metadata["num_classes"])
     trainer = pl.Trainer(
         max_epochs=1,
         accelerator="gpu",
         enable_checkpointing=False,
+        profiler=profiler
     )
     start = time.perf_counter()
     trainer.fit(model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
@@ -37,7 +40,7 @@ def train_h5ad(files: list[str]):
 def divisble_array(ar, n):
     remainder = len(ar) % n > 0 
     if remainder > 0:
-        return arr[:-remainder]
+        return ar[:-remainder]
     return ar
 
 
@@ -71,6 +74,7 @@ def train_gsd(gds_dir: str, val_size=0.2):
 
 
 if __name__ == "__main__":
-    train_gsd("/ephemeral/gds/all_plates")
+    # train_gsd("/ephemeral/gds/all_plates")
     # train_gsd("/mnt/ham/dx_data/plate3_gpu")
     # train_h5ad(["/mnt/ham/dx_data/plate3_filt_Vevo_Tahoe100M_WServicesFrom_ParseGigalab.h5ad"])
+    train_h5ad(["/ephemeral/tahoe100/plate3_filt_Vevo_Tahoe100M_WServicesFrom_ParseGigalab.h5ad"])

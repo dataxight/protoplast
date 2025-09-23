@@ -4,6 +4,7 @@ from collections import Counter
 from collections.abc import Callable
 
 import lightning.pytorch as pl
+from lightning.pytorch.profilers import Profiler, PassThroughProfiler
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
@@ -42,6 +43,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         metadata: dict,
         sparse_key: str,
         mini_batch_size: int = None,
+        profiler = None
     ):
         # use first file as reference first
         self.files = file_paths
@@ -54,6 +56,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         self.metadata = metadata
         self.batches = indices
         self.mini_batch_size = mini_batch_size
+        self.profiler = profiler or PassThroughProfiler()
 
     @classmethod
     def create_distributed_ds(cls, indices: SplitInfo, sparse_key: str, mode: str = "train", **kwargs):
@@ -126,11 +129,12 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         # sometimes, the h5ad file stores X as the dense matrix,
         # so we have to make sure it is a sparse matrix before returning
         # the batch item
-        if self.X is None:
-            # we don't have the X upstream, so we have to incurr IO to fetch it
-            self.X = self._get_mat_by_range(self.ad, start, end)
-        X = self._process_sparse(self.X)
-        return X
+        with self.profiler.profile("DistrbutedAnnDataset transform"):
+            if self.X is None:
+                # we don't have the X upstream, so we have to incurr IO to fetch it
+                self.X = self._get_mat_by_range(self.ad, start, end)
+            X = self._process_sparse(self.X)
+            return X
 
     def __len__(self):
         try:
@@ -144,32 +148,33 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         return sum(1 for i in range(len(self.files)) for _ in self.batches[i]) / world_size
 
     def __iter__(self):
-        self._init_rank()
-        gidx = 0
-        total_iter = 0
-        for fidx, f in enumerate(self.files):
-            self.ad = anndata.read_h5ad(f, backed="r")
-            for start, end in self.batches[fidx]:
-                if not (gidx % self.total_workers) == self.global_rank:
-                    gidx += 1
-                    continue
-                X = self._get_mat_by_range(self.ad, start, end)
-                self.X = X
-                if self.mini_batch_size is None:
-                    # not fetch-then-batch approach, we yield everything
-                    yield self.transform(start, end)
-                    total_iter += 1
-                else:
-                    # fetch-then-batch approach
-                    for i in range(0, X.shape[0], self.mini_batch_size):
-                        # index on the X coordinates
-                        b_start, b_end = i, min(i + self.mini_batch_size, X.shape[0])
-                        # index on the adata coordinates
-                        global_start, global_end = start + i, min(start + i + self.mini_batch_size, end)
-                        self.X = X[b_start:b_end]
-                        yield self.transform(global_start, global_end)
+        with self.profiler.profile("DistrbutedAnnDataset __iter__"):
+            self._init_rank()
+            gidx = 0
+            total_iter = 0
+            for fidx, f in enumerate(self.files):
+                self.ad = anndata.read_h5ad(f, backed="r")
+                for start, end in self.batches[fidx]:
+                    if not (gidx % self.total_workers) == self.global_rank:
+                        gidx += 1
+                        continue
+                    X = self._get_mat_by_range(self.ad, start, end)
+                    self.X = X
+                    if self.mini_batch_size is None:
+                        # not fetch-then-batch approach, we yield everything
+                        yield self.transform(start, end)
                         total_iter += 1
-                gidx += 1
+                    else:
+                        # fetch-then-batch approach
+                        for i in range(0, X.shape[0], self.mini_batch_size):
+                            # index on the X coordinates
+                            b_start, b_end = i, min(i + self.mini_batch_size, X.shape[0])
+                            # index on the adata coordinates
+                            global_start, global_end = start + i, min(start + i + self.mini_batch_size, end)
+                            self.X = X[b_start:b_end]
+                            yield self.transform(global_start, global_end)
+                            total_iter += 1
+                    gidx += 1
 
 
 class DistributedFileSharingAnnDataset(DistributedAnnDataset):
