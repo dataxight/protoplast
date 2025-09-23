@@ -9,6 +9,7 @@ import anndata as ad
 import pandas as pd
 import scipy.sparse as sp
 from models.perturbation_transformer import PerturbationTransformerModel
+from models.perturbation_transformer import PerturbationTransformerWithEmbeddingModel
 from protoplast.scrna.anndata.data_modules.perturbation import PerturbationDataModule
 
 
@@ -17,14 +18,14 @@ class PerturbationPredictor:
     A convenient wrapper for the trained perturbation transformer model.
     """
     
-    def __init__(self, checkpoint_path="best.ckpt"):
+    def __init__(self, checkpoint_path="best.ckpt", is_emb=False):
         """
         Initialize the predictor with a trained checkpoint.
         """
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.model = self._load_model(checkpoint_path)
+        self.model = self._load_model(checkpoint_path, is_emb)
         
-    def _load_model(self, checkpoint_path):
+    def _load_model(self, checkpoint_path, is_emb=False):
         """
         Load the model with correct architecture.
         """
@@ -47,20 +48,34 @@ class PerturbationPredictor:
         
         n_transformer_layers = max_layer + 1
         gene_names = open("gene_names.csv", "r").read().splitlines()
-        hvg_mask = np.isin(gene_names, open("hvg.txt", "r").read().splitlines())
+        hvg_mask = np.isin(gene_names, open("hvg-4000.txt", "r").read().splitlines())
         hvg_mask = torch.tensor(hvg_mask)
         # Create model
-        model = PerturbationTransformerModel(
-            hvg_mask=hvg_mask,
-            d_h=672,
-            n_genes=18080,
-            pert_emb_dim=5120,
-            n_transformer_layers=n_transformer_layers,
-            n_heads=16,
-            dropout=0.1,
-            d_ff=d_ff,
-            d_x=2260
-        )
+        if is_emb:
+            model = PerturbationTransformerWithEmbeddingModel(
+                hvg_mask=hvg_mask,
+                d_emb=2058,
+                d_h=672,
+                n_genes=18080,
+                pert_emb_dim=5120,
+                n_transformer_layers=n_transformer_layers,
+                n_heads=8,
+                dropout=0.1,
+                d_ff=d_ff,
+                d_x=2260
+            )
+        else:
+            model = PerturbationTransformerModel(
+                hvg_mask=hvg_mask,
+                d_h=672,
+                n_genes=18080,
+                pert_emb_dim=5120,
+                n_transformer_layers=n_transformer_layers,
+                n_heads=16,
+                dropout=0.1,
+                d_ff=d_ff,
+                d_x=2260
+            )
         
         # Load weights
         model_state_dict = model.state_dict()
@@ -74,6 +89,7 @@ class PerturbationPredictor:
         
         print(f"✅ Model loaded successfully on {self.device}")
         return model
+
     
     def predict(self, ctrl_cell_emb, pert_emb, covariates):
         """
@@ -153,7 +169,7 @@ def vcc_inference():
     """
     VCC inference.
     """
-    checkpoint_path = "/ephemeral/vcc-models/checkpoints/perturbation-transformer-epoch=98-train_loss=0.38.ckpt"
+    checkpoint_path = "/ephemeral/vcc-models/checkpoints/perturbation-transformer-emb-epoch=59-train_loss=0.13.ckpt"
     # Define our path
     pert_counts_path = "./pert_counts_Validation.csv"
     pert_counts = pd.read_csv(pert_counts_path)
@@ -167,8 +183,8 @@ def vcc_inference():
         num_workers=4  # Set to 0 to avoid multiprocessing issues
     )
     dm.setup(stage="fit")
-    predictor = PerturbationPredictor(checkpoint_path)
-    adata = ad.read_h5ad("/ephemeral/vcc/competition_support_set_sorted/competition_train.h5", backed="r")
+    predictor = PerturbationPredictor(checkpoint_path, is_emb=True)
+    adata = ad.read_h5ad("/ephemeral/vcc/competition_support_set_sorted/competition_train_emb.h5", backed="r")
     control_adata = adata[adata.obs["target_gene"] == "non-targeting"]
     batch_data = control_adata.obs["batch_var"]
     cell_type = "ARC_H1"
@@ -181,7 +197,7 @@ def vcc_inference():
         n_cells = row.n_cells
         # randomly select n_cells from control_adata
         control_indices = np.random.choice(range(len(control_adata)), size=n_cells, replace=False)
-        X_ctrl = control_adata.X[control_indices]
+        X_ctrl = control_adata.obsm["X_state"][control_indices]
         X_ctrl = X_ctrl.toarray()
         X_ctrl = torch.from_numpy(X_ctrl).float().to("cuda")
         X_ctrl = X_ctrl.unsqueeze(0)
@@ -192,11 +208,11 @@ def vcc_inference():
             "cell_type_onehot": dm.train_ds.get_celltype_onehot(cell_type).unsqueeze(0).to("cuda"),
             "batch_onehot": torch.stack(batch_onehot).unsqueeze(0).to("cuda")
         }
-        predictions = predictor.predict(X_ctrl, pert_emb, covariates)
+        X_pert_hat, emb_proj = predictor.predict(X_ctrl, pert_emb, covariates)
         pert_names += list(np.repeat(gene, X_ctrl.shape[1]))
-        predictions = predictions.view(-1, predictions.shape[-1])
+        predictions = X_pert_hat.view(-1, X_pert_hat.shape[-1])
 
-        X = torch.cat([predictions], dim=0) if X is None else torch.cat([X, predictions], dim=0)
+        X = torch.cat([X_pert_hat], dim=0) if X is None else torch.cat([X, X_pert_hat], dim=0)
 
     # add 5000 control cells
     X_ctrl = control_adata.X[np.random.choice(range(len(control_adata)), size=5000, replace=False)]
