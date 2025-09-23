@@ -1,6 +1,6 @@
 import os
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 
 import lightning.pytorch as pl
 import ray
@@ -31,7 +31,7 @@ class RayTrainRunner:
         runtime_env_config: dict | None = None,
         address: str | None = None,
         ray_trainer_strategy: Strategy | None = None,
-        sparse_keys: Iterable[str] = ("X",),
+        sparse_key: str = "X",
         max_open_files: int = 3,
     ):
         self.Model = Model
@@ -39,7 +39,7 @@ class RayTrainRunner:
         self.model_keys = model_keys
         self.metadata_cb = metadata_cb
         self.shuffle_strategy = shuffle_strategy
-        self.sparse_keys = sparse_keys
+        self.sparse_key = sparse_key
         self.before_dense_cb = before_dense_cb
         self.after_dense_cb = after_dense_cb
         self.max_open_files = max_open_files
@@ -98,7 +98,7 @@ class RayTrainRunner:
         shuffle_stragey = self.shuffle_strategy(
             file_paths,
             batch_size,
-            num_workers,
+            num_workers * thread_per_worker,
             test_size,
             val_size,
             random_seed,
@@ -106,6 +106,8 @@ class RayTrainRunner:
             is_shuffled=is_shuffled,
             **kwargs,
         )
+        kwargs.pop("drop_last", None)
+        kwargs.pop("pre_fetch_then_batch", None)
         indices = shuffle_stragey.split()
         print(f"Data splitting time: {time.time() - start:.2f} seconds")
         train_config = {"indices": indices, "ckpt_path": ckpt_path, "shuffle_stragey": shuffle_stragey}
@@ -138,7 +140,7 @@ class RayTrainRunner:
                 indices,
                 Ds,
                 self.prefetch_factor,
-                self.sparse_keys,
+                self.sparse_key,
                 shuffle_stragey,
                 self.before_dense_cb,
                 self.after_dense_cb,

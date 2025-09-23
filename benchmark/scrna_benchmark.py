@@ -63,6 +63,7 @@ if __name__ == "__main__":
             num_workers=num_workers,
             test_size=0.0,
             val_size=0.2,
+            drop_last=False,
         )
     elif mode == "scl":
         print("Running with scDataset streaming")
