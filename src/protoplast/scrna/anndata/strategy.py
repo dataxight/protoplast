@@ -19,9 +19,32 @@ def ann_split_data(
     rng: random.Random | None = None,
     metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
     is_shuffled: bool = True,
+    drop_last: bool = True,
+    drop_remainder_warning_pct: float = 0.05,
 ):
     def to_batches(n):
-        return [(i, min(i + batch_size, n)) for i in range(0, n, batch_size)]
+        batches = []
+        for i in range(0, n, batch_size):
+            if i + batch_size > n:
+                continue
+            batches.append((i, i + batch_size))
+        return batches
+
+    def drop_remainder(batches):
+        n = sum(end - start for start, end in batches)
+        remainder = len(batches) % total_workers
+        if remainder > 0:
+            if drop_last:
+                dropped_n = sum(end - start for start, end in batches[-remainder:])
+                if dropped_n / n > drop_remainder_warning_pct:
+                    print(f"=========Warning: {dropped_n / n} of data is dropped")
+                batches = batches[:-remainder]
+            else:
+                pad = total_workers - remainder
+                print("Duplicating data with", pad)
+                batches.extend(batches[-remainder:] * (pad // remainder))
+                batches.extend(batches[-(pad % remainder) :])
+        return batches
 
     if not rng:
         rng = random.Random()
@@ -50,12 +73,6 @@ def ann_split_data(
         # then we have to pad using the last range to make it divisible by total_workers
         if len(batches) < total_workers:
             batches += [batches[-1]] * (total_workers - len(batches))
-        # Drop per-file remainder to make divisible by total_workers
-        remainder = len(batches) % total_workers
-        # implement rebalancing later but not that important right now
-        if remainder > 0:
-            print("Total batch dropped", i, batches[-remainder:])
-            batches = batches[:-remainder]
         if len(batches) == 0:
             raise Exception("This data is not compatiable with this worker combination")
 
@@ -84,6 +101,25 @@ def ann_split_data(
         val_split = batches[:val_n]
         test_split = batches[val_n : val_n + test_n]
         train_split = batches[val_n + test_n :]
+        print(
+            "=========Length of val_split",
+            len(val_split),
+            "length of test_split",
+            len(test_split),
+            "length of train_split",
+            len(train_split),
+        )
+        val_split = drop_remainder(val_split)
+        test_split = drop_remainder(test_split)
+        train_split = drop_remainder(train_split)
+        print(
+            "=========Length of after dropping remainder val_split",
+            len(val_split),
+            "length of test_split",
+            len(test_split),
+            "length of train_split",
+            len(train_split),
+        )
 
         validation_datas.append(val_split)
         test_datas.append(test_split)
@@ -171,7 +207,8 @@ class SequentialShuffleStrategy(ShuffleStrategy):
         random_seed: int | None = 42,
         metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
         is_shuffled: bool = False,
-        pre_fetch_then_batch: int = 32,
+        pre_fetch_then_batch: int | None = 16,
+        drop_last: bool = True,
     ) -> None:
         super().__init__(
             file_paths,
@@ -184,20 +221,30 @@ class SequentialShuffleStrategy(ShuffleStrategy):
             is_shuffled,
         )
         self.pre_fetch_then_batch = pre_fetch_then_batch
+        self.drop_last = drop_last
 
     def split(self) -> SplitInfo:
+        if self.pre_fetch_then_batch:
+            batch_size = self.batch_size * self.pre_fetch_then_batch
+        else:
+            batch_size = self.batch_size
         split_dict = ann_split_data(
             self.file_paths,
-            self.batch_size * self.pre_fetch_then_batch,  # we need to pre-fetch then batch
+            batch_size,
             self.total_workers,
             self.test_size,
             self.validation_size,
             self.rng,
             self.metadata_cb,
             self.is_shuffled,
+            self.drop_last,
         )
         # this will be passed to the dataset, inorder to know the mini batch size
-        split_dict["mini_batch_size"] = self.batch_size
+        if self.pre_fetch_then_batch:
+            split_dict["mini_batch_size"] = self.batch_size
+        else:
+            # yield everything we read
+            split_dict["mini_batch_size"] = None
         return SplitInfo(**split_dict)
 
     def mixer(self, batch: list):
@@ -216,6 +263,7 @@ class RandomShuffleStrategy(ShuffleStrategy):
         random_seed: int | None = 42,
         metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
         is_shuffled: bool = True,
+        drop_last: bool = True,
     ) -> None:
         super().__init__(
             file_paths,
@@ -228,6 +276,7 @@ class RandomShuffleStrategy(ShuffleStrategy):
             is_shuffled,
         )
         self.mini_batch_size = mini_batch_size
+        self.drop_last = drop_last
 
     def split(self) -> SplitInfo:
         split_dict = ann_split_data(
@@ -239,6 +288,7 @@ class RandomShuffleStrategy(ShuffleStrategy):
             self.rng,
             self.metadata_cb,
             self.is_shuffled,
+            self.drop_last,
         )
         return SplitInfo(**split_dict)
 
