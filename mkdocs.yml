@@ -1,4 +1,4 @@
-site_name: protoplast
+site_name: PROTOplast
 repo_url: https://github.com/dataxight/protoplast
 site_url: https://dataxight.github.io/protoplast
 site_description: protoplast
@@ -9,13 +9,16 @@ copyright: Maintained by <a href="https://dataxight.com">dataxight</a>.
 
 nav:
   - Home: index.md
-  - Modules: modules.md
 plugins:
   - search
   - mkdocstrings:
       handlers:
         python:
-          paths: ["src/protoplast"]
+          paths: ["src"]
+          options:
+            docstring_style: numpy
+            show_root_heading: true
+            show_signature_annotations: true
 theme:
   name: material
   feature:

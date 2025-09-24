@@ -18,6 +18,44 @@ from .torch_dataloader import AnnDataModule, DistributedAnnDataset, cell_line_me
 
 
 class RayTrainRunner:
+    """A class to initialize the training this class automatically initializes Ray cluster or
+    detect whether an existing cluster exist if there is an existing cluster it will automatically
+    connect to it refer to `ray.init()` behavior
+
+    Parameters
+    ----------
+    Model : type[pl.LightningModule]
+        PyTorch Lightning model class
+    Ds : type[DistributedAnnDataset]
+        DistributedAnnDataset class
+    model_keys : list[str]
+        Keys to pass to model from `metadata_cb`
+    metadata_cb : Callable[[anndata.AnnData, dict], None], optional
+        Callback to mutate metadata recommended for passing data from `obs` or `var`
+        or any additional data your models required
+        by default cell_line_metadata_cb
+    before_dense_cb : Callable[[torch.Tensor, str  |  int], torch.Tensor], optional
+        Callback to perform before densification of sparse matrix where the data at this point
+        is still a sparse CSR Tensor, by default None
+    after_dense_cb : Callable[[torch.Tensor, str  |  int], torch.Tensor], optional
+        Callback to perform after densification of sparse matrix where the data at this point
+        is a dense Tensor, by default None 
+    shuffle_strategy : ShuffleStrategy, optional
+        Strategy to split or randomize the data during the training, by default SequentialShuffleStrategy
+    runtime_env_config : dict | None, optional
+        These env config is to pass the RayTrainer processes, by default None
+    address : str | None, optional
+        Override ray address, by default None
+    ray_trainer_strategy : Strategy | None, optional
+        Override Ray Trainer Strategy if this is None it will default to RayDDP, by default None
+    sparse_keys : str, optional
+        _description_, by default "X",
+    Returns
+    -------
+    RayTrainRunner
+        Use this class to start the training
+
+    """
     @beartype
     def __init__(
         self,
@@ -32,7 +70,6 @@ class RayTrainRunner:
         address: str | None = None,
         ray_trainer_strategy: Strategy | None = None,
         sparse_key: str = "X",
-        max_open_files: int = 3,
     ):
         self.Model = Model
         self.Ds = Ds
@@ -42,7 +79,6 @@ class RayTrainRunner:
         self.sparse_key = sparse_key
         self.before_dense_cb = before_dense_cb
         self.after_dense_cb = after_dense_cb
-        self.max_open_files = max_open_files
         if not ray_trainer_strategy:
             self.ray_trainer_strategy = ray.train.lightning.RayDDPStrategy()
         else:
@@ -69,9 +105,46 @@ class RayTrainRunner:
         is_gpu: bool = True,
         random_seed: int | None = 42,
         resource_per_worker: dict | None = None,
-        is_shuffled: bool = True,
+        is_shuffled: bool = False,
         **kwargs,
     ):
+        """Start the training
+
+        Parameters
+        ----------
+        file_paths : list[str]
+            List of h5ad AnnData files
+        batch_size : int
+            How much data to fetch from disk
+        test_size : float
+            Fraction of test data for example 0.1 means 10% will be split for testing
+        val_size : float
+            Fraction of validation data for example 0.2 means 20% will be split for validation
+        prefetch_factor : int, optional
+            Total data fetch is prefetch_factor * batch_size, by default 4
+        max_epochs : int, optional
+            How many epoch(s) to train with, by default 1
+        thread_per_worker : int | None, optional
+            Amount of worker for each dataloader, by default None
+        num_workers : int | None, optional
+            Override number of Ray processes default to number of GPU(s) in the cluster, by default None
+        result_storage_path : str, optional
+            Path to store the loss, validation and checkpoint, by default "~/protoplast_results"
+        ckpt_path : str | None, optional
+            Path of the checkpoint if this is specify it will train from checkpoint otherwise it will start the
+            training from scratch, by default None
+        is_gpu : bool, optional
+            By default True turn this off if your system don't have any GPU, by default True
+        random_seed : int | None, optional
+            Set this to None for real training but for benchmarking and result replication
+            you can adjust the seed here, by default 42
+        resource_per_worker : dict | None, optional
+            This get pass to Ray you can specify how much CPU or GPU each Ray process get, by default None
+        Returns
+        -------
+        Result
+            The training result from RayTrainer
+        """
         self.result_storage_path = result_storage_path
         self.prefetch_factor = prefetch_factor
         self.max_epochs = max_epochs

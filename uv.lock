@@ -1298,6 +1298,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/de/b4/3c5eac68f31e124a55d255d318c7445840fa1be55e013f507556d6481913/mkdocstrings-0.30.0-py3-none-any.whl", hash = "sha256:ae9e4a0d8c1789697ac776f2e034e2ddd71054ae1cf2c2bb1433ccfd07c226f2", size = 36579, upload-time = "2025-07-22T23:48:44.152Z" },
 ]
 
+[package.optional-dependencies]
+python = [
+    { name = "mkdocstrings-python" },
+]
+
 [[package]]
 name = "mkdocstrings-python"
 version = "1.18.2"
@@ -2171,6 +2176,9 @@ dependencies = [
     { name = "fsspec" },
     { name = "fsspec-dnanexus" },
     { name = "lightning" },
+    { name = "mkdocs" },
+    { name = "mkdocs-material" },
+    { name = "mkdocstrings", extra = ["python"] },
     { name = "oxbow" },
     { name = "ray", extra = ["train"] },
     { name = "scdataset" },
@@ -2215,6 +2223,9 @@ requires-dist = [
     { name = "fsspec-dnanexus" },
     { name = "ipdb", marker = "extra == 'test'" },
     { name = "lightning", specifier = ">=2.5.3" },
+    { name = "mkdocs", specifier = ">=1.6.1" },
+    { name = "mkdocs-material", specifier = ">=9.6.19" },
+    { name = "mkdocstrings", extras = ["python"], specifier = ">=0.30.0" },
     { name = "oxbow" },
     { name = "pytest", marker = "extra == 'test'" },
     { name = "ray", extras = ["train"], specifier = ">=2.40.0" },
