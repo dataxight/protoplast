@@ -48,7 +48,7 @@ class RayTrainRunner:
         Override ray address, by default None
     ray_trainer_strategy : Strategy | None, optional
         Override Ray Trainer Strategy if this is None it will default to RayDDP, by default None
-    sparse_keys : str, optional
+    sparse_key : str, optional
         _description_, by default "X",
     Returns
     -------

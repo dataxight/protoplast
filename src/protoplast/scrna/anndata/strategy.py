@@ -137,11 +137,33 @@ def ann_split_data(
 @dataclass
 class SplitInfo:
     files: list[str]
-    train_indices: list[int]
-    val_indices: list[int]
-    test_indices: list[int]
+    train_indices: list[list[int]]
+    val_indices: list[list[int]]
+    test_indices: list[list[int]]
     metadata: dict[str, any]
     mini_batch_size: int | None = None
+    """Information on how to split the data
+    this will get pass to the Dataset to know which part of the data
+    they need to access
+
+    Parameters
+    ----------
+    files : list[str]
+        List of files
+    train_indices : list[list[str]]
+        List of indices for training `train_indices[file_idx][batch_idx]` where `file_idx` must correspond
+        to the idx of `files` parameter
+    val_indices : list[list[str]]
+        List of indices for validation `val_indices[file_idx][batch_idx]` where `file_idx` must correspond
+        to the idx of `files` parameter
+    test_indices : list[list[str]]
+        List of indices for testing `test_indices[file_idx][batch_idx]` where `file_idx` must correspond
+        to the idx of `files` parameter
+    metadata : dict[str, any]
+        Data to pass on to the Dataset and model
+    mini_batch_size : int | None
+        How much data to send to the model
+    """
 
     def to_dict(self) -> dict[str, any]:
         return {
@@ -155,6 +177,30 @@ class SplitInfo:
 
 
 class ShuffleStrategy(ABC):
+    """Strategy on how to data should be split and shuffle during
+    the training
+
+        Parameters
+        ----------
+        file_paths : list[str]
+            List of file paths
+        batch_size : int
+            How much data to fetch
+        total_workers : int
+            Total workers this is equal to number of processes times number of threads per process
+        test_size : float | None, optional
+            Fraction of test data for example 0.1 means 10% will be split for testing, by default None
+        validation_size : float | None, optional
+            Fraction of validation data for example 0.2 means 20% will be split for validation, by default None
+        random_seed : int | None, optional
+            Seed to randomize the split set this to None if you want this to be completely random, by default 42
+        metadata_cb : Callable[[anndata.AnnData, dict], None] | None, optional
+            Callback to mutate metadata recommended for passing data from `obs` or `var`
+            or any additional data your models required
+            by default cell_line_metadata_cb
+        is_shuffled : bool, optional
+            Whether to shuffle the data or not this will be deprecated soon, by default True
+        """
     def __init__(
         self,
         file_paths: list[str],

@@ -35,6 +35,24 @@ def cell_line_metadata_cb(ad: anndata.AnnData, metadata: dict):
 
 
 class DistributedAnnDataset(torch.utils.data.IterableDataset):
+    """Dataset that support multiworker distribution this version will yield the data
+    in a sequential manner
+
+    Parameters
+    ----------
+    file_paths : list[str]
+        List of files
+    indices : list[list[int]]
+        List of indices from `SplitInfo`
+    metadata : dict
+        Metadata dictionary for sending data to the model or other logical purposes
+    sparse_key : str
+        AnnData key for the sparse matrix usually it is "X" if "layers" please use the dot notation for example
+        "layers.attr" where attr is the key in the layer you want to refer to
+    mini_batch_size : int, optional
+        How many observation to send to the model must be less than `batch_size`, by default None
+        and will send the whole batch if this is not specified
+    """
     def __init__(
         self,
         file_paths: list[str],
@@ -58,18 +76,6 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
 
     @classmethod
     def create_distributed_ds(cls, indices: SplitInfo, sparse_key: str, mode: str = "train", **kwargs):
-        """
-        indices is in the following format
-        {
-            "files": [path to anndata must correspond to indices],
-            "train_indices": [[correspond to files[0]], [correspond to files[i]] ],
-            "test_indices": [[correspond to files[0]], [correspond to files[i]] ],
-            "metadata": {
-                ...,
-                depends on metadata_cb read more on cell_line_metadata_cb
-            }
-        }
-        """
         indices = indices.to_dict() if isinstance(indices, SplitInfo) else indices
         return cls(
             indices["files"],
@@ -123,6 +129,21 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             raise Exception("Sparse key not supported")
 
     def transform(self, start: int, end: int):
+        """This method should be overriden to transform data to be send to the Model in the correct format
+        common use case for this is for example `self.ad.obs["key"][start:end]`
+
+        Parameters
+        ----------
+        start : int
+            Starting index of this batch
+        end : int
+            Ending index of this patch
+
+        Returns
+        -------
+        Tensor
+            A sparse tensor
+        """
         # by default we just return the matrix
         # sometimes, the h5ad file stores X as the dense matrix,
         # so we have to make sure it is a sparse matrix before returning
