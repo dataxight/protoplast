@@ -131,7 +131,7 @@ class RayTrainRunner:
         result_storage_path : str, optional
             Path to store the loss, validation and checkpoint, by default "~/protoplast_results"
         ckpt_path : str | None, optional
-            Path of the checkpoint if this is specify it will train from checkpoint otherwise it will start the
+            Path of the checkpoint if this is specified it will train from checkpoint otherwise it will start the
             training from scratch, by default None
         is_gpu : bool, optional
             By default True turn this off if your system don't have any GPU, by default True
