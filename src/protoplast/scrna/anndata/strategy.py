@@ -180,27 +180,27 @@ class ShuffleStrategy(ABC):
     """Strategy on how to data should be split and shuffle during
     the training
 
-        Parameters
-        ----------
-        file_paths : list[str]
-            List of file paths
-        batch_size : int
-            How much data to fetch
-        total_workers : int
-            Total workers this is equal to number of processes times number of threads per process
-        test_size : float | None, optional
-            Fraction of test data for example 0.1 means 10% will be split for testing, by default None
-        validation_size : float | None, optional
-            Fraction of validation data for example 0.2 means 20% will be split for validation, by default None
-        random_seed : int | None, optional
-            Seed to randomize the split set this to None if you want this to be completely random, by default 42
-        metadata_cb : Callable[[anndata.AnnData, dict], None] | None, optional
-            Callback to mutate metadata recommended for passing data from `obs` or `var`
-            or any additional data your models required
-            by default cell_line_metadata_cb
-        is_shuffled : bool, optional
-            Whether to shuffle the data or not this will be deprecated soon, by default True
-        """
+    Parameters
+    ----------
+    file_paths : list[str]
+        List of file paths
+    batch_size : int
+        How much data to fetch
+    total_workers : int
+        Total workers this is equal to number of processes times number of threads per process
+    test_size : float | None, optional
+        Fraction of test data for example 0.1 means 10% will be split for testing, by default None
+    validation_size : float | None, optional
+        Fraction of validation data for example 0.2 means 20% will be split for validation, by default None
+    random_seed : int | None, optional
+        Seed to randomize the split set this to None if you want this to be completely random, by default 42
+    metadata_cb : Callable[[anndata.AnnData, dict], None] | None, optional
+        Callback to mutate metadata recommended for passing data from `obs` or `var`
+        or any additional data your models required
+        by default cell_line_metadata_cb
+    is_shuffled : bool, optional
+        Whether to shuffle the data or not this will be deprecated soon, by default True
+    """
     def __init__(
         self,
         file_paths: list[str],
@@ -236,13 +236,44 @@ class ShuffleStrategy(ABC):
     @abstractmethod
     def mixer(self, batch: list) -> any:
         """
-        If you use Dataset that return 1 sample and not prebatched
-        you need to implement this
+        If your Dataset only return 1 sample and not prebatched
+        this need to be implemented
         """
         pass
 
 
 class SequentialShuffleStrategy(ShuffleStrategy):
+    """Return the data in a sequential way randomness is not guarantee
+    there is a high chance the data will come from nearby rows this might
+    affect your training accuracy depending on how the anndata are ordered you can
+    overcome this by preshuffling the data manually yourself if this is an issue
+
+    Parameters
+    ----------
+    file_paths : list[str]
+        List of file paths
+    batch_size : int
+        How much data to fetch
+    total_workers : int
+        Total workers this is equal to number of processes times number of threads per process
+    test_size : float | None, optional
+        Fraction of test data for example 0.1 means 10% will be split for testing, by default None
+    validation_size : float | None, optional
+        Fraction of validation data for example 0.2 means 20% will be split for validation, by default None
+    random_seed : int | None, optional
+        Seed to randomize the split set this to None if you want this to be completely random, by default 42
+    metadata_cb : Callable[[anndata.AnnData, dict], None] | None, optional
+        Callback to mutate metadata recommended for passing data from `obs` or `var`
+        or any additional data your models required
+        by default cell_line_metadata_cb
+    is_shuffled : bool, optional
+        Whether to shuffle the data or not this will be deprecated soon, by default True
+    pre_fetch_then_batch : int | None
+        The prefetch factor the total size of data fetch will be equal to `pre_fetch_then_batch * batch_size`
+    drop_last : bool
+        If there is true drop the remainder, default to True otherwise duplicate the data to make sure the
+        data is evenly distributed to all the workers
+    """
     def __init__(
         self,
         file_paths: list[str],

@@ -16,8 +16,6 @@ For fetching and sending data to the model
 :::protoplast.scrna.anndata.torch_dataloader.DistributedAnnDataset
 
 
-## ShuffleStrategy
-How to randomize the data
 :::protoplast.scrna.anndata.strategy.ShuffleStrategy
 
 :::protoplast.scrna.anndata.strategy.SplitInfo
