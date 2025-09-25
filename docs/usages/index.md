@@ -8,4 +8,8 @@ import protoplast
 
 There are multiple modules refer to the usage guide for each module
 
+## Modules
+
+* [Single Cell Training](scrna.md)
+
 

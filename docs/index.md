@@ -7,6 +7,6 @@
 - [Usage](usages/index.md)
     - [Single Cell Training](usages/scrna.md)
 - [API](apis/index.md)
-    - [Single Cell](apis/scrna.md)
+    - [Single Cell Training](apis/scrna.md)
 - [Contributing](contributing.md)
 - [History](history.md)
