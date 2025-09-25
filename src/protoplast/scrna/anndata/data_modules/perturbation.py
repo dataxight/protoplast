@@ -248,14 +248,13 @@ class PerturbationDataset(DistributedAnnDataset):
         start, end = self.cell_type_ctrl_regions[cell_type][file_i]
 
         if (end - start) > target_number:
-            start_pos = np.random.randint(0, end - start - target_number + 1)
+            start_pos = start +np.random.randint(0, end - start - target_number + 1)
             end_pos = start_pos + target_number
             X = self._get_mat_by_range(self.h5files[file_i], start_pos, end_pos)
             barcodes = self.adata_obs[file_i].index[start_pos:end_pos].values
         else:
             X = self._get_mat_by_range(self.h5files[file_i], start, end)
             barcodes = self.adata_obs[file_i].index[start:end].values
-
         # if not enough cells, sample with replacement
         if X.shape[0] < target_number:
             indices = np.random.choice(X.shape[0], target_number, replace=True)
@@ -652,12 +651,12 @@ class PerturbationDataModule(AnnDataModule):
 
 if __name__ == "__main__":
     # Test with fewshot config file
-    config_path = "/ephemeral/vcc-models/configs/data.toml"
+    config_path = "/home/tphan/Softwares/vcc-models/configs/data.toml"
 
     dm = PerturbationDataModule(
         config_path=config_path,
         barcodes=True,
-        pert_embedding_file="/ephemeral/vcc/competition_support_set_sorted/ESM2_pert_features.pt"
+        pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt"
     )
     dm.setup(stage="fit")
 
@@ -690,5 +689,8 @@ if __name__ == "__main__":
             print("pert_emb shape:", batch['pert_emb'].shape)
             print("pert_name:", batch['pert_name'])
             print("cell_type:", batch['cell_type'])
+            # barcodes
+            print("pert_cell_barcode shape:", batch['pert_cell_barcode'])
+            print("ctrl_cell_barcode shape:", batch['ctrl_cell_barcode'])
             if i >= 1:  # Just show first few samples
                 break
