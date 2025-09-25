@@ -3,6 +3,7 @@ import os
 from collections import Counter
 from collections.abc import Callable
 
+import anndata
 import lightning.pytorch as pl
 import numpy as np
 import pandas as pd
@@ -11,7 +12,6 @@ import torch
 import torch.distributed as td
 from torch.utils.data import DataLoader, get_worker_info
 
-import anndata
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
 from protoplast.patches.anndata_remote import apply_file_backing_patch
 
@@ -53,6 +53,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         How many observation to send to the model must be less than `batch_size`, by default None
         and will send the whole batch if this is not specified
     """
+
     def __init__(
         self,
         file_paths: list[str],

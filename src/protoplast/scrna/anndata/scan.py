@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import anndata
 import h5py
 import numpy as np
 import pyarrow as pa
@@ -13,7 +14,6 @@ from daft.io.source import DataSource, DataSourceTask
 from daft.logical.schema import Schema
 from daft.recordbatch.micropartition import MicroPartition
 
-import anndata
 from protoplast.utils import ExpressionVisitorWithRequiredColumns
 
 if TYPE_CHECKING:

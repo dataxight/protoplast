@@ -2,6 +2,7 @@ import os
 import time
 from collections.abc import Callable
 
+import anndata
 import lightning.pytorch as pl
 import ray
 import ray.train
@@ -10,8 +11,6 @@ import ray.train.torch
 import torch
 from beartype import beartype
 from lightning.pytorch.strategies import Strategy
-
-import anndata
 
 from .strategy import SequentialShuffleStrategy, ShuffleStrategy
 from .torch_dataloader import AnnDataModule, DistributedAnnDataset, cell_line_metadata_cb
@@ -39,7 +38,7 @@ class RayTrainRunner:
         is still a sparse CSR Tensor, by default None
     after_dense_cb : Callable[[torch.Tensor, str  |  int], torch.Tensor], optional
         Callback to perform after densification of sparse matrix where the data at this point
-        is a dense Tensor, by default None 
+        is a dense Tensor, by default None
     shuffle_strategy : ShuffleStrategy, optional
         Strategy to split or randomize the data during the training, by default SequentialShuffleStrategy
     runtime_env_config : dict | None, optional
@@ -56,6 +55,7 @@ class RayTrainRunner:
         Use this class to start the training
 
     """
+
     @beartype
     def __init__(
         self,

@@ -4,10 +4,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import anndata
 import torch
 from torch.utils.data._utils.collate import default_collate
-
-import anndata
 
 
 def ann_split_data(
@@ -201,6 +200,7 @@ class ShuffleStrategy(ABC):
     is_shuffled : bool, optional
         Whether to shuffle the data or not this will be deprecated soon, by default True
     """
+
     def __init__(
         self,
         file_paths: list[str],
@@ -274,6 +274,7 @@ class SequentialShuffleStrategy(ShuffleStrategy):
         If there is true drop the remainder, default to True otherwise duplicate the data to make sure the
         data is evenly distributed to all the workers
     """
+
     def __init__(
         self,
         file_paths: list[str],
