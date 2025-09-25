@@ -1,0 +1,3 @@
+nvidia-ml-py
+scanpy
+scvi-tools
