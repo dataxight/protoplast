@@ -42,7 +42,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         metadata: dict,
         sparse_key: str,
         mini_batch_size: int = None,
-        **kwargs, # FIXME: workaround for PROTO-23
+        **kwargs,  # FIXME: workaround for PROTO-23
     ):
         # use first file as reference first
         self.files = file_paths

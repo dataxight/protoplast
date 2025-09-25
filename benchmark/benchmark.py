@@ -9,65 +9,45 @@
 
 # General
 import argparse
-from pydantic import BaseModel
-import traceback
-from typing import Literal, get_args
-import time
-from abc import ABC, abstractmethod
-import glob
-import psutil
-from contextlib import contextmanager
 import csv
-from pathlib import Path
-from threading import Thread, Event
+import glob
 import os
-import pynvml
+import time
+import traceback
+from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from pathlib import Path
+from threading import Event, Thread
+from typing import Literal, get_args
 
 # Data structure
 import anndata as ad
-from anndata.experimental import AnnCollection, AnnLoader
-import pandas as pd
+import lightning.pytorch as pl
 import numpy as np
-from scipy import sparse
+import pandas as pd
+import psutil
+import pynvml
 import scanpy as sc
-
-# scDataset
-from scdataset import scDataset, Streaming
-
-# SCVI
-from scvi.data import AnnDataManager
-from scvi.dataloaders import AnnDataLoader
-from scvi.data.fields import LayerField
-from scvi.data.fields import CategoricalObsField
 
 # AI/ML
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from anndata.experimental import AnnCollection, AnnLoader
+from pydantic import BaseModel
+
+# scDataset
+from scdataset import Streaming, scDataset
+from scipy import sparse
+
+# SCVI
+from scvi.data import AnnDataManager
+from scvi.data.fields import CategoricalObsField, LayerField
+from scvi.dataloaders import AnnDataLoader
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
-import lightning.pytorch as pl
-
 
 # === HELPER FUNCTIONS ===
-
-
-def get_peak_memory(pid: int = None) -> int:
-    """
-    Return peak memory usage (in bytes) of a process.
-    Falls back to current RSS if peak info not available.
-    """
-    pid = pid or os.getpid()
-    proc = psutil.Process(pid)
-    meminfo = proc.memory_info()
-
-    # Try to use platform-specific peak attributes if they exist
-    for attr in ["peak_wset", "peak_pagefile", "peak_vms"]:
-        if hasattr(meminfo, attr):
-            return getattr(meminfo, attr)
-
-    # Fallback: return current RSS as an approximation
-    return meminfo.rss
 
 
 class Classifier(pl.LightningModule):
@@ -162,7 +142,6 @@ class BenchmarkRunner(ABC):
         success = True
 
         # Start recording RAM usage
-        pid = os.getpid()
         stop_event = Event()
         peak = {"rss": psutil.virtual_memory().used}
 
