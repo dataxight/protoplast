@@ -91,7 +91,7 @@ class BenchmarkRunnerParams(BaseModel):
     label: str
     batch_size: int
     fetch_factor: int
-    num_workers: int
+    num_workers: int # Per GPU
     class_name: RunnerClass
     logfile: str
     num_gpus: int
@@ -129,7 +129,8 @@ class BenchmarkRunner(ABC):
                         "Cell_count",
                         "Batch size",
                         "Fetch factor",
-                        "# workers",
+                        "# workers per GPU",
+                        "# GPUs",
                         "Task",
                         "Elapsed (seconds)",
                         "Peak RAM usage (MB)",
@@ -201,6 +202,7 @@ class BenchmarkRunner(ABC):
                         self.params.batch_size,
                         self.params.fetch_factor,
                         self.params.num_workers,
+                        self.params.num_gpus,
                         msg,
                         elapsed if success else -1,
                         peak["rss"] / 1024**2,
