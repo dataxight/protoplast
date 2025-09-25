@@ -91,7 +91,7 @@ class BenchmarkRunnerParams(BaseModel):
     label: str
     batch_size: int
     fetch_factor: int
-    num_workers: int # Per GPU
+    num_workers: int  # Per GPU
     class_name: RunnerClass
     logfile: str
     num_gpus: int
