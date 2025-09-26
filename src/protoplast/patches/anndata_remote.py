@@ -80,7 +80,7 @@ def apply_file_backing_patch():
         file_backing_module.AnnDataFileManager = PatchedAnnDataFileManager
         # patch the module where it is used
         anndata_module.AnnDataFileManager = PatchedAnnDataFileManager
-        print("✓ Applied AnnDataFileManager patch")
+        print("✓ Applied AnnDataFileManager patch, AnnData cannot be imported after the patch!")
     except ImportError:
         print("⚠ AnnDataFileManager not available for patching")
 

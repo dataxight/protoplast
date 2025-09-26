@@ -130,20 +130,22 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             raise Exception("Sparse key not supported")
 
     def transform(self, start: int, end: int):
-        """This method should be overriden to transform data to be send to the Model in the correct format
-        common use case for this is for example `self.ad.obs["key"][start:end]`
+        """The subclass should implement the logic to get more data for the cell. It can leverage this super function
+        to efficiently get X as a sparse tensor. An example of how to get to more data from the cell is
+        `self.ad.obs["key"][start:end]` where you must only fetch a subset of this data with `start` and `end`
+
 
         Parameters
         ----------
         start : int
             Starting index of this batch
         end : int
-            Ending index of this patch
+            Ending index of this batch
 
         Returns
         -------
-        Tensor
-            A sparse tensor
+        Any
+            Usually a tensor, a list of tensor or dictionary with tensor value
         """
         # by default we just return the matrix
         # sometimes, the h5ad file stores X as the dense matrix,
