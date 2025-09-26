@@ -24,9 +24,9 @@ def main():
     # Set up data module
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
-        pert_embedding_file="/ephemeral/vcc/competition_support_set_sorted/ESM2_pert_features.pt",
+        pert_embedding_file="//mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt",
         batch_size=16,
-        group_size_S=64,
+        group_size_S=128,
         num_workers=4  # Set to 0 to avoid multiprocessing issues
     )
     dm.setup(stage="fit")
