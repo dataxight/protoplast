@@ -1,4 +1,5 @@
 """Top-level package for protoplast."""
 
-__author__ = """Tan Phan"""
-__email__ = "tan@dataxight.com"
+from protoplast.scrna.anndata.lightning_models import LinearClassifier
+from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset, DistributedCellLineAnnDataset
+from protoplast.scrna.anndata.trainer import RayTrainRunner
