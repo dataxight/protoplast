@@ -1,0 +1,83 @@
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: ray-cluster
+  namespace: ray
+spec:
+  rayVersion: "2.34.0"
+
+  headGroupSpec:
+    serviceAccount: ray-head-sa
+    rayStartParams:
+      dashboard-host: "0.0.0.0"
+    template:
+      spec:
+        containers:
+          - name: ray-head
+            image: 123456789012.dkr.ecr.us-west-2.amazonaws.com/ray-custom:latest
+            env:
+              - name: AWS_REGION
+                value: {{ .Values.awsRegion }}
+              - name: AWS_ACCOUNT_ID
+                value: {{ .Values.awsAccountId }}
+              - name: S3_BUCKET
+                value: {{ .Values.s3Bucket }}
+        nodeSelector:
+          gpu: "false"
+        tolerations:
+          - key: "dedicated"
+            operator: "Equal"
+            value: "cpu"
+            effect: "NoSchedule"
+
+  workerGroupSpecs:
+    - groupName: cpu-workers
+      replicas: 0
+      template:
+        spec:
+          serviceAccountName: ray-worker-sa
+          containers:
+            - name: ray-worker
+              image: 123456789012.dkr.ecr.us-west-2.amazonaws.com/ray-custom:latest
+              env:
+                - name: AWS_REGION
+                  value: {{ .Values.awsRegion }}
+                - name: AWS_ACCOUNT_ID
+                  value: {{ .Values.awsAccountId }}
+                - name: S3_BUCKET
+                  value: {{ .Values.s3Bucket }}
+          nodeSelector:
+            gpu: "false"
+          tolerations:
+            - key: "dedicated"
+              operator: "Equal"
+              value: "cpu"
+              effect: "NoSchedule"
+
+    - groupName: gpu-workers
+      replicas: 0
+      template:
+        spec:
+          serviceAccountName: ray-worker-sa
+          containers:
+            - name: ray-worker
+              image: 123456789012.dkr.ecr.us-west-2.amazonaws.com/ray-custom:latest
+              resources:
+                requests:
+                  nvidia.com/gpu: 1
+                limits:
+                  nvidia.com/gpu: 1
+              env:
+                - name: AWS_REGION
+                  value: {{ .Values.awsRegion }}
+                - name: AWS_ACCOUNT_ID
+                  value: {{ .Values.awsAccountId }}
+                - name: S3_BUCKET
+                  value: {{ .Values.s3Bucket }}
+          nodeSelector:
+            gpu: "true"
+          tolerations:
+            - key: "dedicated"
+              operator: "Equal"
+              value: "gpu"
+              effect: "NoSchedule"
