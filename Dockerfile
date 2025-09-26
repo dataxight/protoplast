@@ -4,5 +4,4 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 WORKDIR /app
 COPY . .
-RUN uv add .
-CMD [ "uv", "run", "marimo", "edit", "notebooks", "--host", "0.0.0.0", "-p", "8888"]
+RUN uv sync

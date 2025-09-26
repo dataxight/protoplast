@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ray-worker-sa
+  namespace: ray
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::{{ .Values.awsAccountId }}:role/ray-worker-role

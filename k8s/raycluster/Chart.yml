@@ -1,0 +1,4 @@
+apiVersion: v2
+name: PROTOplast Ray cluster
+description: Helm chart for PROTOplast on EKS with CPU/GPU node groups and IRSA
+version: 0.1.0
