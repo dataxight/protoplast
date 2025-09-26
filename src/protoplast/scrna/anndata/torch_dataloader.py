@@ -3,6 +3,7 @@ import os
 from collections import Counter
 from collections.abc import Callable
 
+import anndata
 import lightning.pytorch as pl
 import numpy as np
 import pandas as pd
@@ -11,7 +12,6 @@ import torch
 import torch.distributed as td
 from torch.utils.data import DataLoader, get_worker_info
 
-import anndata
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
 from protoplast.patches.anndata_remote import apply_file_backing_patch
 
@@ -35,6 +35,25 @@ def cell_line_metadata_cb(ad: anndata.AnnData, metadata: dict):
 
 
 class DistributedAnnDataset(torch.utils.data.IterableDataset):
+    """Dataset that support multiworker distribution this version will yield the data
+    in a sequential manner
+
+    Parameters
+    ----------
+    file_paths : list[str]
+        List of files
+    indices : list[list[int]]
+        List of indices from `SplitInfo`
+    metadata : dict
+        Metadata dictionary for sending data to the model or other logical purposes
+    sparse_key : str
+        AnnData key for the sparse matrix usually it is "X" if "layers" please use the dot notation for example
+        "layers.attr" where attr is the key in the layer you want to refer to
+    mini_batch_size : int, optional
+        How many observation to send to the model must be less than `batch_size`, by default None
+        and will send the whole batch if this is not specified
+    """
+
     def __init__(
         self,
         file_paths: list[str],
@@ -58,18 +77,6 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
 
     @classmethod
     def create_distributed_ds(cls, indices: SplitInfo, sparse_key: str, mode: str = "train", **kwargs):
-        """
-        indices is in the following format
-        {
-            "files": [path to anndata must correspond to indices],
-            "train_indices": [[correspond to files[0]], [correspond to files[i]] ],
-            "test_indices": [[correspond to files[0]], [correspond to files[i]] ],
-            "metadata": {
-                ...,
-                depends on metadata_cb read more on cell_line_metadata_cb
-            }
-        }
-        """
         indices = indices.to_dict() if isinstance(indices, SplitInfo) else indices
         return cls(
             indices["files"],
@@ -123,6 +130,23 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             raise Exception("Sparse key not supported")
 
     def transform(self, start: int, end: int):
+        """The subclass should implement the logic to get more data for the cell. It can leverage this super function
+        to efficiently get X as a sparse tensor. An example of how to get to more data from the cell is
+        `self.ad.obs["key"][start:end]` where you must only fetch a subset of this data with `start` and `end`
+
+
+        Parameters
+        ----------
+        start : int
+            Starting index of this batch
+        end : int
+            Ending index of this batch
+
+        Returns
+        -------
+        Any
+            Usually a tensor, a list of tensor or dictionary with tensor value
+        """
         # by default we just return the matrix
         # sometimes, the h5ad file stores X as the dense matrix,
         # so we have to make sure it is a sparse matrix before returning
