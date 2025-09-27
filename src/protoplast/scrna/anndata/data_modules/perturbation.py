@@ -298,12 +298,12 @@ class PerturbationDataset(DistributedAnnDataset):
                     batches = self.adata_obs[file_i][self.batch_label].iloc[cell_indices].values
 
                     # Get pert embedding
-                    X_pert_emb = self.adatas[file_i].obsm["X_state"][cell_indices]
+                    # X_pert_emb = self.adatas[file_i].obsm["X_state"][cell_indices]
 
                     # Get control cells with matching covariates
                     X_ctrl, ctrl_barcodes = self.sampling_control(cell_type, file_i, self.group_size_S)
                     ctrl_indices = np.where(self.adata_obs[file_i].index.isin(ctrl_barcodes))[0]
-                    X_ctrl_emb = self.adatas[file_i].obsm["X_state"][ctrl_indices]
+                    # X_ctrl_emb = self.adatas[file_i].obsm["X_state"][ctrl_indices]
 
                     # Get embeddings and onehot encodings
                     pert_emb = self._get_pert_embedding(target)
@@ -319,8 +319,8 @@ class PerturbationDataset(DistributedAnnDataset):
                     sample = {
                         "pert_cell_g": X_pert, # scipy csr matrix [S, G]
                         "ctrl_cell_g": X_ctrl, # scipy csr matrix [S, G]
-                        "pert_cell_emb": torch.from_numpy(X_pert_emb), # tensor [S, 2058]
-                        "ctrl_cell_emb": torch.from_numpy(X_ctrl_emb), # tensor [S, 2058]
+                        # "pert_cell_emb": torch.from_numpy(X_pert_emb), # tensor [S, 2058]
+                        # "ctrl_cell_emb": torch.from_numpy(X_ctrl_emb), # tensor [S, 2058]
                         "pert_emb": pert_emb, # tensor [5102]
                         "pert_name": np.array([target]),
                         "cell_type": np.array([cell_type]), # str
@@ -595,9 +595,9 @@ class PerturbationDataModule(AnnDataModule):
                 # Stack sparse tensors
                 collated[key] = torch.stack(torch_sparse_tensors)
 
-            elif key in ['pert_cell_emb', 'ctrl_cell_emb']:
-                # concat tensors
-                collated[key] = torch.stack(values)
+            # elif key in ['pert_cell_emb', 'ctrl_cell_emb']:
+            #     # concat tensors
+            #     collated[key] = torch.stack(values)
             elif key in ['pert_emb', 'cell_type_onehot', 'batch_onehot']:
                 # Stack regular tensors
                 collated[key] = torch.stack(values)
