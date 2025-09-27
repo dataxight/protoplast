@@ -5,7 +5,7 @@
 # ===============================
 [datasets]
 #replogle_h1 = "/ephemeral/vcc/competition_support_set_sorted/{competition_train,hepg2,jurkat,k562_gwps,k562,rpe1}.h5"
-replogle_h1 = "/mnt/hdd2/tan/competition_support_set_sorted/emb/competition_train_emb.h5"
+replogle_h1 = "/mnt/hdd2/tan/competition_support_set_sorted/{competition_train,hepg2,jurkat,k562_gwps,k562,rpe1}.h5"
 
 # ===============================
 # Training specs
@@ -14,7 +14,6 @@ replogle_h1 = "/mnt/hdd2/tan/competition_support_set_sorted/emb/competition_trai
 # ===============================
 [training]
 replogle_h1 = "train"
-# xaira = "train"
 
 # ===============================
 # Zeroshot specs
@@ -26,10 +25,18 @@ replogle_h1 = "train"
 # Fewshot specs
 # Route specific perturbations within a given cell type
 # to train/val/test. Others fall back to train.
-#replogle_h1.k562 = "val"
 # ===============================
 [fewshot]
 # Example: for cell type ARC_H1 in dataset replogle_h1,
 # send the listed perturbations to val split.
-[fewshot."replogle_h1.competition_train_emb"]
-val = ['PHF10', 'USP22', 'RAF1', 'PRCP', 'EIF4B', 'NDUFB4', 'CASP3', 'ZNF426', 'UBE3C', 'MAP3K7', 'ZNF593', 'SIN3B', 'DNAJA3', 'STAG2', 'LZTR1', 'XRCC4', 'CALM3', 'EID2', 'SNCA', 'SHPRH', 'PMS1', 'C1QBP', 'BRD9', 'NREP', 'TMSB4X', 'RAB3B', 'TMSB10', 'METTL3', 'TWF2']
+[fewshot."replogle_h1.k562_gwps"]
+val = ['ARPC2', 'COX6C', 'DPH2', 'EIF3H', 'HDAC3', 'HMGCR', 'HTATSF1', 'JAZF1', 'MAT2A']
+[fewshot."replogle_h1.rpe1"]
+val = ['PPP2R3C',
+ 'SMARCB1',
+ 'SMARCE1',
+ 'STRAP',
+ 'SUPV3L1',
+ 'UQCRB',
+ 'USF2',
+ 'WAC']

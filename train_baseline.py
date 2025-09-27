@@ -37,7 +37,7 @@ def main():
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt",
-        batch_size=16,
+        batch_size=64,
         group_size_S=128,
         num_workers=4
     )
@@ -59,14 +59,12 @@ def main():
     sample_batch = next(iter(train_loader))
     
     n_genes = sample_batch["pert_cell_g"].shape[-1]
-    embedding_dim = sample_batch["pert_cell_emb"].shape[-1]
     pert_emb_dim = sample_batch["pert_emb"].shape[-1]
     n_cell_types = sample_batch["cell_type_onehot"].shape[-1]
     n_batches = sample_batch["batch_onehot"].shape[-1]
     
     print(f"Data dimensions:")
     print(f"  n_genes: {n_genes}")
-    print(f"  embedding_dim: {embedding_dim}")
     print(f"  pert_emb_dim: {pert_emb_dim}")
     print(f"  n_cell_types: {n_cell_types}")
     print(f"  n_batches: {n_batches}")
@@ -118,12 +116,12 @@ def main():
         d_h=512,  # Hidden dimension
         d_f=2048,  # Bottleneck dimension
         n_genes=n_genes,
-        embedding_dim=embedding_dim,
+        embedding_dim=n_genes,
         pert_emb_dim=pert_emb_dim,
         n_cell_types=n_cell_types,
         n_batches=n_batches,
         hvg_mask=hvg_mask,
-        dropout=0.1,
+        dropout=0.2,
         lr=1e-3,
         wd=1e-4
     )

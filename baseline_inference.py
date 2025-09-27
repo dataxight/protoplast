@@ -41,9 +41,9 @@ class BaselinePredictor:
                 'd_h': 512,
                 'd_f': 2048,
                 'n_genes': 18080,
-                'embedding_dim': 2058,
+                'embedding_dim': 18080,
                 'pert_emb_dim': 5120,
-                'dropout': 0.1
+                'dropout': 0.2
             }
         
         # Create model with hyperparameters
@@ -51,9 +51,9 @@ class BaselinePredictor:
             d_h=hparams.get('d_h', 512),
             d_f=hparams.get('d_f', 2048),
             n_genes=hparams.get('n_genes', 18080),
-            embedding_dim=hparams.get('embedding_dim', 2058),
+            embedding_dim=hparams.get('embedding_dim', 18080),
             pert_emb_dim=hparams.get('pert_emb_dim', 5120),
-            dropout=hparams.get('dropout', 0.1)
+            dropout=hparams.get('dropout', 0.2)
         )
         
         # Load state dict
@@ -93,9 +93,9 @@ class BaselinePredictor:
             with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
                               dtype=torch.float16, enabled=self.device=='cuda'):
                 predictions = self.model(ctrl_cell_emb, pert_emb, covariates)
-                log1p_target = self.model.compute_log1p_target(predictions, 10000, ctrl_cell_emb, pert_emb)
+                # log1p_target = self.model.compute_log1p_target(predictions, 10000, ctrl_cell_emb, pert_emb)
         
-        return log1p_target 
+        return predictions 
     
     def predict_batch(self, batch_data):
         """
@@ -125,7 +125,7 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-mmd/baseline-epoch=46-val_loss=0.7183.ckpt"  # Update with actual path
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-mmd/baseline-epoch=03-val_loss=25.9183.ckpt"  # Update with actual path
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation.csv"
@@ -158,7 +158,7 @@ def baseline_vcc_inference():
         
         # Randomly select n_cells from control_adata
         control_indices = np.random.choice(range(len(control_adata)), size=n_cells, replace=False)
-        X_ctrl = control_adata.obsm["X_state"][control_indices]
+        X_ctrl = control_adata.X[control_indices]
         X_ctrl = X_ctrl.toarray()
         X_ctrl = torch.from_numpy(X_ctrl).float()
         X_ctrl = X_ctrl.unsqueeze(0)  # Add batch dimension [1, S, E]
@@ -246,7 +246,7 @@ def baseline_validation_inference():
                 break
             print(f"Processing batch {i+1} / {len(val_loader)}: {batch['pert_name']}")
             
-            ctrl_cell_emb = batch["ctrl_cell_emb"]
+            ctrl_cell_emb = batch["ctrl_cell_g"]
             pert_emb = batch["pert_emb"]
             covariates = {
                 "cell_type_onehot": batch["cell_type_onehot"],
@@ -290,70 +290,6 @@ def baseline_validation_inference():
         print(f"❌ Error during validation inference: {e}")
         import traceback
         traceback.print_exc()
-
-
-def create_example_data():
-    """
-    Create example data for testing the baseline model.
-    """
-    batch_size = 2
-    seq_length = 20
-    embedding_dim = 2058
-    n_genes = 18080
-    
-    # Simulate control cell embeddings
-    ctrl_cell_emb = torch.randn(batch_size, seq_length, embedding_dim) * 0.5
-    
-    # Simulate perturbation embeddings
-    pert_emb = torch.randn(batch_size, 5120) * 0.3
-    
-    # Simulate covariates
-    covariates = {
-        'cell_type_onehot': torch.zeros(batch_size, seq_length, 1),
-        'batch_onehot': torch.zeros(batch_size, seq_length, 49)
-    }
-    
-    # Set some cell types and batches
-    covariates['cell_type_onehot'][:, :, 0] = 1.0  # All cells are type 0
-    covariates['batch_onehot'][:, :, 0] = 1.0      # All cells are batch 0
-    
-    return ctrl_cell_emb, pert_emb, covariates
-
-
-def test_baseline_inference():
-    """
-    Test the baseline inference with example data.
-    """
-    print("🧬 Baseline Model Inference Test")
-    print("=" * 40)
-    
-    try:
-        # Create example data
-        ctrl_cell_emb, pert_emb, covariates = create_example_data()
-        
-        # Initialize predictor (this will fail if no checkpoint exists)
-        checkpoint_path = "checkpoints/baseline/baseline-best.ckpt"
-        predictor = BaselinePredictor(checkpoint_path)
-        
-        # Run prediction
-        predictions = predictor.predict(ctrl_cell_emb, pert_emb, covariates)
-        
-        print(f"   Input shape: {ctrl_cell_emb.shape}")
-        print(f"   Predictions shape: {predictions.shape}")
-        print(f"   Prediction range: [{predictions.min().item():.4f}, {predictions.max().item():.4f}]")
-        print(f"\n✅ Baseline inference test completed successfully!")
-        
-        return predictor, predictions
-        
-    except FileNotFoundError:
-        print("❌ Checkpoint file not found. Please train the baseline model first.")
-        return None, None
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return None, None
-
 
 if __name__ == "__main__":
     # Test with example data first
