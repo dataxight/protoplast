@@ -4,11 +4,14 @@ version = "0.0.1"
 description = "Scalable machine learning for molecular data analysis"
 readme = "README.md"
 authors = [
-  {name = "DataXight Solution", email = "solutions@dataxight.com"}
+  {name = "DataXight Solutions", email = "solutions@dataxight.com"}
 ]
 maintainers = [
   {name = "Tan Phan", email = "tan@dataxight.com"},
-  {name = "Worapol Boontanonda", email = "ham@dataxight.com"},
+  {name = "Worapol Boontanonda", email = "worapol@dataxight.com"},
+  {name = "Tri Le", email="tri@dataxight.com"},
+  {name = "Nam Phung", email="nam@dataxight.com"},
+  {name = "Ivy Tran", email="ivy@dataxight.com"},
   {name = "Michael Pan", email = "michael@dataxight.com"},
 ]
 classifiers = [
