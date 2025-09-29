@@ -13,7 +13,6 @@
 #   limitations under the License.
 
 
-
 # This script performs benchmarking for PROTOplast
 
 # WARNING: DO NOT IMPORT PROTOPLAST EARLY ON IF YOU ARE GOING TO
