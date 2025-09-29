@@ -34,24 +34,28 @@ class BaselinePredictor:
         
         # Get hyperparameters from checkpoint
         if 'hyper_parameters' in checkpoint:
+            print("Hyperparameters found in checkpoint")
             hparams = checkpoint['hyper_parameters']
         else:
             # Default hyperparameters if not saved
+            print("No hyperparameters found in checkpoint, using default hyperparameters")
             hparams = {
                 'd_h': 512,
                 'd_f': 2048,
                 'n_genes': 18080,
-                'embedding_dim': 18080,
+                'embedding_dim': 4000,
                 'pert_emb_dim': 5120,
                 'dropout': 0.2
             }
         
         # Create model with hyperparameters
         model = BaselineModel(
+            mean_target_map=hparams.get('mean_target_map', {}),
+            mean_target_index_map=hparams.get('mean_target_index_map', {}),
             d_h=hparams.get('d_h', 512),
             d_f=hparams.get('d_f', 2048),
             n_genes=hparams.get('n_genes', 18080),
-            embedding_dim=hparams.get('embedding_dim', 18080),
+            embedding_dim=hparams.get('embedding_dim', 4000),
             pert_emb_dim=hparams.get('pert_emb_dim', 5120),
             dropout=hparams.get('dropout', 0.2)
         )
@@ -125,13 +129,16 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-mmd/baseline-epoch=03-val_loss=25.9183.ckpt"  # Update with actual path
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-mmd/baseline-epoch=28-val_loss=7.6366.ckpt"  # Update with actual path
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation.csv"
     pert_counts = pd.read_csv(pert_counts_path)
     gene_names = pd.read_csv("./gene_names.csv", header=None)
     gene_names = gene_names[0].tolist()
+    hvg_gene_names = open("hvg-4000.txt", "r").read().splitlines()
+    hvg_mask = np.isin(gene_names, hvg_gene_names)
+    hvg_mask = torch.tensor(hvg_mask)
     
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
@@ -143,7 +150,7 @@ def baseline_vcc_inference():
     dm.setup(stage="fit")
     
     predictor = BaselinePredictor(checkpoint_path)
-    adata = ad.read_h5ad("/mnt/hdd2/tan/competition_support_set_sorted/emb/competition_train_emb.h5", backed="r")
+    adata = ad.read_h5ad("/mnt/hdd2/tan/competition_support_set_sorted/competition_train.h5", backed="r")
     control_adata = adata[adata.obs["target_gene"] == "non-targeting"]
     batch_data = control_adata.obs["batch_var"]
     cell_type = "ARC_H1"
@@ -161,6 +168,7 @@ def baseline_vcc_inference():
         X_ctrl = control_adata.X[control_indices]
         X_ctrl = X_ctrl.toarray()
         X_ctrl = torch.from_numpy(X_ctrl).float()
+        X_ctrl = X_ctrl[:, hvg_mask]
         X_ctrl = X_ctrl.unsqueeze(0)  # Add batch dimension [1, S, E]
         
         # Get batch and perturbation embeddings
@@ -183,8 +191,8 @@ def baseline_vcc_inference():
         
         X = predictions if X is None else torch.cat([X, predictions], dim=0)
 
-    # Add 5000 control cells
-    control_indices = np.random.choice(range(len(control_adata)), size=5000, replace=False)
+    # Add 10000 control cells
+    control_indices = np.random.choice(range(len(control_adata)), size=10000, replace=False)
     X_ctrl = control_adata.X[control_indices]
     X_ctrl = X_ctrl.toarray()
     X_ctrl = torch.from_numpy(X_ctrl).float().to("cuda")
@@ -197,6 +205,7 @@ def baseline_vcc_inference():
     pert_names = np.array(pert_names)
 
     # Save results
+    path = "baseline_vcc_inference_mmd_cosine.h5ad"
     ad.AnnData(
         X=X,
         obs=pd.DataFrame(
@@ -206,10 +215,10 @@ def baseline_vcc_inference():
             index=np.arange(X.shape[0]).astype(str),
         ),
         var=pd.DataFrame(index=gene_names),
-    ).write_h5ad("baseline_vcc_inference_mmd.h5ad")
+    ).write_h5ad(path)
     
     print(f"\n🎉 Baseline VCC inference completed successfully!")
-    print(f"Results saved to baseline_vcc_inference.h5ad")
+    print(f"Results saved to {path}")
 
 
 def baseline_validation_inference():
@@ -217,7 +226,7 @@ def baseline_validation_inference():
     Run inference on validation data using the baseline model.
     """
     # checkpoint_path = "checkpoints/baseline/baseline-best.ckpt"  # Update with actual path
-    checkpoint_path = "checkpoints/baseline-mmd/baseline-epoch=55-val_loss=0.1830.ckpt"  # Update with actual path
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-mmd/baseline-epoch=28-val_loss=7.6366.ckpt"  # Update with actual path
     
     dm = PerturbationDataModule(
         config_path="configs/data.toml",

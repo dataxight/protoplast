@@ -5,6 +5,7 @@ Training script for the baseline model.
 import torch
 import lightning as L
 import numpy as np
+import logging
 import argparse
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import CSVLogger
@@ -12,6 +13,8 @@ from lightning.pytorch.loggers import CSVLogger
 # Import the data module and baseline model
 from protoplast.scrna.anndata.data_modules.perturbation import PerturbationDataModule
 from models.baseline import BaselineModel
+import pickle
+
 
 # Set tensor core precision for better performance
 torch.set_float32_matmul_precision('medium')
@@ -22,16 +25,18 @@ def main():
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Train baseline perturbation model")
-    parser.add_argument("--resume", action="store_true", help="Resume from latest checkpoint")
-    parser.add_argument("--checkpoint", type=str, help="Specific checkpoint path to resume from")
-    parser.add_argument("--no-resume", action="store_true", help="Start fresh training (ignore checkpoints)")
+    parser.add_argument("--mean-target-map", type=str, help="Path to mean target map", required=True)
+    parser.add_argument("--mean-target-addresses", type=str, help="Path to mean target addresses", required=True)
+    # parser.add_argument("--hvg-gene-names", type=str, help="Path to hvg gene names", required=True)
+    parser.add_argument("--gene-names", type=str, help="Path to gene names", required=True)
     args = parser.parse_args()
     
     L.seed_everything(42, workers=True)
 
-    gene_names = open("gene_names.csv", "r").read().splitlines()
-    hvg_mask = np.isin(gene_names, open("hvg-2000.txt", "r").read().splitlines())
-    hvg_mask = torch.tensor(hvg_mask)
+    gene_names = open(args.gene_names, "r").read().splitlines()
+    # hvg_gene_names = open(args.hvg_gene_names, "r").read().splitlines()
+    # hvg_mask = np.isin(gene_names, hvg_gene_names)
+    # hvg_mask = torch.tensor(hvg_mask)
     
     # Set up data module
     dm = PerturbationDataModule(
@@ -42,6 +47,8 @@ def main():
         num_workers=4
     )
     dm.setup(stage="fit")
+    
+    mean_target_map, mean_target_addresses = torch.load(args.mean_target_map, map_location="cpu"), pickle.load(open(args.mean_target_addresses, "rb"))
     
     # Infer dimensions from the first batch
     train_loader = dm.train_dataloader()
@@ -73,43 +80,43 @@ def main():
     import glob
     import os
     
-    checkpoint_dir = "checkpoints/baseline/"
+    checkpoint_dir = "checkpoints/baseline-pds/"
     checkpoint_to_load = None
     
-    # Handle command line arguments for checkpoint loading
-    if args.no_resume:
-        print("--no-resume flag set, starting fresh training")
-        checkpoint_to_load = None
-    elif args.checkpoint:
-        # Use specific checkpoint provided
-        if os.path.exists(args.checkpoint):
-            checkpoint_to_load = args.checkpoint
-            print(f"Using specified checkpoint: {checkpoint_to_load}")
-        else:
-            print(f"Specified checkpoint not found: {args.checkpoint}")
-            print("Starting fresh training")
-    elif args.resume:
-        # Find latest checkpoint automatically
-        checkpoint_files = glob.glob(os.path.join(checkpoint_dir, "*.ckpt"))
-        if checkpoint_files:
-            checkpoint_to_load = max(checkpoint_files, key=os.path.getmtime)
-            print(f"Auto-resuming from latest checkpoint: {checkpoint_to_load}")
-        else:
-            print("No checkpoints found, starting fresh training")
-    else:
-        # Interactive mode - ask user
-        checkpoint_files = glob.glob(os.path.join(checkpoint_dir, "*.ckpt"))
-        if checkpoint_files:
-            latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
-            print(f"Found existing checkpoint: {latest_checkpoint}")
+    # # Handle command line arguments for checkpoint loading
+    # if args.no_resume:
+    #     print("--no-resume flag set, starting fresh training")
+    #     checkpoint_to_load = None
+    # elif args.checkpoint:
+    #     # Use specific checkpoint provided
+    #     if os.path.exists(args.checkpoint):
+    #         checkpoint_to_load = args.checkpoint
+    #         print(f"Using specified checkpoint: {checkpoint_to_load}")
+    #     else:
+    #         print(f"Specified checkpoint not found: {args.checkpoint}")
+    #         print("Starting fresh training")
+    # elif args.resume:
+    #     # Find latest checkpoint automatically
+    #     checkpoint_files = glob.glob(os.path.join(checkpoint_dir, "*.ckpt"))
+    #     if checkpoint_files:
+    #         checkpoint_to_load = max(checkpoint_files, key=os.path.getmtime)
+    #         print(f"Auto-resuming from latest checkpoint: {checkpoint_to_load}")
+    #     else:
+    #         print("No checkpoints found, starting fresh training")
+    # else:
+    #     # Interactive mode - ask user
+    #     checkpoint_files = glob.glob(os.path.join(checkpoint_dir, "*.ckpt"))
+    #     if checkpoint_files:
+    #         latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
+    #         print(f"Found existing checkpoint: {latest_checkpoint}")
             
-            # Ask user if they want to resume from checkpoint
-            resume_choice = input("Resume from checkpoint? (y/n): ").lower().strip()
-            if resume_choice in ['y', 'yes']:
-                checkpoint_to_load = latest_checkpoint
-                print(f"Will resume training from: {checkpoint_to_load}")
-            else:
-                print("Starting fresh training")
+    #         # Ask user if they want to resume from checkpoint
+    #         resume_choice = input("Resume from checkpoint? (y/n): ").lower().strip()
+    #         if resume_choice in ['y', 'yes']:
+    #             checkpoint_to_load = latest_checkpoint
+    #             print(f"Will resume training from: {checkpoint_to_load}")
+    #         else:
+    #             print("Starting fresh training")
     
     # Create baseline model
     model = BaselineModel(
@@ -120,8 +127,10 @@ def main():
         pert_emb_dim=pert_emb_dim,
         n_cell_types=n_cell_types,
         n_batches=n_batches,
-        hvg_mask=hvg_mask,
+        hvg_mask=None,
         dropout=0.2,
+        mean_target_map=mean_target_map,
+        mean_target_addresses=mean_target_addresses,
         lr=1e-3,
         wd=1e-4
     )
@@ -179,7 +188,7 @@ def main():
         monitor="val_loss",
         mode="min",
         save_top_k=3,
-        dirpath="checkpoints/baseline-mmd/",
+        dirpath="checkpoints/baseline-pds/",
         filename="baseline-{epoch:02d}-{val_loss:.4f}"
     )
     
@@ -190,20 +199,24 @@ def main():
     )
     
     # Set up logger
-    logger = CSVLogger("logs", name="baseline")
+    logger = CSVLogger("logs", name="baseline-pds")
     
     # Create trainer
+    logging.getLogger("pytorch_lightning").setLevel(logging.DEBUG)
     trainer = L.Trainer(
-        max_epochs=100,
+        max_epochs=40,
         callbacks=[checkpoint_callback],
         logger=logger,
         accelerator="auto",
         devices=1,
         precision="16-mixed",  # Use mixed precision for efficiency
         gradient_clip_val=1.0,
-        log_every_n_steps=50,
+        log_every_n_steps=2,
         check_val_every_n_epoch=1,
-        enable_progress_bar=True
+        enable_progress_bar=True,
+        num_sanity_val_steps=0,
+        enable_model_summary=True,
+        detect_anomaly=True
     )
     
     # Train the model (always start fresh training since we manually loaded weights)

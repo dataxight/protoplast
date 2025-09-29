@@ -6,6 +6,8 @@
 [datasets]
 #replogle_h1 = "/ephemeral/vcc/competition_support_set_sorted/{competition_train,hepg2,jurkat,k562_gwps,k562,rpe1}.h5"
 replogle_h1 = "/mnt/hdd2/tan/competition_support_set_sorted/{competition_train,hepg2,jurkat,k562_gwps,k562,rpe1}.h5"
+jiang = "/mnt/hdd2/tan/competition_support_set_sorted/jiang_{a549,bxpc3,hap1,ht29}.h5" 
+mcfaline = "/mnt/hdd2/tan/competition_support_set_sorted/mcfaline_{a172,t98g,u87mg}.h5" 
 
 # ===============================
 # Training specs
@@ -14,6 +16,8 @@ replogle_h1 = "/mnt/hdd2/tan/competition_support_set_sorted/{competition_train,h
 # ===============================
 [training]
 replogle_h1 = "train"
+jiang = "train"
+mcfaline = "train"
 
 # ===============================
 # Zeroshot specs

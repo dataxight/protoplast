@@ -14,7 +14,7 @@ Architecture:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Any, Dict
+from typing import Any, Dict, List
 import numpy as np
 
 from .base import PerturbationModel, mmd2_rff_batched, energy_distance_batched
@@ -36,8 +36,8 @@ class BaselineModel(PerturbationModel):
     
     def __init__(
         self,
-        mean_target_map: Dict[str, torch.Tensor],
-        mean_target_index_map: Dict[str, Dict[str, int]],
+        mean_target_map: torch.Tensor,
+        mean_target_addresses: List[str],
         d_h: int = 512,  # Hidden dimension
         d_f: int = 2048,  # Bottleneck dimension 
         n_genes: int = 18080,  # Number of genes (G)
@@ -63,13 +63,12 @@ class BaselineModel(PerturbationModel):
         self.use_nb = use_nb
         self.num_mc_samples = num_mc_samples
         self.mean_target_map = mean_target_map
-        self.mean_target_index_map = mean_target_index_map
+        self.mean_target_addresses = mean_target_addresses
 
-        for key, value in mean_target_map.items():
-            mean_target_map[key].to(self.device)
+        # mean_target_map.to(self.device)
 
         # Save hyperparameters
-        self.save_hyperparameters(ignore=["kwargs"])
+        # self.save_hyperparameters(ignore=["kwargs"])
         
         # Batch embedding layer (will be initialized when we know n_batches)
         self.batch_embedding = None
@@ -155,28 +154,33 @@ class BaselineModel(PerturbationModel):
         # Call parent load_state_dict
         return super().load_state_dict(state_dict, strict=strict)
 
-    def calculate_loss_centroid(self, pred, cell_types: np.ndarray, pert_names: np.ndarray):
+    def calculate_loss_centroid(self, pred, pert_names: np.ndarray):
         """
         Calculate the distance between the control cell embeddings and the other targets.
         """
         B, S, G = pred.shape
         # mean over S
         pred = pred.mean(dim=1) # [B, G]
-        all_target_means = [self.mean_target_map[cell_type] for cell_type in cell_types] # list of shape [n_targets, G]
-        all_target_means = torch.stack(all_target_means, dim=0) # [all_targets, G]
-        all_targets = [[f"{x}@{cell_type}" for x in self.mean_target_index_map[cell_type].keys()] for cell_type in cell_types] # list of shape [n_targets]
-        all_targets = np.concatenate(all_targets)
-        pert_addresses = pert_names + "@" + cell_types
-        target_mask = torch.tensor(np.isin(all_targets, pert_addresses))
-        non_target_mask = ~target_mask
-        target_means = all_target_means[target_mask] # [B, G]
-        other_target_means = all_target_means[non_target_mask] # [B, G]
-        loss_same_target = (1 -F.cosine_similarity(pred, target_means, dim=1)).mean() # scalar, we want to minimize this
-        x_expand = pred[:, None, :] # [B, 1, G]
-        y_expand = other_target_means[None, :, :] # [1, all_targets, G] 
-        loss_other_targets = F.cosine_similarity(x_expand, y_expand, dim=-1).mean(dim=1).mean()
-
-        return loss_same_target, loss_other_targets
+        pert_addresses = pert_names # + "@" + cell_types
+        # print(f"pert_addresses: {pert_addresses.shape}, {pert_addresses}")
+        mask = torch.tensor([np.where(np.strings.find(self.mean_target_addresses, s) != -1)[0][0] for s in pert_addresses], device=self.device)
+        # print(f"mask: {mask.shape}, {mask}")
+        self.mean_target_map = self.mean_target_map.to(self.device)
+        target_means = self.mean_target_map[mask, :]
+        # print(f"target_means: {target_means.shape}, {target_means}")
+        l1_same_target = F.l1_loss(pred, target_means, reduction="none")
+        # print(f"l1_same_target: {l1_same_target.shape}, {l1_same_target}")
+        distance_same_target = l1_same_target.sum(dim=1)
+        # random 100 perturbations in the list of pert_addresses
+        random_indices = np.random.choice(len(self.mean_target_addresses), size=100, replace=False)
+        random_target_means = self.mean_target_map[random_indices, :]
+        # print(f"distance_same_target: {distance_same_target}") # [B]
+        l1_other_targets = F.l1_loss(pred[:, None, :], random_target_means[None, :, :], reduction="none")
+        distance_other_targets = l1_other_targets.sum(dim=-1) # [B, all_targets]
+        diff_other_targets = distance_other_targets - distance_same_target[:, None] # [B, all_targets] # we want to maximize this
+        sigmoid_diff_other_targets = torch.sigmoid(-diff_other_targets) # set as negative because we want to maximize
+        loss_pds = sigmoid_diff_other_targets.sum(dim=1).mean() # scalar
+        return loss_pds 
 
     def forward(self, ctrl_cell_emb, pert_emb, covariates):
         """
@@ -191,7 +195,6 @@ class BaselineModel(PerturbationModel):
             Predicted perturbation effects [B, S, G]
         """
         B, S, E = ctrl_cell_emb.shape
-        print(f"B: {B}, S: {S}, E: {E}")
         
         # Initialize embeddings if needed
         self._initialize_embeddings_if_needed(covariates)
@@ -236,9 +239,7 @@ class BaselineModel(PerturbationModel):
         pert_emb = batch["pert_emb"]
         ctrl_cell_emb = batch["ctrl_cell_g"]
         pert_cell_data = batch["pert_cell_g"]
-        breakpoint()
-        ctrl_cell_emb_hvg = ctrl_cell_emb[:, :, self.hvg_mask]
-        print(f"ctrl_cell_emb_hvg: {ctrl_cell_emb_hvg.shape}")
+        # ctrl_cell_emb_hvg = ctrl_cell_emb[:, :, self.hvg_mask]
         covariates = {
             "cell_type_onehot": batch["cell_type_onehot"],
             "batch_onehot": batch["batch_onehot"],
@@ -246,24 +247,25 @@ class BaselineModel(PerturbationModel):
         
         cell_type = batch["cell_type"]
         pert_names = batch["pert_name"]
-        pred = self.forward(ctrl_cell_emb_hvg, pert_emb, covariates)
+        self.mean_target_map = self.mean_target_map.to(self.device)
+        pred = self.forward(ctrl_cell_emb, pert_emb, covariates)
         B = pred.shape[0]
 
-        loss_same_target, loss_other_targets = self.calculate_loss_centroid(pred, cell_type, pert_names)
-        loss_centroid = 0.8 * loss_same_target + 0.2 * loss_other_targets
+        loss_pds = self.calculate_loss_centroid(pred, pert_names)
         energy_distance = energy_distance_batched(pred, pert_cell_data)
-        mse_loss = F.mse_loss(pred, pert_cell_data)
-        loss = 0.3 * energy_distance + 0.3 * mse_loss + 0.3 * loss_centroid
+        mse_loss = F.l1_loss(pred, pert_cell_data)
+        loss = 0.2 * energy_distance + 0.3 * mse_loss + 0.5 * loss_pds
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("train_ed", energy_distance, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("train_mse_loss", mse_loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("train_loss_centroid", loss_centroid, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("train_loss_pds", loss_pds, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
     
     def validation_step(self, batch, batch_idx):
         """Validation step supporting Negative Binomial likelihood on gene counts."""
         pert_cell_data = batch["pert_cell_g"]
         ctrl_cell_emb = batch["ctrl_cell_g"]
+        # ctrl_cell_emb_hvg = ctrl_cell_emb[:, :, self.hvg_mask]
         
         pert_emb = batch["pert_emb"]
         
@@ -276,14 +278,14 @@ class BaselineModel(PerturbationModel):
         B = pred.shape[0]
         cell_type = batch["cell_type"]
         pert_names = batch["pert_name"]
-        loss_same_target, loss_other_targets = self.calculate_loss_centroid(pred, cell_type, pert_names)
-        loss_centroid = 0.8 * loss_same_target + 0.2 * loss_other_targets
+        loss_same_target = self.calculate_loss_centroid(pred, pert_names)
+        loss_pds = loss_same_target
         
         energy_distance = energy_distance_batched(pred, pert_cell_data)
         mse_loss = F.mse_loss(pred, pert_cell_data)
-        loss = 0.3 * energy_distance + 0.3 * mse_loss + 0.3 * loss_centroid
+        loss = 0.2 * energy_distance + 0.3 * mse_loss + 0.5 * loss_pds
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("val_ed", energy_distance, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("val_mse_loss", mse_loss, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("val_loss_centroid", loss_centroid, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("val_loss_pds", loss_pds, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
