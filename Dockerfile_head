@@ -1,0 +1,7 @@
+FROM ubuntu:24.04
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
+WORKDIR /app
+COPY . .
+RUN uv sync

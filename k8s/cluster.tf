@@ -1,3 +1,8 @@
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+
 resource "aws_vpc" "protoplast_vpc" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_hostnames = true
@@ -8,7 +13,7 @@ resource "aws_vpc" "protoplast_vpc" {
 }
 
 resource "aws_internet_gateway" "igw" {
-  vpc_id = aws_vpc.ray_vpc.id
+  vpc_id = aws_vpc.protoplast_vpc.id
   tags = {
     Name = "protoplast-igw"
     Environment = var.env
@@ -16,7 +21,7 @@ resource "aws_internet_gateway" "igw" {
 }
 
 resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.ray_vpc.id
+  vpc_id = aws_vpc.protoplast_vpc.id
   route {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.igw.id
@@ -29,8 +34,8 @@ resource "aws_route_table" "public" {
 
 resource "aws_subnet" "public" {
   count                   = 2
-  vpc_id                  = aws_vpc.ray_vpc.id
-  cidr_block              = cidrsubnet(aws_vpc.ray_vpc.cidr_block, 8, count.index)
+  vpc_id                  = aws_vpc.protoplast_vpc.id
+  cidr_block              = cidrsubnet(aws_vpc.protoplast_vpc.cidr_block, 8, count.index)
   availability_zone       = data.aws_availability_zones.available.names[count.index]
   map_public_ip_on_launch = true
   tags = {
@@ -90,4 +95,11 @@ resource "aws_iam_role" "cluster" {
 resource "aws_iam_role_policy_attachment" "cluster_AmazonEKSClusterPolicy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
   role       = aws_iam_role.cluster.name
+}
+
+resource "kubernetes_namespace" "protoplast" {
+    metadata {
+      name = "protoplast-${var.env}"
+    }
+  
 }
