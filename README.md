@@ -14,7 +14,9 @@ Early developer preview of PROTOplast targets acceleration of ML model training 
 * Drop-in replacement of your custom ML training (by subclassing Lightning's LightningModule)
 
 
-## Usage
+## Getting started
+
+It's easy to get started with PROTOplast
 
 ```python
 from protoplast import RayTrainRunner, DistributedCellLineAnnDataset, LinearClassifier
@@ -27,10 +29,9 @@ trainer = RayTrainRunner(
    DistributedCellLineAnnDataset,  # replace with your own Dataset
    ["num_genes", "num_classes"],  # change according to what you need for your model
 )
-trainer.train(
-   file_paths=
-   batch_size=1024,
-   test_size=0.0,
-   val_size=0.0,
-)
+trainer.train(file_paths=files)
 ```
+
+Additional tutorials are available at https://protoplast.dataxight.com/tutorials
+
+Full documentation at https://protoplast.dataxight.com
