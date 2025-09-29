@@ -3,6 +3,7 @@ torch>=2.0.0
 lightning>=2.0.0
 geomloss>=0.2.4
 wandb>=0.15.0
+line-profiler
 
 # Data processing
 numpy>=1.21.0
