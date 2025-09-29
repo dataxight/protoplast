@@ -129,7 +129,7 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-pds-hvg/baseline-epoch=02-val_loss=7.0198.ckpt"  # Update with actual path
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-pds-hvg-noenergy/baseline-epoch=30-val_loss=0.1128.ckpt"  # Update with actual path
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation.csv"
@@ -205,7 +205,7 @@ def baseline_vcc_inference():
     pert_names = np.array(pert_names)
 
     # Save results
-    path = "baseline_vcc_inference_pds.h5ad"
+    path = "baseline_vcc_inference_pds_noenergy.h5ad"
     ad.AnnData(
         X=X,
         obs=pd.DataFrame(

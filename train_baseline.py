@@ -13,6 +13,7 @@ from lightning.pytorch.loggers import CSVLogger
 # Import the data module and baseline model
 from protoplast.scrna.anndata.data_modules.perturbation import PerturbationDataModule
 from models.baseline import BaselineModel
+from models.perturbation_transformer import PerturbationTransformer
 import pickle
 
 
@@ -42,7 +43,7 @@ def main():
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt",
-        batch_size=64,
+        batch_size=32,
         group_size_S=128,
         num_workers=8
     )
@@ -80,46 +81,8 @@ def main():
     import glob
     import os
     
-    checkpoint_dir = "checkpoints/baseline-pds/"
-    checkpoint_to_load = None
-    
-    # # Handle command line arguments for checkpoint loading
-    # if args.no_resume:
-    #     print("--no-resume flag set, starting fresh training")
-    #     checkpoint_to_load = None
-    # elif args.checkpoint:
-    #     # Use specific checkpoint provided
-    #     if os.path.exists(args.checkpoint):
-    #         checkpoint_to_load = args.checkpoint
-    #         print(f"Using specified checkpoint: {checkpoint_to_load}")
-    #     else:
-    #         print(f"Specified checkpoint not found: {args.checkpoint}")
-    #         print("Starting fresh training")
-    # elif args.resume:
-    #     # Find latest checkpoint automatically
-    #     checkpoint_files = glob.glob(os.path.join(checkpoint_dir, "*.ckpt"))
-    #     if checkpoint_files:
-    #         checkpoint_to_load = max(checkpoint_files, key=os.path.getmtime)
-    #         print(f"Auto-resuming from latest checkpoint: {checkpoint_to_load}")
-    #     else:
-    #         print("No checkpoints found, starting fresh training")
-    # else:
-    #     # Interactive mode - ask user
-    #     checkpoint_files = glob.glob(os.path.join(checkpoint_dir, "*.ckpt"))
-    #     if checkpoint_files:
-    #         latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
-    #         print(f"Found existing checkpoint: {latest_checkpoint}")
-            
-    #         # Ask user if they want to resume from checkpoint
-    #         resume_choice = input("Resume from checkpoint? (y/n): ").lower().strip()
-    #         if resume_choice in ['y', 'yes']:
-    #             checkpoint_to_load = latest_checkpoint
-    #             print(f"Will resume training from: {checkpoint_to_load}")
-    #         else:
-    #             print("Starting fresh training")
-    
     # Create baseline model
-    model = BaselineModel(
+    model = PerturbationTransformer(
         d_h=512,  # Hidden dimension
         d_f=256,  # Bottleneck dimension
         n_genes=n_genes,
@@ -141,54 +104,12 @@ def main():
         "batch_onehot": sample_batch["batch_onehot"]
     })
     
-    # Manually load checkpoint weights if available (avoiding optimizer state issues)
-    if checkpoint_to_load and os.path.exists(checkpoint_to_load):
-        print(f"Manually loading model weights from: {checkpoint_to_load}")
-        
-        try:
-            checkpoint = torch.load(checkpoint_to_load, map_location='cpu')
-            state_dict = checkpoint['state_dict']
-            
-            # Filter state dict to match current model
-            model_state_dict = model.state_dict()
-            filtered_state_dict = {}
-            
-            for key, value in state_dict.items():
-                if key in model_state_dict:
-                    if model_state_dict[key].shape == value.shape:
-                        filtered_state_dict[key] = value
-                    else:
-                        print(f"⚠️  Shape mismatch for {key}: {model_state_dict[key].shape} vs {value.shape}")
-                else:
-                    print(f"⚠️  Key not in model: {key}")
-            
-            # Load the filtered weights
-            missing_keys, unexpected_keys = model.load_state_dict(filtered_state_dict, strict=False)
-            
-            if missing_keys:
-                print(f"🔧 Missing keys (will be randomly initialized): {len(missing_keys)} keys")
-            
-            if unexpected_keys:
-                print(f"🔧 Unexpected keys (ignored): {len(unexpected_keys)} keys")
-            
-            print(f"✅ Loaded {len(filtered_state_dict)} parameters from checkpoint")
-            print("🚀 Starting training with loaded weights (fresh optimizer state)")
-            
-        except Exception as e:
-            print(f"❌ Error loading checkpoint manually: {e}")
-            print("🔄 Starting training from scratch")
-            checkpoint_to_load = None  # Clear checkpoint path to avoid trainer issues
-    else:
-        print("Created new model - starting training from scratch")
-    
-    print(f"Model has {sum(p.numel() for p in model.parameters()):,} parameters")
-    
     # Set up callbacks
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
         mode="min",
         save_top_k=5,
-        dirpath="checkpoints/baseline-pds-hvg-noenergy/",
+        dirpath="checkpoints/baseline-pds-hvg-transformer/",
         filename="baseline-{epoch:02d}-{val_loss:.4f}"
     )
     
@@ -199,7 +120,7 @@ def main():
     )
     
     # Set up logger
-    logger = CSVLogger("logs", name="baseline-pds-hvg-noenergy")
+    logger = CSVLogger("logs", name="baseline-pds-hvg-transformer")
     
     # Create trainer
     logging.getLogger("pytorch_lightning").setLevel(logging.DEBUG)

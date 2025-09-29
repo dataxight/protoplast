@@ -19,6 +19,7 @@ import numpy as np
 
 from .base import PerturbationModel, mmd2_rff_batched, energy_distance_batched
 from .nn.mlp import MLP
+from geomloss import SamplesLoss
 
 
 class BaselineModel(PerturbationModel):
@@ -124,6 +125,8 @@ class BaselineModel(PerturbationModel):
         )
 
         self.norm = nn.LayerNorm(d_h)
+
+        self.ot_loss = SamplesLoss("sinkhorn", p=2, blur=0.05, scaling=0.9)
 
     def _initialize_embeddings_if_needed(self, covariates: Dict[str, torch.Tensor]):
         """Initialize embedding layers based on covariate dimensions."""
@@ -264,11 +267,11 @@ class BaselineModel(PerturbationModel):
         B = pred.shape[0]
 
         loss_pds = self.calculate_loss_centroid(pred, pert_names)
-        #energy_distance = energy_distance_batched(pred_emb, pert_cell_data_hvg)
-        mse_loss = F.mse_loss(pred, pert_cell_data)
-        loss = 0.5 * mse_loss + 0.5 * loss_pds
+        mse_loss = 0.2 * F.mse_loss(pred, pert_cell_data) + 0.8 * F.mse_loss(pred_emb, pert_cell_data_hvg)
+        loss_ot = self.ot_loss(pred_emb, pert_cell_data_hvg).nanmean()
+        loss = 0.4 * mse_loss + 0.4 * loss_pds + 0.2 * loss_ot
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
-        #self.log("train_ed", energy_distance, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
+        self.log("train_loss_ot", loss_ot, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("train_mse_loss", mse_loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("train_loss_pds", loss_pds, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
@@ -293,11 +296,11 @@ class BaselineModel(PerturbationModel):
         loss_same_target = self.calculate_loss_centroid(pred, pert_names)
         loss_pds = loss_same_target
         
-        #energy_distance = energy_distance_batched(pred_emb, pert_cell_data_hvg)
-        mse_loss = F.mse_loss(pred, pert_cell_data)
-        loss = 0.5 * mse_loss + 0.5 * loss_pds
+        mse_loss = 0.2 * F.mse_loss(pred, pert_cell_data) + 0.8 * F.mse_loss(pred_emb, pert_cell_data_hvg)
+        loss_ot = self.ot_loss(pred_emb, pert_cell_data_hvg).nanmean()
+        loss = 0.4 * mse_loss + 0.4 * loss_pds + 0.2 * loss_ot
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
-        #self.log("val_ed", energy_distance, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
+        self.log("val_loss_ot", loss_ot, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("val_mse_loss", mse_loss, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("val_loss_pds", loss_pds, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
