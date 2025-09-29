@@ -4,8 +4,7 @@
 
 - [Readme](readme.md)
 - [Installation](installation.md)
-- [Usage](usages/index.md)
-    - [Single Cell Training](usages/scrna.md)
+- [Tutorials](tutorials/index.md)
 - [API](apis/index.md)
     - [Single Cell Training](apis/scrna.md)
 - [Contributing](contributing.md)

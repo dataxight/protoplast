@@ -16,7 +16,7 @@ Early developer preview of PROTOplast targets acceleration of ML model training 
 
 ## Usage
 
-```
+```python
 from protoplast import RayTrainRunner, DistributedCellLineAnnDataset, LinearClassifier
 import glob
 
