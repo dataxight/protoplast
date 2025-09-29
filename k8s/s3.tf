@@ -1,5 +1,5 @@
 resource "aws_s3_bucket" "protoplast_bucket" {
-  bucket = "protoplast-${var.aws_account_id}-${var.aws_region}"
+  bucket = "protoplast-${var.aws_account_id}-${var.aws_region}-${var.env}"
   tags = {
     Environment = var.env
   }
@@ -7,7 +7,7 @@ resource "aws_s3_bucket" "protoplast_bucket" {
 }
 
 
-data "aws_iam_policy_document" "ray_s3_access" {
+data "aws_iam_policy_document" "protoplast_s3_access" {
   statement {
     effect = "Allow"
 

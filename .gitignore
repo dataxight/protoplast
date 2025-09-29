@@ -211,3 +211,7 @@ lightning_logs/
 .vscode
 tmp
 .DS_Store
+.terraform/
+*.tfvars
+*.hcl
+tfplan
