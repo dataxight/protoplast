@@ -102,6 +102,7 @@ dev = [
     "mkdocstrings[python]>=0.30.0",
     "mypy>=1.17.1",
     "pre-commit>=4.3.0",
+    "pygments>=2.19.2",
     "pytest>=8.4.1",
     "pytest-cov>=6.2.1",
 ]

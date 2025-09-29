@@ -10,7 +10,7 @@ copyright: Maintained by <a href="https://dataxight.com">dataxight</a>.
 nav:
   - Home: index.md
   - Installation: installation.md
-  - Usage: usages/index.md
+  - Tutorials: tutorials/index.md
   - API: apis/index.md
   - Contributing: contributing.md
   - History: history.md
@@ -58,3 +58,8 @@ markdown_extensions:
       permalink: true
   - pymdownx.arithmatex:
       generic: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
