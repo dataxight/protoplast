@@ -176,7 +176,7 @@ class RayTrainRunner:
         if not resource_per_worker:
             if not thread_per_worker:
                 print("Setting thread_per_worker to half of the available CPUs capped at 4")
-                thread_per_worker = min(int(self.resources.get("CPU", 1) / 2), 4)
+                thread_per_worker = min(int((self.resources.get("CPU", 2) - 1) / 2), 4)
             resource_per_worker = {"CPU": thread_per_worker}
         if is_gpu and self.resources.get("GPU", 0) == 0:
             warnings.warn("`is_gpu = True` but there is no GPU found. Fallback to CPU.", UserWarning, stacklevel=2)
@@ -189,7 +189,7 @@ class RayTrainRunner:
             )
         else:
             if num_workers is None:
-                num_workers = max(int(self.resources.get("CPU", 1) / thread_per_worker), 1)
+                num_workers = max(int((self.resources.get("CPU", 2) - 1) / thread_per_worker), 1)
             scaling_config = ray.train.ScalingConfig(
                 num_workers=num_workers, use_gpu=False, resources_per_worker=resource_per_worker
             )
