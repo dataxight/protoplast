@@ -15,6 +15,7 @@
 
 import os
 import time
+import warnings
 from collections.abc import Callable
 
 import anndata
@@ -178,7 +179,8 @@ class RayTrainRunner:
                 thread_per_worker = min(int(self.resources.get("CPU", 1) / 2), 4)
             resource_per_worker = {"CPU": thread_per_worker}
         if is_gpu and self.resources.get("GPU", 0) == 0:
-            raise Exception("`is_gpu = True` but there is no GPU found")
+            warnings.warn("`is_gpu = True` but there is no GPU found. Fallback to CPU.", UserWarning, stacklevel=2)
+            is_gpu = False
         if is_gpu:
             if num_workers is None:
                 num_workers = int(self.resources.get("GPU"))
