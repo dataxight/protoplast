@@ -100,8 +100,6 @@ class RayTrainRunner:
             self.ray_trainer_strategy = ray_trainer_strategy
         ray.init(address=address, runtime_env=runtime_env_config, ignore_reinit_error=True)
         self.resources = ray.cluster_resources()
-        if self.resources.get("GPU", 0) <= 0:
-            raise Exception("Only support with GPU is available only")
 
     @beartype
     def train(
@@ -169,6 +167,8 @@ class RayTrainRunner:
                 print("Setting thread_per_worker to half of the available CPUs capped at 4")
                 thread_per_worker = min(int(self.resources.get("CPU", 1) / 2), 4)
             resource_per_worker = {"CPU": thread_per_worker}
+        if is_gpu and self.resources.get("GPU", 0) == 0:
+            raise Exception("`is_gpu = True` but there is no GPU found")
         if is_gpu:
             if num_workers is None:
                 num_workers = int(self.resources.get("GPU"))
