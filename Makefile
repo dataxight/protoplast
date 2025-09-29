@@ -75,16 +75,11 @@ coverage: ## check code coverage quickly with the default Python
 	coverage html
 	$(BROWSER) htmlcov/index.html
 
-docs: ## generate Sphinx HTML documentation, including API docs
-	rm -f docs/protoplast.md
-	rm -f docs/modules.md
-	sphinx-apidoc -o docs/ protoplast
-	$(MAKE) -C docs clean
-	$(MAKE) -C docs html
-	$(BROWSER) docs/_build/html/index.html
+servedocs: docs ## Compile the docs watching for changes
+	uv run mkdocs serve
 
-servedocs: docs ## compile the docs watching for changes
-	watchmedo shell-command -p '*.md' -c '$(MAKE) -C docs html' -R -D .
+releasedocs: ## Deploy new docs
+	uv run mkdocs gh-deploy
 
 release: dist ## package and upload a release
 	uv release -t $(UV_PUBLISH_TOKEN)
