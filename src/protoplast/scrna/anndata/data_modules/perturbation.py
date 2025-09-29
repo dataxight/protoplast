@@ -602,7 +602,7 @@ class PerturbationDataModule(AnnDataModule):
                 # Stack regular tensors
                 collated[key] = torch.stack(values)
 
-            elif key == 'pert_name':
+            elif key in ['pert_name', 'cell_type']:
                 # Handle string arrays - concatenate
                 collated[key] = np.concatenate(values)
 
@@ -680,8 +680,8 @@ if __name__ == "__main__":
         print("\n=== Testing Training Data ===")
         for i, batch in enumerate(dm.train_ds):
             print("Batch keys:", batch.keys())
-            print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
-            print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
+            # print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
+            # print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
             print("pert_cell_g shape:", batch['pert_cell_g'].shape)
             print("ctrl_cell_g shape:", batch['ctrl_cell_g'].shape)
             print("cell_type_onehot shape:", batch['cell_type_onehot'].shape)
