@@ -15,8 +15,8 @@ if TYPE_CHECKING:
 from protoplast.patches.anndata_read_h5ad_backed import apply_read_h5ad_backed_patch
 from protoplast.patches.anndata_remote import apply_file_backing_patch
 
-apply_file_backing_patch()
-apply_read_h5ad_backed_patch()
+# apply_file_backing_patch()
+# apply_read_h5ad_backed_patch()
 
 
 def read_h5ad(
