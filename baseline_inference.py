@@ -41,7 +41,7 @@ class BaselinePredictor:
             print("No hyperparameters found in checkpoint, using default hyperparameters")
             hparams = {
                 'd_h': 512,
-                'd_f': 2048,
+                'd_f': 256,
                 'n_genes': 18080,
                 'embedding_dim': 4000,
                 'pert_emb_dim': 5120,
@@ -51,9 +51,9 @@ class BaselinePredictor:
         # Create model with hyperparameters
         model = BaselineModel(
             mean_target_map=hparams.get('mean_target_map', {}),
-            mean_target_index_map=hparams.get('mean_target_index_map', {}),
+            mean_target_addresses=hparams.get('mean_target_addresses', {}),
             d_h=hparams.get('d_h', 512),
-            d_f=hparams.get('d_f', 2048),
+            d_f=hparams.get('d_f', 256),
             n_genes=hparams.get('n_genes', 18080),
             embedding_dim=hparams.get('embedding_dim', 4000),
             pert_emb_dim=hparams.get('pert_emb_dim', 5120),
@@ -96,7 +96,7 @@ class BaselinePredictor:
         with torch.no_grad():
             with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
                               dtype=torch.float16, enabled=self.device=='cuda'):
-                predictions = self.model(ctrl_cell_emb, pert_emb, covariates)
+                predictions, emb = self.model(ctrl_cell_emb, pert_emb, covariates)
                 # log1p_target = self.model.compute_log1p_target(predictions, 10000, ctrl_cell_emb, pert_emb)
         
         return predictions 
@@ -129,14 +129,14 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-mmd/baseline-epoch=28-val_loss=7.6366.ckpt"  # Update with actual path
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-pds-hvg/baseline-epoch=02-val_loss=7.0198.ckpt"  # Update with actual path
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation.csv"
     pert_counts = pd.read_csv(pert_counts_path)
     gene_names = pd.read_csv("./gene_names.csv", header=None)
     gene_names = gene_names[0].tolist()
-    hvg_gene_names = open("hvg-4000.txt", "r").read().splitlines()
+    hvg_gene_names = open("./hvg-4000-competition-extended.txt", "r").read().splitlines()
     hvg_mask = np.isin(gene_names, hvg_gene_names)
     hvg_mask = torch.tensor(hvg_mask)
     
@@ -205,7 +205,7 @@ def baseline_vcc_inference():
     pert_names = np.array(pert_names)
 
     # Save results
-    path = "baseline_vcc_inference_mmd_cosine.h5ad"
+    path = "baseline_vcc_inference_pds.h5ad"
     ad.AnnData(
         X=X,
         obs=pd.DataFrame(

@@ -39,7 +39,7 @@ class BaselineModel(PerturbationModel):
         mean_target_map: torch.Tensor,
         mean_target_addresses: List[str],
         d_h: int = 512,  # Hidden dimension
-        d_f: int = 2048,  # Bottleneck dimension 
+        d_f: int = 256,  # Bottleneck dimension 
         n_genes: int = 18080,  # Number of genes (G)
         embedding_dim: int = 2058,  # Embedding dimension (E)
         pert_emb_dim: int = 5120,  # Perturbation embedding dimension
@@ -81,7 +81,7 @@ class BaselineModel(PerturbationModel):
             input_dim=embedding_dim,
             hidden_dim=d_h,
             output_dim=d_h,
-            n_layers=3,
+            n_layers=4,
             dropout=dropout,
             activation="gelu"
         )
@@ -92,6 +92,15 @@ class BaselineModel(PerturbationModel):
             hidden_dim=d_h,
             output_dim=d_h,
             n_layers=3,
+            dropout=dropout,
+            activation="gelu"
+        )
+
+        self.residual_encoder = MLP(
+            input_dim=d_h,
+            hidden_dim=d_h,
+            output_dim=d_h,
+            n_layers=2,
             dropout=dropout,
             activation="gelu"
         )
@@ -113,6 +122,8 @@ class BaselineModel(PerturbationModel):
             nn.Linear(d_f, n_genes),  # Down-up to genes
             nn.ReLU()
         )
+
+        self.norm = nn.LayerNorm(d_h)
 
     def _initialize_embeddings_if_needed(self, covariates: Dict[str, torch.Tensor]):
         """Initialize embedding layers based on covariate dimensions."""
@@ -172,14 +183,14 @@ class BaselineModel(PerturbationModel):
         # print(f"l1_same_target: {l1_same_target.shape}, {l1_same_target}")
         distance_same_target = l1_same_target.sum(dim=1)
         # random 100 perturbations in the list of pert_addresses
-        random_indices = np.random.choice(len(self.mean_target_addresses), size=100, replace=False)
+        random_indices = range(150) # 150 random perturbations
         random_target_means = self.mean_target_map[random_indices, :]
         # print(f"distance_same_target: {distance_same_target}") # [B]
         l1_other_targets = F.l1_loss(pred[:, None, :], random_target_means[None, :, :], reduction="none")
         distance_other_targets = l1_other_targets.sum(dim=-1) # [B, all_targets]
         diff_other_targets = distance_other_targets - distance_same_target[:, None] # [B, all_targets] # we want to maximize this
         sigmoid_diff_other_targets = torch.sigmoid(-diff_other_targets) # set as negative because we want to maximize
-        loss_pds = sigmoid_diff_other_targets.sum(dim=1).mean() # scalar
+        loss_pds = sigmoid_diff_other_targets.mean(dim=1).mean() # scalar
         return loss_pds 
 
     def forward(self, ctrl_cell_emb, pert_emb, covariates):
@@ -225,6 +236,7 @@ class BaselineModel(PerturbationModel):
         
         # 4. Combine encodings: H = H_ctrl + H_batch + H_pert
         H = H_ctrl + H_batch + H_pert  # [B, S, d_h]
+        H = H + self.residual_encoder(self.norm(H))
         
         # 5. Project back to embedding space: MLP(d_h, E)
         emb_output = self.projection_to_emb(H)  # [B, S, E]
@@ -232,29 +244,29 @@ class BaselineModel(PerturbationModel):
         # 6. Bottleneck layer: up-down-up from E to d_f to G with ReLU
         gene_output = self.bottleneck(emb_output)  # [B, S, G]
         
-        return gene_output
+        return gene_output, emb_output
 
     def training_step(self, batch, batch_idx):
         """Training step supporting Negative Binomial likelihood on gene counts."""
         pert_emb = batch["pert_emb"]
-        ctrl_cell_emb = batch["ctrl_cell_g"]
+        ctrl_cell_data = batch["ctrl_cell_g"]
         pert_cell_data = batch["pert_cell_g"]
-        # ctrl_cell_emb_hvg = ctrl_cell_emb[:, :, self.hvg_mask]
+        ctrl_cell_data_hvg = ctrl_cell_data[:, :, self.hvg_mask]
+        pert_cell_data_hvg = pert_cell_data[:, :, self.hvg_mask]
         covariates = {
             "cell_type_onehot": batch["cell_type_onehot"],
             "batch_onehot": batch["batch_onehot"],
         }
         
-        cell_type = batch["cell_type"]
         pert_names = batch["pert_name"]
         self.mean_target_map = self.mean_target_map.to(self.device)
-        pred = self.forward(ctrl_cell_emb, pert_emb, covariates)
+        pred, pred_emb = self.forward(ctrl_cell_data_hvg, pert_emb, covariates)
         B = pred.shape[0]
 
         loss_pds = self.calculate_loss_centroid(pred, pert_names)
-        energy_distance = energy_distance_batched(pred, pert_cell_data)
-        mse_loss = F.l1_loss(pred, pert_cell_data)
-        loss = 0.2 * energy_distance + 0.3 * mse_loss + 0.5 * loss_pds
+        energy_distance = energy_distance_batched(pred_emb, pert_cell_data_hvg)
+        mse_loss = F.mse_loss(pred, pert_cell_data)
+        loss = 0.4 * energy_distance + 0.1 * mse_loss + 0.5 * loss_pds
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("train_ed", energy_distance, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("train_mse_loss", mse_loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
@@ -264,8 +276,9 @@ class BaselineModel(PerturbationModel):
     def validation_step(self, batch, batch_idx):
         """Validation step supporting Negative Binomial likelihood on gene counts."""
         pert_cell_data = batch["pert_cell_g"]
-        ctrl_cell_emb = batch["ctrl_cell_g"]
-        # ctrl_cell_emb_hvg = ctrl_cell_emb[:, :, self.hvg_mask]
+        ctrl_cell_data = batch["ctrl_cell_g"]
+        ctrl_cell_data_hvg = ctrl_cell_data[:, :, self.hvg_mask]
+        pert_cell_data_hvg = pert_cell_data[:, :, self.hvg_mask]
         
         pert_emb = batch["pert_emb"]
         
@@ -274,16 +287,15 @@ class BaselineModel(PerturbationModel):
             "batch_onehot": batch["batch_onehot"],
         }
         
-        pred = self.forward(ctrl_cell_emb, pert_emb, covariates)
+        pred, pred_emb = self.forward(ctrl_cell_data_hvg, pert_emb, covariates)
         B = pred.shape[0]
-        cell_type = batch["cell_type"]
         pert_names = batch["pert_name"]
         loss_same_target = self.calculate_loss_centroid(pred, pert_names)
         loss_pds = loss_same_target
         
-        energy_distance = energy_distance_batched(pred, pert_cell_data)
+        energy_distance = energy_distance_batched(pred_emb, pert_cell_data_hvg)
         mse_loss = F.mse_loss(pred, pert_cell_data)
-        loss = 0.2 * energy_distance + 0.3 * mse_loss + 0.5 * loss_pds
+        loss = 0.4 * energy_distance + 0.1 * mse_loss + 0.5 * loss_pds
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("val_ed", energy_distance, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("val_mse_loss", mse_loss, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)

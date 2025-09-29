@@ -27,16 +27,16 @@ def main():
     parser = argparse.ArgumentParser(description="Train baseline perturbation model")
     parser.add_argument("--mean-target-map", type=str, help="Path to mean target map", required=True)
     parser.add_argument("--mean-target-addresses", type=str, help="Path to mean target addresses", required=True)
-    # parser.add_argument("--hvg-gene-names", type=str, help="Path to hvg gene names", required=True)
+    parser.add_argument("--hvg-gene-names", type=str, help="Path to hvg gene names", required=True)
     parser.add_argument("--gene-names", type=str, help="Path to gene names", required=True)
     args = parser.parse_args()
     
     L.seed_everything(42, workers=True)
 
     gene_names = open(args.gene_names, "r").read().splitlines()
-    # hvg_gene_names = open(args.hvg_gene_names, "r").read().splitlines()
-    # hvg_mask = np.isin(gene_names, hvg_gene_names)
-    # hvg_mask = torch.tensor(hvg_mask)
+    hvg_gene_names = open(args.hvg_gene_names, "r").read().splitlines()
+    hvg_mask = np.isin(gene_names, hvg_gene_names)
+    hvg_mask = torch.tensor(hvg_mask)
     
     # Set up data module
     dm = PerturbationDataModule(
@@ -44,7 +44,7 @@ def main():
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt",
         batch_size=64,
         group_size_S=128,
-        num_workers=4
+        num_workers=8
     )
     dm.setup(stage="fit")
     
@@ -121,13 +121,13 @@ def main():
     # Create baseline model
     model = BaselineModel(
         d_h=512,  # Hidden dimension
-        d_f=2048,  # Bottleneck dimension
+        d_f=256,  # Bottleneck dimension
         n_genes=n_genes,
-        embedding_dim=n_genes,
+        embedding_dim=len(hvg_gene_names),
         pert_emb_dim=pert_emb_dim,
         n_cell_types=n_cell_types,
         n_batches=n_batches,
-        hvg_mask=None,
+        hvg_mask=hvg_mask,
         dropout=0.2,
         mean_target_map=mean_target_map,
         mean_target_addresses=mean_target_addresses,
@@ -188,7 +188,7 @@ def main():
         monitor="val_loss",
         mode="min",
         save_top_k=3,
-        dirpath="checkpoints/baseline-pds/",
+        dirpath="checkpoints/baseline-pds-hvg/",
         filename="baseline-{epoch:02d}-{val_loss:.4f}"
     )
     
@@ -199,7 +199,7 @@ def main():
     )
     
     # Set up logger
-    logger = CSVLogger("logs", name="baseline-pds")
+    logger = CSVLogger("logs", name="baseline-pds-hvg")
     
     # Create trainer
     logging.getLogger("pytorch_lightning").setLevel(logging.DEBUG)
