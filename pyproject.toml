@@ -1,6 +1,6 @@
 [project]
 name = "protoplast"
-version = "0.0.1"
+version = "1.0.0"
 description = "Scalable machine learning for molecular data analysis"
 readme = "README.md"
 authors = [
