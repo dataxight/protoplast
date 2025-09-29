@@ -183,7 +183,7 @@ class RayTrainRunner:
             )
         print(f"Using {num_workers} workers with {resource_per_worker} each")
         start = time.time()
-        shuffle_stragey = self.shuffle_strategy(
+        shuffle_strategy = self.shuffle_strategy(
             file_paths,
             batch_size,
             num_workers * thread_per_worker,
@@ -196,9 +196,9 @@ class RayTrainRunner:
         )
         kwargs.pop("drop_last", None)
         kwargs.pop("pre_fetch_then_batch", None)
-        indices = shuffle_stragey.split()
+        indices = shuffle_strategy.split()
         print(f"Data splitting time: {time.time() - start:.2f} seconds")
-        train_config = {"indices": indices, "ckpt_path": ckpt_path, "shuffle_stragey": shuffle_stragey}
+        train_config = {"indices": indices, "ckpt_path": ckpt_path, "shuffle_strategy": shuffle_strategy}
         my_train_func = self._trainer()
         par_trainer = ray.train.torch.TorchTrainer(
             my_train_func,
@@ -223,13 +223,13 @@ class RayTrainRunner:
             num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
             print(f"=========Starting the training on {rank} with num threads: {num_threads}=========")
             model_params = indices.metadata
-            shuffle_stragey = config.get("shuffle_stragey")
+            shuffle_strategy = config.get("shuffle_strategy")
             ann_dm = AnnDataModule(
                 indices,
                 Ds,
                 self.prefetch_factor,
                 self.sparse_key,
-                shuffle_stragey,
+                shuffle_strategy,
                 self.before_dense_cb,
                 self.after_dense_cb,
                 **self.kwargs,
