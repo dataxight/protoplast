@@ -264,11 +264,11 @@ class BaselineModel(PerturbationModel):
         B = pred.shape[0]
 
         loss_pds = self.calculate_loss_centroid(pred, pert_names)
-        energy_distance = energy_distance_batched(pred_emb, pert_cell_data_hvg)
+        #energy_distance = energy_distance_batched(pred_emb, pert_cell_data_hvg)
         mse_loss = F.mse_loss(pred, pert_cell_data)
-        loss = 0.4 * energy_distance + 0.1 * mse_loss + 0.5 * loss_pds
+        loss = 0.5 * mse_loss + 0.5 * loss_pds
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
-        self.log("train_ed", energy_distance, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
+        #self.log("train_ed", energy_distance, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("train_mse_loss", mse_loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("train_loss_pds", loss_pds, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
@@ -293,11 +293,11 @@ class BaselineModel(PerturbationModel):
         loss_same_target = self.calculate_loss_centroid(pred, pert_names)
         loss_pds = loss_same_target
         
-        energy_distance = energy_distance_batched(pred_emb, pert_cell_data_hvg)
+        #energy_distance = energy_distance_batched(pred_emb, pert_cell_data_hvg)
         mse_loss = F.mse_loss(pred, pert_cell_data)
-        loss = 0.4 * energy_distance + 0.1 * mse_loss + 0.5 * loss_pds
+        loss = 0.5 * mse_loss + 0.5 * loss_pds
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
-        self.log("val_ed", energy_distance, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
+        #self.log("val_ed", energy_distance, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("val_mse_loss", mse_loss, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("val_loss_pds", loss_pds, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         return loss

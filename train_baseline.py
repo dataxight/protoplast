@@ -128,7 +128,7 @@ def main():
         n_cell_types=n_cell_types,
         n_batches=n_batches,
         hvg_mask=hvg_mask,
-        dropout=0.2,
+        dropout=0.1,
         mean_target_map=mean_target_map,
         mean_target_addresses=mean_target_addresses,
         lr=1e-3,
@@ -187,8 +187,8 @@ def main():
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
         mode="min",
-        save_top_k=3,
-        dirpath="checkpoints/baseline-pds-hvg/",
+        save_top_k=5,
+        dirpath="checkpoints/baseline-pds-hvg-noenergy/",
         filename="baseline-{epoch:02d}-{val_loss:.4f}"
     )
     
@@ -199,7 +199,7 @@ def main():
     )
     
     # Set up logger
-    logger = CSVLogger("logs", name="baseline-pds-hvg")
+    logger = CSVLogger("logs", name="baseline-pds-hvg-noenergy")
     
     # Create trainer
     logging.getLogger("pytorch_lightning").setLevel(logging.DEBUG)
