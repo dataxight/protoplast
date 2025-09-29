@@ -1,4 +1,4 @@
-# Usage
+# Tutorials
 
 ## Quick Start
 Get up and running with minimal setup. Learn how to install dependencies, prepare your data, and run your first example in just a few commands.
@@ -31,6 +31,12 @@ Integrate external machine learning models into the workflow. Learn how to plug 
 
 [Learn more](https://github.com/dataxight/protoplast-ml-example/blob/main/notebooks/classification_examples.ipynb)
 
-## More Examples
+### Create a submission to the Virtual Cell Challenge
+
+Learn how to package your trained model and datasets into the required format for the Virtual Cell Challenge. This section walks you through preparing submission files, validating them locally, and uploading your entry for official evaluation.
+
+[Learn more](https://github.com/dataxight/protoplast-ml-example/blob/main/notebooks/protoplast_vcc.ipynb)
+
+## More Tutorials
 
 Please visit [protoplast-ml-example](https://github.com/dataxight/protoplast-ml-example) to get the latest examples of PROTOplast.
