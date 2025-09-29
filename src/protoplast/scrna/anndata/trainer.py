@@ -15,6 +15,7 @@
 
 import os
 import time
+import warnings
 from collections.abc import Callable
 
 import anndata
@@ -98,10 +99,18 @@ class RayTrainRunner:
             self.ray_trainer_strategy = ray.train.lightning.RayDDPStrategy()
         else:
             self.ray_trainer_strategy = ray_trainer_strategy
-        ray.init(address=address, runtime_env=runtime_env_config, ignore_reinit_error=True)
+
+        # Init ray cluster
+        DEFAULT_RUNTIME_ENV_CONFIG = {
+            "working_dir": os.getenv("PWD"),  # Allow ray workers to inherit venv at $PWD if there is any
+        }
+        if runtime_env_config is None:
+            runtime_env_config = DEFAULT_RUNTIME_ENV_CONFIG
+        ray.init(
+            address=address, runtime_env={**DEFAULT_RUNTIME_ENV_CONFIG, **runtime_env_config}, ignore_reinit_error=True
+        )
+
         self.resources = ray.cluster_resources()
-        if self.resources.get("GPU", 0) <= 0:
-            raise Exception("Only support with GPU is available only")
 
     @beartype
     def train(
@@ -167,8 +176,11 @@ class RayTrainRunner:
         if not resource_per_worker:
             if not thread_per_worker:
                 print("Setting thread_per_worker to half of the available CPUs capped at 4")
-                thread_per_worker = min(int(self.resources.get("CPU", 1) / 2), 4)
+                thread_per_worker = min(int((self.resources.get("CPU", 2) - 1) / 2), 4)
             resource_per_worker = {"CPU": thread_per_worker}
+        if is_gpu and self.resources.get("GPU", 0) == 0:
+            warnings.warn("`is_gpu = True` but there is no GPU found. Fallback to CPU.", UserWarning, stacklevel=2)
+            is_gpu = False
         if is_gpu:
             if num_workers is None:
                 num_workers = int(self.resources.get("GPU"))
@@ -177,7 +189,7 @@ class RayTrainRunner:
             )
         else:
             if num_workers is None:
-                num_workers = max(int(self.resources.get("CPU", 1) / thread_per_worker), 1)
+                num_workers = max(int((self.resources.get("CPU", 2) - 1) / thread_per_worker), 1)
             scaling_config = ray.train.ScalingConfig(
                 num_workers=num_workers, use_gpu=False, resources_per_worker=resource_per_worker
             )
