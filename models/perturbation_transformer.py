@@ -27,16 +27,16 @@ class ResidualEncoder(nn.Module):
     def __init__(self, d_h: int = 672, n_transformer_layers: int = 12, n_heads: int = 16, d_ff: int = 2048, dropout: float = 0.1, n_genes: int = 18080):
         super().__init__()
         transformer_kwargs = {
-            "hidden_size": self.d_h,
+            "hidden_size": d_h,
             "num_hidden_layers": n_transformer_layers,
             "num_attention_heads": n_heads,
-            "head_dim": self.d_h // n_heads,
+            "head_dim": d_h // n_heads,
             "intermediate_size": d_ff,
-            "dropout": self.dropout,
-            "max_position_embeddings": 256,  # Max sequence length
+            "dropout": dropout,
+            "max_position_embeddings": 1024,  # Max sequence length
             "rms_norm_eps": 1e-6,
         }
-        self.transformer, self.model_dim = get_transformer_backbone("llama", transformer_kwargs, input_dim=self.n_genes)
+        self.transformer, self.model_dim = get_transformer_backbone("llama", transformer_kwargs, input_dim=self.d_h)
 
     def forward(self, H):
         cache_position = torch.arange(H.size(1), device=H.device)
@@ -53,7 +53,7 @@ class PerturbationTransformer(BaselineModel):
     
     def __init__(self, n_transformer_layers: int = 12, n_heads: int = 16, d_ff: int = 2048, **kwargs):
         super().__init__(**kwargs)
-        self.residual_encoder = ResidualEncoder(
+        self.residual_encoder_transformer = ResidualEncoder(
             d_h=self.d_h,
             n_transformer_layers=n_transformer_layers,
             n_heads=n_heads,
@@ -62,6 +62,9 @@ class PerturbationTransformer(BaselineModel):
             n_genes=self.n_genes,
         )
 
+    def _refine_H(self, H):
+        return H + self.residual_encoder_transformer(H)
+    
     def forward(self, ctrl_cell_emb, pert_emb, covariates):
         """
         Forward pass implementing H_x = H_ctrl + H_pert + H_batch, then O = H + ft(H).

@@ -19,6 +19,7 @@ import numpy as np
 
 from .base import PerturbationModel, mmd2_rff_batched, energy_distance_batched
 from .nn.mlp import MLP
+from .nn.gears_loss import gears_autofocus_direction_loss
 from geomloss import SamplesLoss
 
 
@@ -65,6 +66,7 @@ class BaselineModel(PerturbationModel):
         self.num_mc_samples = num_mc_samples
         self.mean_target_map = mean_target_map
         self.mean_target_addresses = mean_target_addresses
+        self.dropout = dropout
 
         # mean_target_map.to(self.device)
 
@@ -128,6 +130,10 @@ class BaselineModel(PerturbationModel):
 
         self.ot_loss = SamplesLoss("sinkhorn", p=2, blur=0.05, scaling=0.9)
 
+    def _refine_H(self, H):
+        # baseline path: simple residual MLP
+        return H + self.residual_encoder(H)
+
     def _initialize_embeddings_if_needed(self, covariates: Dict[str, torch.Tensor]):
         """Initialize embedding layers based on covariate dimensions."""
         if self.batch_embedding is None and "batch_onehot" in covariates:
@@ -177,24 +183,31 @@ class BaselineModel(PerturbationModel):
         pred = pred.mean(dim=1) # [B, G]
         pert_addresses = pert_names # + "@" + cell_types
         # print(f"pert_addresses: {pert_addresses.shape}, {pert_addresses}")
-        mask = torch.tensor([np.where(np.strings.find(self.mean_target_addresses, s) != -1)[0][0] for s in pert_addresses], device=self.device)
+        # Build a dict once (cache it) mapping string -> row index
+        if not hasattr(self, "_mean_addr_index"):
+            self._mean_addr_index = {k: i for i, k in enumerate(self.mean_target_addresses)}
+
+        idx = torch.tensor([self._mean_addr_index[s] for s in pert_addresses], device=self.device, dtype=torch.long)
+
         # print(f"mask: {mask.shape}, {mask}")
         self.mean_target_map = self.mean_target_map.to(self.device)
-        target_means = self.mean_target_map[mask, :]
+        target_means = self.mean_target_map[idx]
         # print(f"target_means: {target_means.shape}, {target_means}")
-        l1_same_target = F.l1_loss(pred, target_means, reduction="none")
+        d_same = (pred - target_means).abs().sum(dim=1)  # [B]
         # print(f"l1_same_target: {l1_same_target.shape}, {l1_same_target}")
-        distance_same_target = l1_same_target.sum(dim=1)
-        # random 100 perturbations in the list of pert_addresses
-        random_indices = range(150) # 150 random perturbations
-        random_target_means = self.mean_target_map[random_indices, :]
-        # print(f"distance_same_target: {distance_same_target}") # [B]
-        l1_other_targets = F.l1_loss(pred[:, None, :], random_target_means[None, :, :], reduction="none")
-        distance_other_targets = l1_other_targets.sum(dim=-1) # [B, all_targets]
-        diff_other_targets = distance_other_targets - distance_same_target[:, None] # [B, all_targets] # we want to maximize this
-        sigmoid_diff_other_targets = torch.sigmoid(-diff_other_targets) # set as negative because we want to maximize
-        loss_pds = sigmoid_diff_other_targets.mean(dim=1).mean() # scalar
-        return loss_pds 
+        # sample K negatives without replacement
+        K = min(128, self.mean_target_map.size(0)-1)
+        all_idx = torch.arange(self.mean_target_map.size(0), device=pred.device)
+        # exclude positives
+        mask = torch.ones_like(all_idx, dtype=torch.bool)
+        mask[idx.unique()] = False
+        neg_pool = all_idx[mask]
+        neg_sel = neg_pool[torch.randint(0, neg_pool.numel(), (K,))]  # [K]
+        neg_means = self.mean_target_map.to(pred.device)[neg_sel]
+        d_other = (pred[:, None, :] - neg_means[None, :, :]).abs().sum(dim=-1)  # [B,K]
+        margin = 50.0  # tune
+        loss = F.relu(margin + d_same[:, None] - d_other).mean()
+        return loss
 
     def forward(self, ctrl_cell_emb, pert_emb, covariates):
         """
@@ -239,7 +252,7 @@ class BaselineModel(PerturbationModel):
         
         # 4. Combine encodings: H = H_ctrl + H_batch + H_pert
         H = H_ctrl + H_batch + H_pert  # [B, S, d_h]
-        H = H + self.residual_encoder(self.norm(H))
+        H = self._refine_H(self.norm(H))
         
         # 5. Project back to embedding space: MLP(d_h, E)
         emb_output = self.projection_to_emb(H)  # [B, S, E]
@@ -260,20 +273,24 @@ class BaselineModel(PerturbationModel):
             "cell_type_onehot": batch["cell_type_onehot"],
             "batch_onehot": batch["batch_onehot"],
         }
+
         
         pert_names = batch["pert_name"]
         self.mean_target_map = self.mean_target_map.to(self.device)
         pred, pred_emb = self.forward(ctrl_cell_data_hvg, pert_emb, covariates)
+        # GEARS losses (tune gamma, lambda, tau as needed)
+        loss_gears, l_auto, l_dir = gears_autofocus_direction_loss(
+            pred_emb, pert_cell_data_hvg, ctrl_cell_data_hvg, gamma=1.0, lam=0.2, tau=0.0
+        ) 
         B = pred.shape[0]
 
         loss_pds = self.calculate_loss_centroid(pred, pert_names)
-        mse_loss = 0.2 * F.mse_loss(pred, pert_cell_data) + 0.8 * F.mse_loss(pred_emb, pert_cell_data_hvg)
-        loss_ot = self.ot_loss(pred_emb, pert_cell_data_hvg).nanmean()
-        loss = 0.4 * mse_loss + 0.4 * loss_pds + 0.2 * loss_ot
+        loss = 0.2 * loss_pds + 0.8 * loss_gears
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
-        self.log("train_loss_ot", loss_ot, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
-        self.log("train_mse_loss", mse_loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("train_loss_pds", loss_pds, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("train_loss_gears", loss_gears, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("train_loss_gears_auto", l_auto, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("train_loss_gears_dir", l_dir, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
     
     def validation_step(self, batch, batch_idx):
@@ -291,16 +308,17 @@ class BaselineModel(PerturbationModel):
         }
         
         pred, pred_emb = self.forward(ctrl_cell_data_hvg, pert_emb, covariates)
+        # GEARS losses (tune gamma, lambda, tau as needed)
+        loss_gears, l_auto, l_dir = gears_autofocus_direction_loss(
+            pred_emb, pert_cell_data_hvg, ctrl_cell_data_hvg, gamma=1.0, lam=0.2, tau=0.0
+        )
         B = pred.shape[0]
         pert_names = batch["pert_name"]
-        loss_same_target = self.calculate_loss_centroid(pred, pert_names)
-        loss_pds = loss_same_target
-        
-        mse_loss = 0.2 * F.mse_loss(pred, pert_cell_data) + 0.8 * F.mse_loss(pred_emb, pert_cell_data_hvg)
-        loss_ot = self.ot_loss(pred_emb, pert_cell_data_hvg).nanmean()
-        loss = 0.4 * mse_loss + 0.4 * loss_pds + 0.2 * loss_ot
+        loss_pds = self.calculate_loss_centroid(pred, pert_names)
+        loss = 0.2 * loss_pds + 0.8 * loss_gears
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
-        self.log("val_loss_ot", loss_ot, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
-        self.log("val_mse_loss", mse_loss, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("val_loss_pds", loss_pds, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("val_loss_gears", loss_gears, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("val_loss_gears_auto", l_auto, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("val_loss_gears_dir", l_dir, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
