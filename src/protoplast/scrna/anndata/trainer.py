@@ -81,7 +81,7 @@ class RayTrainRunner:
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         shuffle_strategy: ShuffleStrategy = SequentialShuffleStrategy,
-        runtime_env_config: dict = {},
+        runtime_env_config: dict | None = None,
         address: str | None = None,
         ray_trainer_strategy: Strategy | None = None,
         sparse_key: str = "X",
@@ -101,9 +101,13 @@ class RayTrainRunner:
 
         # Init ray cluster
         DEFAULT_RUNTIME_ENV_CONFIG = {
-            "working_dir": os.getenv("PWD"), # Allow ray workers to inherit venv at $PWD if there is any
+            "working_dir": os.getenv("PWD"),  # Allow ray workers to inherit venv at $PWD if there is any
         }
-        ray.init(address=address, runtime_env={**DEFAULT_RUNTIME_ENV_CONFIG, **runtime_env_config}, ignore_reinit_error=True)
+        if runtime_env_config is None:
+            runtime_env_config = DEFAULT_RUNTIME_ENV_CONFIG
+        ray.init(
+            address=address, runtime_env={**DEFAULT_RUNTIME_ENV_CONFIG, **runtime_env_config}, ignore_reinit_error=True
+        )
 
         self.resources = ray.cluster_resources()
 
