@@ -116,9 +116,9 @@ class RayTrainRunner:
     def train(
         self,
         file_paths: list[str],
-        batch_size: int,
-        test_size: float,
-        val_size: float,
+        batch_size: int = 2000,
+        test_size: float = 0.0,
+        val_size: float = 0.2,
         prefetch_factor: int = 4,
         max_epochs: int = 1,
         thread_per_worker: int | None = None,
@@ -138,12 +138,14 @@ class RayTrainRunner:
         ----------
         file_paths : list[str]
             List of h5ad AnnData files
-        batch_size : int
-            How much data to fetch from disk
-        test_size : float
+        batch_size : int, optional
+            How much data to fetch from disk, by default to 2000
+        test_size : float, optional
             Fraction of test data for example 0.1 means 10% will be split for testing
-        val_size : float
-            Fraction of validation data for example 0.2 means 20% will be split for validation
+            default to 0.0
+        val_size : float, optional
+            Fraction of validation data for example 0.2 means 20% will be split for validation,
+            default to 0.2
         prefetch_factor : int, optional
             Total data fetch is prefetch_factor * batch_size, by default 4
         max_epochs : int, optional
