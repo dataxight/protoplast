@@ -18,7 +18,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.19">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.18">
     
     
       
@@ -302,7 +302,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../usages/" class="md-nav__link">
+      <a href="../../usages/index.md" class="md-nav__link">
         
   
   
@@ -827,8 +827,7 @@ is a dense Tensor, by default None</p>
 
               <details class="quote">
                 <summary>Source code in <code>src/protoplast/scrna/anndata/trainer.py</code></summary>
-                <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 34</span>
-<span class="normal"> 35</span>
+                <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 35</span>
 <span class="normal"> 36</span>
 <span class="normal"> 37</span>
 <span class="normal"> 38</span>
@@ -1045,7 +1044,21 @@ is a dense Tensor, by default None</p>
 <span class="normal">249</span>
 <span class="normal">250</span>
 <span class="normal">251</span>
-<span class="normal">252</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">RayTrainRunner</span><span class="p">:</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">RayTrainRunner</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;A class to initialize the training this class automatically initializes Ray cluster or</span>
 <span class="sd">    detect whether an existing cluster exist if there is an existing cluster it will automatically</span>
 <span class="sd">    connect to it refer to `ray.init()` behavior</span>
@@ -1112,18 +1125,26 @@ is a dense Tensor, by default None</p>
             <span class="bp">self</span><span class="o">.</span><span class="n">ray_trainer_strategy</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">train</span><span class="o">.</span><span class="n">lightning</span><span class="o">.</span><span class="n">RayDDPStrategy</span><span class="p">()</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">ray_trainer_strategy</span> <span class="o">=</span> <span class="n">ray_trainer_strategy</span>
-        <span class="n">ray</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">address</span><span class="o">=</span><span class="n">address</span><span class="p">,</span> <span class="n">runtime_env</span><span class="o">=</span><span class="n">runtime_env_config</span><span class="p">,</span> <span class="n">ignore_reinit_error</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+        <span class="c1"># Init ray cluster</span>
+        <span class="n">DEFAULT_RUNTIME_ENV_CONFIG</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;working_dir&quot;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;PWD&quot;</span><span class="p">),</span>  <span class="c1"># Allow ray workers to inherit venv at $PWD if there is any</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="n">runtime_env_config</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">runtime_env_config</span> <span class="o">=</span> <span class="n">DEFAULT_RUNTIME_ENV_CONFIG</span>
+        <span class="n">ray</span><span class="o">.</span><span class="n">init</span><span class="p">(</span>
+            <span class="n">address</span><span class="o">=</span><span class="n">address</span><span class="p">,</span> <span class="n">runtime_env</span><span class="o">=</span><span class="p">{</span><span class="o">**</span><span class="n">DEFAULT_RUNTIME_ENV_CONFIG</span><span class="p">,</span> <span class="o">**</span><span class="n">runtime_env_config</span><span class="p">},</span> <span class="n">ignore_reinit_error</span><span class="o">=</span><span class="kc">True</span>
+        <span class="p">)</span>
+
         <span class="bp">self</span><span class="o">.</span><span class="n">resources</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">cluster_resources</span><span class="p">()</span>
-        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">resources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;GPU&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
-            <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s2">&quot;Only support with GPU is available only&quot;</span><span class="p">)</span>
 
     <span class="nd">@beartype</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">train</span><span class="p">(</span>
         <span class="bp">self</span><span class="p">,</span>
         <span class="n">file_paths</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
-        <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
-        <span class="n">test_size</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
-        <span class="n">val_size</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+        <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2000</span><span class="p">,</span>
+        <span class="n">test_size</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span>
+        <span class="n">val_size</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.2</span><span class="p">,</span>
         <span class="n">prefetch_factor</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">4</span><span class="p">,</span>
         <span class="n">max_epochs</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
         <span class="n">thread_per_worker</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
@@ -1143,12 +1164,14 @@ is a dense Tensor, by default None</p>
 <span class="sd">        ----------</span>
 <span class="sd">        file_paths : list[str]</span>
 <span class="sd">            List of h5ad AnnData files</span>
-<span class="sd">        batch_size : int</span>
-<span class="sd">            How much data to fetch from disk</span>
-<span class="sd">        test_size : float</span>
+<span class="sd">        batch_size : int, optional</span>
+<span class="sd">            How much data to fetch from disk, by default to 2000</span>
+<span class="sd">        test_size : float, optional</span>
 <span class="sd">            Fraction of test data for example 0.1 means 10% will be split for testing</span>
-<span class="sd">        val_size : float</span>
-<span class="sd">            Fraction of validation data for example 0.2 means 20% will be split for validation</span>
+<span class="sd">            default to 0.0</span>
+<span class="sd">        val_size : float, optional</span>
+<span class="sd">            Fraction of validation data for example 0.2 means 20% will be split for validation,</span>
+<span class="sd">            default to 0.2</span>
 <span class="sd">        prefetch_factor : int, optional</span>
 <span class="sd">            Total data fetch is prefetch_factor * batch_size, by default 4</span>
 <span class="sd">        max_epochs : int, optional</span>
@@ -1181,8 +1204,11 @@ is a dense Tensor, by default None</p>
         <span class="k">if</span> <span class="ow">not</span> <span class="n">resource_per_worker</span><span class="p">:</span>
             <span class="k">if</span> <span class="ow">not</span> <span class="n">thread_per_worker</span><span class="p">:</span>
                 <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Setting thread_per_worker to half of the available CPUs capped at 4&quot;</span><span class="p">)</span>
-                <span class="n">thread_per_worker</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">resources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;CPU&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span><span class="p">),</span> <span class="mi">4</span><span class="p">)</span>
+                <span class="n">thread_per_worker</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="nb">int</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">resources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;CPU&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span><span class="p">),</span> <span class="mi">4</span><span class="p">)</span>
             <span class="n">resource_per_worker</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;CPU&quot;</span><span class="p">:</span> <span class="n">thread_per_worker</span><span class="p">}</span>
+        <span class="k">if</span> <span class="n">is_gpu</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">resources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;GPU&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s2">&quot;`is_gpu = True` but there is no GPU found. Fallback to CPU.&quot;</span><span class="p">,</span> <span class="ne">UserWarning</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+            <span class="n">is_gpu</span> <span class="o">=</span> <span class="kc">False</span>
         <span class="k">if</span> <span class="n">is_gpu</span><span class="p">:</span>
             <span class="k">if</span> <span class="n">num_workers</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
                 <span class="n">num_workers</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">resources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;GPU&quot;</span><span class="p">))</span>
@@ -1191,13 +1217,13 @@ is a dense Tensor, by default None</p>
             <span class="p">)</span>
         <span class="k">else</span><span class="p">:</span>
             <span class="k">if</span> <span class="n">num_workers</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-                <span class="n">num_workers</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">resources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;CPU&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="n">thread_per_worker</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="n">num_workers</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">int</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">resources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;CPU&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="n">thread_per_worker</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
             <span class="n">scaling_config</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">train</span><span class="o">.</span><span class="n">ScalingConfig</span><span class="p">(</span>
                 <span class="n">num_workers</span><span class="o">=</span><span class="n">num_workers</span><span class="p">,</span> <span class="n">use_gpu</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">resources_per_worker</span><span class="o">=</span><span class="n">resource_per_worker</span>
             <span class="p">)</span>
         <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Using </span><span class="si">{</span><span class="n">num_workers</span><span class="si">}</span><span class="s2"> workers with </span><span class="si">{</span><span class="n">resource_per_worker</span><span class="si">}</span><span class="s2"> each&quot;</span><span class="p">)</span>
         <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-        <span class="n">shuffle_stragey</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">shuffle_strategy</span><span class="p">(</span>
+        <span class="n">shuffle_strategy</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">shuffle_strategy</span><span class="p">(</span>
             <span class="n">file_paths</span><span class="p">,</span>
             <span class="n">batch_size</span><span class="p">,</span>
             <span class="n">num_workers</span> <span class="o">*</span> <span class="n">thread_per_worker</span><span class="p">,</span>
@@ -1210,9 +1236,9 @@ is a dense Tensor, by default None</p>
         <span class="p">)</span>
         <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s2">&quot;drop_last&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
         <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s2">&quot;pre_fetch_then_batch&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
-        <span class="n">indices</span> <span class="o">=</span> <span class="n">shuffle_stragey</span><span class="o">.</span><span class="n">split</span><span class="p">()</span>
+        <span class="n">indices</span> <span class="o">=</span> <span class="n">shuffle_strategy</span><span class="o">.</span><span class="n">split</span><span class="p">()</span>
         <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Data splitting time: </span><span class="si">{</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">start</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> seconds&quot;</span><span class="p">)</span>
-        <span class="n">train_config</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;indices&quot;</span><span class="p">:</span> <span class="n">indices</span><span class="p">,</span> <span class="s2">&quot;ckpt_path&quot;</span><span class="p">:</span> <span class="n">ckpt_path</span><span class="p">,</span> <span class="s2">&quot;shuffle_stragey&quot;</span><span class="p">:</span> <span class="n">shuffle_stragey</span><span class="p">}</span>
+        <span class="n">train_config</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;indices&quot;</span><span class="p">:</span> <span class="n">indices</span><span class="p">,</span> <span class="s2">&quot;ckpt_path&quot;</span><span class="p">:</span> <span class="n">ckpt_path</span><span class="p">,</span> <span class="s2">&quot;shuffle_strategy&quot;</span><span class="p">:</span> <span class="n">shuffle_strategy</span><span class="p">}</span>
         <span class="n">my_train_func</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_trainer</span><span class="p">()</span>
         <span class="n">par_trainer</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">train</span><span class="o">.</span><span class="n">torch</span><span class="o">.</span><span class="n">TorchTrainer</span><span class="p">(</span>
             <span class="n">my_train_func</span><span class="p">,</span>
@@ -1237,13 +1263,13 @@ is a dense Tensor, by default None</p>
             <span class="n">num_threads</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;OMP_NUM_THREADS&quot;</span><span class="p">,</span> <span class="n">os</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()))</span>
             <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;=========Starting the training on </span><span class="si">{</span><span class="n">rank</span><span class="si">}</span><span class="s2"> with num threads: </span><span class="si">{</span><span class="n">num_threads</span><span class="si">}</span><span class="s2">=========&quot;</span><span class="p">)</span>
             <span class="n">model_params</span> <span class="o">=</span> <span class="n">indices</span><span class="o">.</span><span class="n">metadata</span>
-            <span class="n">shuffle_stragey</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;shuffle_stragey&quot;</span><span class="p">)</span>
+            <span class="n">shuffle_strategy</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;shuffle_strategy&quot;</span><span class="p">)</span>
             <span class="n">ann_dm</span> <span class="o">=</span> <span class="n">AnnDataModule</span><span class="p">(</span>
                 <span class="n">indices</span><span class="p">,</span>
                 <span class="n">Ds</span><span class="p">,</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">prefetch_factor</span><span class="p">,</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">sparse_key</span><span class="p">,</span>
-                <span class="n">shuffle_stragey</span><span class="p">,</span>
+                <span class="n">shuffle_strategy</span><span class="p">,</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">before_dense_cb</span><span class="p">,</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">after_dense_cb</span><span class="p">,</span>
                 <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">kwargs</span><span class="p">,</span>
@@ -1284,7 +1310,7 @@ is a dense Tensor, by default None</p>
 
 
 <h3 id="protoplast.scrna.anndata.trainer.RayTrainRunner.train" class="doc doc-heading">
-            <code class="highlight language-python"><span class="n">train</span><span class="p">(</span><span class="n">file_paths</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">test_size</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">val_size</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">prefetch_factor</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">4</span><span class="p">,</span> <span class="n">max_epochs</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">thread_per_worker</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">num_workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">result_storage_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;~/protoplast_results&#39;</span><span class="p">,</span> <span class="n">ckpt_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">is_gpu</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">random_seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="mi">42</span><span class="p">,</span> <span class="n">resource_per_worker</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">is_shuffled</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></code>
+            <code class="highlight language-python"><span class="n">train</span><span class="p">(</span><span class="n">file_paths</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2000</span><span class="p">,</span> <span class="n">test_size</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span> <span class="n">val_size</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.2</span><span class="p">,</span> <span class="n">prefetch_factor</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">4</span><span class="p">,</span> <span class="n">max_epochs</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">thread_per_worker</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">num_workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">result_storage_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s1">&#39;~/protoplast_results&#39;</span><span class="p">,</span> <span class="n">ckpt_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">is_gpu</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">random_seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="mi">42</span><span class="p">,</span> <span class="n">resource_per_worker</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">is_shuffled</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></code>
 
 <a href="#protoplast.scrna.anndata.trainer.RayTrainRunner.train" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -1330,11 +1356,11 @@ is a dense Tensor, by default None</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>How much data to fetch from disk</p>
+                <p>How much data to fetch from disk, by default to 2000</p>
               </div>
             </td>
             <td>
-                <em>required</em>
+                  <code>2000</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -1346,11 +1372,12 @@ is a dense Tensor, by default None</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Fraction of test data for example 0.1 means 10% will be split for testing</p>
+                <p>Fraction of test data for example 0.1 means 10% will be split for testing
+default to 0.0</p>
               </div>
             </td>
             <td>
-                <em>required</em>
+                  <code>0.0</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -1362,11 +1389,12 @@ is a dense Tensor, by default None</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Fraction of validation data for example 0.2 means 20% will be split for validation</p>
+                <p>Fraction of validation data for example 0.2 means 20% will be split for validation,
+default to 0.2</p>
               </div>
             </td>
             <td>
-                <em>required</em>
+                  <code>0.2</code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -1544,16 +1572,7 @@ you can adjust the seed here, by default 42</p>
 
             <details class="quote">
               <summary>Source code in <code>src/protoplast/scrna/anndata/trainer.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">106</span>
-<span class="normal">107</span>
-<span class="normal">108</span>
-<span class="normal">109</span>
-<span class="normal">110</span>
-<span class="normal">111</span>
-<span class="normal">112</span>
-<span class="normal">113</span>
-<span class="normal">114</span>
-<span class="normal">115</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">115</span>
 <span class="normal">116</span>
 <span class="normal">117</span>
 <span class="normal">118</span>
@@ -1648,13 +1667,27 @@ you can adjust the seed here, by default 42</p>
 <span class="normal">207</span>
 <span class="normal">208</span>
 <span class="normal">209</span>
-<span class="normal">210</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@beartype</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@beartype</span>
 <span class="k">def</span><span class="w"> </span><span class="nf">train</span><span class="p">(</span>
     <span class="bp">self</span><span class="p">,</span>
     <span class="n">file_paths</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
-    <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
-    <span class="n">test_size</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
-    <span class="n">val_size</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2000</span><span class="p">,</span>
+    <span class="n">test_size</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span>
+    <span class="n">val_size</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.2</span><span class="p">,</span>
     <span class="n">prefetch_factor</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">4</span><span class="p">,</span>
     <span class="n">max_epochs</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
     <span class="n">thread_per_worker</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
@@ -1674,12 +1707,14 @@ you can adjust the seed here, by default 42</p>
 <span class="sd">    ----------</span>
 <span class="sd">    file_paths : list[str]</span>
 <span class="sd">        List of h5ad AnnData files</span>
-<span class="sd">    batch_size : int</span>
-<span class="sd">        How much data to fetch from disk</span>
-<span class="sd">    test_size : float</span>
+<span class="sd">    batch_size : int, optional</span>
+<span class="sd">        How much data to fetch from disk, by default to 2000</span>
+<span class="sd">    test_size : float, optional</span>
 <span class="sd">        Fraction of test data for example 0.1 means 10% will be split for testing</span>
-<span class="sd">    val_size : float</span>
-<span class="sd">        Fraction of validation data for example 0.2 means 20% will be split for validation</span>
+<span class="sd">        default to 0.0</span>
+<span class="sd">    val_size : float, optional</span>
+<span class="sd">        Fraction of validation data for example 0.2 means 20% will be split for validation,</span>
+<span class="sd">        default to 0.2</span>
 <span class="sd">    prefetch_factor : int, optional</span>
 <span class="sd">        Total data fetch is prefetch_factor * batch_size, by default 4</span>
 <span class="sd">    max_epochs : int, optional</span>
@@ -1712,8 +1747,11 @@ you can adjust the seed here, by default 42</p>
     <span class="k">if</span> <span class="ow">not</span> <span class="n">resource_per_worker</span><span class="p">:</span>
         <span class="k">if</span> <span class="ow">not</span> <span class="n">thread_per_worker</span><span class="p">:</span>
             <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Setting thread_per_worker to half of the available CPUs capped at 4&quot;</span><span class="p">)</span>
-            <span class="n">thread_per_worker</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">resources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;CPU&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span><span class="p">),</span> <span class="mi">4</span><span class="p">)</span>
+            <span class="n">thread_per_worker</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="nb">int</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">resources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;CPU&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span><span class="p">),</span> <span class="mi">4</span><span class="p">)</span>
         <span class="n">resource_per_worker</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;CPU&quot;</span><span class="p">:</span> <span class="n">thread_per_worker</span><span class="p">}</span>
+    <span class="k">if</span> <span class="n">is_gpu</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">resources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;GPU&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s2">&quot;`is_gpu = True` but there is no GPU found. Fallback to CPU.&quot;</span><span class="p">,</span> <span class="ne">UserWarning</span><span class="p">,</span> <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="n">is_gpu</span> <span class="o">=</span> <span class="kc">False</span>
     <span class="k">if</span> <span class="n">is_gpu</span><span class="p">:</span>
         <span class="k">if</span> <span class="n">num_workers</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="n">num_workers</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">resources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;GPU&quot;</span><span class="p">))</span>
@@ -1722,13 +1760,13 @@ you can adjust the seed here, by default 42</p>
         <span class="p">)</span>
     <span class="k">else</span><span class="p">:</span>
         <span class="k">if</span> <span class="n">num_workers</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-            <span class="n">num_workers</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">resources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;CPU&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="n">thread_per_worker</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="n">num_workers</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">int</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">resources</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;CPU&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="n">thread_per_worker</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
         <span class="n">scaling_config</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">train</span><span class="o">.</span><span class="n">ScalingConfig</span><span class="p">(</span>
             <span class="n">num_workers</span><span class="o">=</span><span class="n">num_workers</span><span class="p">,</span> <span class="n">use_gpu</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">resources_per_worker</span><span class="o">=</span><span class="n">resource_per_worker</span>
         <span class="p">)</span>
     <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Using </span><span class="si">{</span><span class="n">num_workers</span><span class="si">}</span><span class="s2"> workers with </span><span class="si">{</span><span class="n">resource_per_worker</span><span class="si">}</span><span class="s2"> each&quot;</span><span class="p">)</span>
     <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-    <span class="n">shuffle_stragey</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">shuffle_strategy</span><span class="p">(</span>
+    <span class="n">shuffle_strategy</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">shuffle_strategy</span><span class="p">(</span>
         <span class="n">file_paths</span><span class="p">,</span>
         <span class="n">batch_size</span><span class="p">,</span>
         <span class="n">num_workers</span> <span class="o">*</span> <span class="n">thread_per_worker</span><span class="p">,</span>
@@ -1741,9 +1779,9 @@ you can adjust the seed here, by default 42</p>
     <span class="p">)</span>
     <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s2">&quot;drop_last&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
     <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="s2">&quot;pre_fetch_then_batch&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
-    <span class="n">indices</span> <span class="o">=</span> <span class="n">shuffle_stragey</span><span class="o">.</span><span class="n">split</span><span class="p">()</span>
+    <span class="n">indices</span> <span class="o">=</span> <span class="n">shuffle_strategy</span><span class="o">.</span><span class="n">split</span><span class="p">()</span>
     <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Data splitting time: </span><span class="si">{</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">start</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> seconds&quot;</span><span class="p">)</span>
-    <span class="n">train_config</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;indices&quot;</span><span class="p">:</span> <span class="n">indices</span><span class="p">,</span> <span class="s2">&quot;ckpt_path&quot;</span><span class="p">:</span> <span class="n">ckpt_path</span><span class="p">,</span> <span class="s2">&quot;shuffle_stragey&quot;</span><span class="p">:</span> <span class="n">shuffle_stragey</span><span class="p">}</span>
+    <span class="n">train_config</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;indices&quot;</span><span class="p">:</span> <span class="n">indices</span><span class="p">,</span> <span class="s2">&quot;ckpt_path&quot;</span><span class="p">:</span> <span class="n">ckpt_path</span><span class="p">,</span> <span class="s2">&quot;shuffle_strategy&quot;</span><span class="p">:</span> <span class="n">shuffle_strategy</span><span class="p">}</span>
     <span class="n">my_train_func</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_trainer</span><span class="p">()</span>
     <span class="n">par_trainer</span> <span class="o">=</span> <span class="n">ray</span><span class="o">.</span><span class="n">train</span><span class="o">.</span><span class="n">torch</span><span class="o">.</span><span class="n">TorchTrainer</span><span class="p">(</span>
         <span class="n">my_train_func</span><span class="p">,</span>
