@@ -100,8 +100,6 @@ class RayTrainRunner:
             self.ray_trainer_strategy = ray_trainer_strategy
         ray.init(address=address, runtime_env=runtime_env_config, ignore_reinit_error=True)
         self.resources = ray.cluster_resources()
-        if self.resources.get("GPU", 0) <= 0:
-            raise Exception("Only support with GPU is available only")
 
     @beartype
     def train(
