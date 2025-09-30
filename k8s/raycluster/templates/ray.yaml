@@ -2,24 +2,26 @@ apiVersion: ray.io/v1
 kind: RayCluster
 metadata:
   name: ray-cluster
-  namespace: ray
+  namespace: {{ .Values.namespace }}
 spec:
-  rayVersion: "2.34.0"
-
+  rayVersion: "2.48"
+  
   headGroupSpec:
-    serviceAccount: ray-head-sa
+    replicas: 1
+    serviceAccount: {{ .Values.headServiceAccount }}
     rayStartParams:
       dashboard-host: "0.0.0.0"
+      include-dashboard: "true"
     template:
       spec:
         containers:
           - name: ray-head
-            image: 123456789012.dkr.ecr.us-west-2.amazonaws.com/ray-custom:latest
+            image: 948959680124.dkr.ecr.us-west-2.amazonaws.com/protoplast/head:latest
             env:
               - name: AWS_REGION
                 value: {{ .Values.awsRegion }}
               - name: AWS_ACCOUNT_ID
-                value: {{ .Values.awsAccountId }}
+                value: {{ .Values.awsAccountId | quote }}
               - name: S3_BUCKET
                 value: {{ .Values.s3Bucket }}
         nodeSelector:
@@ -35,15 +37,15 @@ spec:
       replicas: 0
       template:
         spec:
-          serviceAccountName: ray-worker-sa
+          serviceAccountName: {{ .Values.workerServiceAccount }}
           containers:
             - name: ray-worker
-              image: 123456789012.dkr.ecr.us-west-2.amazonaws.com/ray-custom:latest
+              image: 948959680124.dkr.ecr.us-west-2.amazonaws.com/protoplast/head:latest
               env:
                 - name: AWS_REGION
                   value: {{ .Values.awsRegion }}
                 - name: AWS_ACCOUNT_ID
-                  value: {{ .Values.awsAccountId }}
+                  value: {{ .Values.awsAccountId | quote }}
                 - name: S3_BUCKET
                   value: {{ .Values.s3Bucket }}
           nodeSelector:
@@ -58,10 +60,10 @@ spec:
       replicas: 0
       template:
         spec:
-          serviceAccountName: ray-worker-sa
+          serviceAccountName: {{ .Values.workerServiceAccount }}
           containers:
             - name: ray-worker
-              image: 123456789012.dkr.ecr.us-west-2.amazonaws.com/ray-custom:latest
+              image: 948959680124.dkr.ecr.us-west-2.amazonaws.com/protoplast/worker:latest
               resources:
                 requests:
                   nvidia.com/gpu: 1
@@ -71,7 +73,7 @@ spec:
                 - name: AWS_REGION
                   value: {{ .Values.awsRegion }}
                 - name: AWS_ACCOUNT_ID
-                  value: {{ .Values.awsAccountId }}
+                  value: {{ .Values.awsAccountId | quote }}
                 - name: S3_BUCKET
                   value: {{ .Values.s3Bucket }}
           nodeSelector:

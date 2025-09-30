@@ -1,21 +1,17 @@
-data "aws_iam_openid_connect_provider" "eks" {
-  url = aws_eks_cluster.protoplast.identity[0].oidc[0].issuer
-}
-
 data "aws_iam_policy_document" "trust" {
   statement {
     effect = "Allow"
 
     principals {
       type        = "Federated"
-      identifiers = [data.aws_iam_openid_connect_provider.eks.arn]
+      identifiers = [module.eks.oidc_provider_arn]
     }
 
     actions = ["sts:AssumeRoleWithWebIdentity"]
 
     condition {
       test     = "StringEquals"
-      variable = "${replace(data.aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub"
+      variable = "${replace(module.eks.oidc_provider, "https://", "")}:sub"
       values   = ["system:serviceaccount:protoplast:${kubernetes_namespace.protoplast.metadata[0].name}"]
     }
   }
@@ -86,7 +82,7 @@ resource "aws_iam_role_policy" "worker_s3_access" {
 }
 
 
-resource "aws_iam_role_policy" "worker_s3_access" {
+resource "aws_iam_role_policy" "worker_ecr_access" {
     name = "worker_ecr_access"
     role = aws_iam_role.protoplast_worker_role.id
     policy = data.aws_iam_policy_document.ecr_access.json

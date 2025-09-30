@@ -1,0 +1,13 @@
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates wget
+ADD https://astral.sh/uv/install.sh /uv-installer.sh
+RUN sh /uv-installer.sh && rm /uv-installer.sh
+ENV PATH="/root/.local/bin/:$PATH"
+
+WORKDIR /app
+COPY . .
+RUN uv sync --python 3.11
+RUN uv add "ray[default]==2.48"
+ENV PATH="/app/.venv/bin:$PATH"
+RUN ray --version

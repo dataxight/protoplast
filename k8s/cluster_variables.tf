@@ -1,6 +1,6 @@
 variable "cpu_instance_type" {
     description = "Instance type for the head node"
-    default = "t4.large"
+    default = "t3a.xlarge"
 }
 variable "cpu_desired_capacity" {
     default = 1

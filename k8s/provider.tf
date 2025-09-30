@@ -3,11 +3,19 @@ provider "aws" {
 }
 
 data "aws_eks_cluster_auth" "protoplast" {
-  name = aws_eks_cluster.protoplast.name
+  name = module.eks.cluster_name
 }
 
 provider "kubernetes" {
-  host                   = aws_eks_cluster.protoplast.endpoint
-  cluster_ca_certificate = base64decode(aws_eks_cluster.protoplast.certificate_authority[0].data)
+  host                   = module.eks.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
   token                  = data.aws_eks_cluster_auth.protoplast.token
+}
+
+provider "helm" {
+  kubernetes = {
+    host = module.eks.cluster_endpoint
+    cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+    token = data.aws_eks_cluster_auth.protoplast.token
+  }
 }

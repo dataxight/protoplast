@@ -29,7 +29,7 @@ if __name__ == "__main__":
     thread_per_worker = int(sys.argv[3])
     batch_size = int(sys.argv[4])
     num_workers = int(sys.argv[5])
-    if os.path.isfile(tahoe_dir):
+    if os.path.isfile(tahoe_dir) or ("s3" in tahoe_dir):
         paths = [tahoe_dir]
     else:
         paths = os.listdir(tahoe_dir)
@@ -69,7 +69,6 @@ if __name__ == "__main__":
             Dcl,  # replace with your own Dataset
             ["num_genes", "num_classes"],  # change according to what you need for your model
             cell_line_metadata_cb,  # include data you need for your dataset
-            max_open_files=12,
         )
         trainer.train(
             paths,
