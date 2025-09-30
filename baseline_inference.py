@@ -129,7 +129,7 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-pds-hvg-noenergy/baseline-epoch=30-val_loss=0.1128.ckpt"  # Update with actual path
+    checkpoint_path = "checkpoints/baseline-pds-hvg-gears-transformer/baseline-epoch=28-val_loss=0.3134.ckpt"
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation.csv"

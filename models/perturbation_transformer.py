@@ -36,7 +36,7 @@ class ResidualEncoder(nn.Module):
             "max_position_embeddings": 1024,  # Max sequence length
             "rms_norm_eps": 1e-6,
         }
-        self.transformer, self.model_dim = get_transformer_backbone("llama", transformer_kwargs, input_dim=self.d_h)
+        self.transformer, self.model_dim = get_transformer_backbone("llama", transformer_kwargs, input_dim=d_h)
 
     def forward(self, H):
         cache_position = torch.arange(H.size(1), device=H.device)

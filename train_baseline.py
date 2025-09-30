@@ -43,7 +43,7 @@ def main():
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt",
-        batch_size=32,
+        batch_size=64,
         group_size_S=128,
         num_workers=8
     )
@@ -82,7 +82,7 @@ def main():
     import os
     
     # Create baseline model
-    model = BaselineModel(
+    model = PerturbationTransformer(
         d_h=512,  # Hidden dimension
         d_f=256,  # Bottleneck dimension
         n_genes=n_genes,
@@ -109,7 +109,7 @@ def main():
         monitor="val_loss",
         mode="min",
         save_top_k=5,
-        dirpath="checkpoints/baseline-pds-hvg-gears/",
+        dirpath="checkpoints/baseline-pds-hvg-gears-transformer/",
         filename="baseline-{epoch:02d}-{val_loss:.4f}"
     )
     
@@ -120,7 +120,7 @@ def main():
     )
     
     # Set up logger
-    logger = CSVLogger("logs", name="baseline-pds-hvg-gears")
+    logger = CSVLogger("logs", name="baseline-pds-hvg-gears-transformer")
     
     # Create trainer
     logging.getLogger("pytorch_lightning").setLevel(logging.DEBUG)

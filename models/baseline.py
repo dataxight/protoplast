@@ -279,15 +279,17 @@ class BaselineModel(PerturbationModel):
         self.mean_target_map = self.mean_target_map.to(self.device)
         pred, pred_emb = self.forward(ctrl_cell_data_hvg, pert_emb, covariates)
         # GEARS losses (tune gamma, lambda, tau as needed)
-        loss_gears, l_auto, l_dir = gears_autofocus_direction_loss(
-            pred_emb, pert_cell_data_hvg, ctrl_cell_data_hvg, gamma=1.0, lam=0.2, tau=0.0
-        ) 
+        with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
+                              dtype=torch.float32, enabled=self.device=='cuda'):
+            loss_gears, l_auto, l_dir = gears_autofocus_direction_loss(
+                pred_emb, pert_cell_data_hvg, ctrl_cell_data_hvg, gamma=1.0, lam=0.2, tau=0.0
+            )
         B = pred.shape[0]
 
-        loss_pds = self.calculate_loss_centroid(pred, pert_names)
-        loss = 0.2 * loss_pds + 0.8 * loss_gears
+        #loss_pds = self.calculate_loss_centroid(pred, pert_names)
+        loss = loss_gears
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
-        self.log("train_loss_pds", loss_pds, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        #self.log("train_loss_pds", loss_pds, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("train_loss_gears", loss_gears, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("train_loss_gears_auto", l_auto, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("train_loss_gears_dir", l_dir, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
@@ -309,15 +311,17 @@ class BaselineModel(PerturbationModel):
         
         pred, pred_emb = self.forward(ctrl_cell_data_hvg, pert_emb, covariates)
         # GEARS losses (tune gamma, lambda, tau as needed)
-        loss_gears, l_auto, l_dir = gears_autofocus_direction_loss(
-            pred_emb, pert_cell_data_hvg, ctrl_cell_data_hvg, gamma=1.0, lam=0.2, tau=0.0
-        )
+        with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
+                              dtype=torch.float32, enabled=self.device=='cuda'):
+            loss_gears, l_auto, l_dir = gears_autofocus_direction_loss(
+                pred_emb, pert_cell_data_hvg, ctrl_cell_data_hvg, gamma=1.0, lam=0.2, tau=0.0
+            )
         B = pred.shape[0]
         pert_names = batch["pert_name"]
-        loss_pds = self.calculate_loss_centroid(pred, pert_names)
-        loss = 0.2 * loss_pds + 0.8 * loss_gears
+        #loss_pds = self.calculate_loss_centroid(pred, pert_names)
+        loss = loss_gears
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
-        self.log("val_loss_pds", loss_pds, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        #self.log("val_loss_pds", loss_pds, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("val_loss_gears", loss_gears, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("val_loss_gears_auto", l_auto, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("val_loss_gears_dir", l_dir, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
