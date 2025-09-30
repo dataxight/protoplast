@@ -54,6 +54,7 @@ class PerturbationDataset(DistributedAnnDataset):
         n_items: int = None,
         cell_noise: float = 0.3,
         gene_noise: float = 0.3,
+        hvg_only: bool = True,
         *args,
         **kwargs
     ):
@@ -80,6 +81,7 @@ class PerturbationDataset(DistributedAnnDataset):
 
         self._initialize_region_mappings()
         self._initialized_worker_info = False
+        self.hvg_only = hvg_only
 
 
     def _get_mat_by_range(self, h5file: h5py.File, start: int, end: int):
@@ -261,6 +263,9 @@ class PerturbationDataset(DistributedAnnDataset):
             X = X[indices]
             barcodes = barcodes[indices]
 
+        if self.hvg_only:
+            hvg_mask = np.where(np.array(self.adata_vars[file_i]["highly_variable"]))[0]
+            X = X[:, hvg_mask]
         return X, barcodes
 
     def __len__(self):
@@ -272,7 +277,12 @@ class PerturbationDataset(DistributedAnnDataset):
             self._init_worker_info()
         # Load anndata objects in backed mode
         if self.adata_obs is None:
-            self.adata_obs = [deepcopy(anndata.read_h5ad(f, backed="r").obs) for f in self.files]
+            self.adata_obs = []
+            self.adata_vars = []
+            for f in self.files:
+                adata = anndata.read_h5ad(f, backed="r")
+                self.adata_obs.append(deepcopy(adata.obs))
+                self.adata_vars.append(deepcopy(adata.var))
         if self.h5files is None:
             self.h5files = [h5py.File(f, 'r', libver='latest', swmr=True) for f in self.files]
         if self.adatas is None:
@@ -315,12 +325,15 @@ class PerturbationDataset(DistributedAnnDataset):
                     if self.barcodes:
                         pert_barcodes = self.adata_obs[file_i].index[cell_indices].values
 
+                    if self.hvg_only:
+                        hvg_mask = np.where(np.array(self.adata_vars[file_i]["highly_variable"]))[0]
+                        X_pert_hvg = X_pert[:, hvg_mask]
+
                     # Create sample dictionary
                     sample = {
-                        "pert_cell_g": X_pert, # scipy csr matrix [S, G]
-                        "ctrl_cell_g": X_ctrl, # scipy csr matrix [S, G]
-                        # "pert_cell_emb": torch.from_numpy(X_pert_emb), # tensor [S, 2058]
-                        # "ctrl_cell_emb": torch.from_numpy(X_ctrl_emb), # tensor [S, 2058]
+                        "pert_cell_g": X_pert.astype(np.float32), # scipy csr matrix [S, G]
+                        "pert_cell_emb": X_pert_hvg.astype(np.float32), # tensor [S, 2058]
+                        "ctrl_cell_emb": X_ctrl.astype(np.float32), # tensor [S, 2058]
                         "pert_emb": pert_emb, # tensor [5102]
                         "pert_name": np.array([target]),
                         "cell_type": np.array([cell_type]), # str
@@ -575,7 +588,7 @@ class PerturbationDataModule(AnnDataModule):
 
             
 
-            if key in ['pert_cell_g', 'ctrl_cell_g']:
+            if key in ['pert_cell_g']:
                 # Convert scipy sparse matrices to torch sparse tensors and stack
                 torch_sparse_tensors = []
                 for val in values:
@@ -585,7 +598,7 @@ class PerturbationDataModule(AnnDataModule):
                         coo = val.tocoo()
                         # Create torch sparse tensor
                         indices = torch.from_numpy(np.vstack((coo.row, coo.col))).long()
-                        values_tensor = torch.from_numpy(coo.data).float()
+                        values_tensor = torch.from_numpy(coo.data).to(torch.float16)
                         sparse_tensor = torch.sparse_coo_tensor(indices, values_tensor, coo.shape)
                         torch_sparse_tensors.append(sparse_tensor)
                     else:
@@ -595,9 +608,9 @@ class PerturbationDataModule(AnnDataModule):
                 # Stack sparse tensors
                 collated[key] = torch.stack(torch_sparse_tensors)
 
-            # elif key in ['pert_cell_emb', 'ctrl_cell_emb']:
-            #     # concat tensors
-            #     collated[key] = torch.stack(values)
+            elif key in ['pert_cell_emb', 'ctrl_cell_emb']:
+                # concat tensors
+                collated[key] = torch.stack(values)
             elif key in ['pert_emb', 'cell_type_onehot', 'batch_onehot']:
                 # Stack regular tensors
                 collated[key] = torch.stack(values)
@@ -683,7 +696,11 @@ if __name__ == "__main__":
             # print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
             # print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
             print("pert_cell_g shape:", batch['pert_cell_g'].shape)
-            print("ctrl_cell_g shape:", batch['ctrl_cell_g'].shape)
+            print(batch["pert_cell_g"][0])
+            print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
+            print(batch["pert_cell_emb"][0])
+            print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
+            print(batch["ctrl_cell_emb"][0])
             print("cell_type_onehot shape:", batch['cell_type_onehot'].shape)
             print("batch_onehot shape:", batch['batch_onehot'].shape)
             print("pert_emb shape:", batch['pert_emb'].shape)
@@ -692,5 +709,4 @@ if __name__ == "__main__":
             # barcodes
             print("pert_cell_barcode shape:", batch['pert_cell_barcode'])
             print("ctrl_cell_barcode shape:", batch['ctrl_cell_barcode'])
-            if i >= 1:  # Just show first few samples
-                break
+            break
