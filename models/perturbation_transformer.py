@@ -24,7 +24,7 @@ class ResidualEncoder(nn.Module):
     Residual encoder.
     """
     
-    def __init__(self, d_h: int = 672, n_transformer_layers: int = 12, n_heads: int = 16, d_ff: int = 2048, dropout: float = 0.1, n_genes: int = 18080):
+    def __init__(self, d_h: int = 672, n_transformer_layers: int = 8, n_heads: int = 16, d_ff: int = 8192, dropout: float = 0.1, n_genes: int = 18080):
         super().__init__()
         transformer_kwargs = {
             "hidden_size": d_h,
@@ -51,7 +51,7 @@ class PerturbationTransformer(BaselineModel):
     Transformer-based perturbation prediction model.
     """
     
-    def __init__(self, n_transformer_layers: int = 12, n_heads: int = 16, d_ff: int = 2048, **kwargs):
+    def __init__(self, n_transformer_layers: int = 16, n_heads: int = 16, d_ff: int = 2048, **kwargs):
         super().__init__(**kwargs)
         self.residual_encoder_transformer = ResidualEncoder(
             d_h=self.d_h,

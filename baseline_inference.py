@@ -8,6 +8,7 @@ import anndata as ad
 import pandas as pd
 import scipy.sparse as sp
 from models.baseline import BaselineModel
+from models.perturbation_transformer import PerturbationTransformer
 from protoplast.scrna.anndata.data_modules.perturbation import PerturbationDataModule
 
 
@@ -40,22 +41,22 @@ class BaselinePredictor:
             # Default hyperparameters if not saved
             print("No hyperparameters found in checkpoint, using default hyperparameters")
             hparams = {
-                'd_h': 512,
-                'd_f': 256,
+                'd_h': 672,
+                'd_f': 512,
                 'n_genes': 18080,
-                'embedding_dim': 4000,
+                'embedding_dim': 2000,
                 'pert_emb_dim': 5120,
-                'dropout': 0.2
+                'dropout': 0.1
             }
         
         # Create model with hyperparameters
-        model = BaselineModel(
+        model = PerturbationTransformer(
             mean_target_map=hparams.get('mean_target_map', {}),
             mean_target_addresses=hparams.get('mean_target_addresses', {}),
             d_h=hparams.get('d_h', 512),
             d_f=hparams.get('d_f', 256),
             n_genes=hparams.get('n_genes', 18080),
-            embedding_dim=hparams.get('embedding_dim', 4000),
+            embedding_dim=hparams.get('embedding_dim', 2000),
             pert_emb_dim=hparams.get('pert_emb_dim', 5120),
             dropout=hparams.get('dropout', 0.2)
         )
@@ -97,7 +98,6 @@ class BaselinePredictor:
             with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
                               dtype=torch.float16, enabled=self.device=='cuda'):
                 predictions, emb = self.model(ctrl_cell_emb, pert_emb, covariates)
-                # log1p_target = self.model.compute_log1p_target(predictions, 10000, ctrl_cell_emb, pert_emb)
         
         return predictions 
     
@@ -129,16 +129,13 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "checkpoints/baseline-pds-hvg-gears-transformer/baseline-epoch=28-val_loss=0.3134.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer/baseline-epoch=19-val_loss=0.3139.ckpt"
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation.csv"
     pert_counts = pd.read_csv(pert_counts_path)
     gene_names = pd.read_csv("./gene_names.csv", header=None)
     gene_names = gene_names[0].tolist()
-    hvg_gene_names = open("./hvg-4000-competition-extended.txt", "r").read().splitlines()
-    hvg_mask = np.isin(gene_names, hvg_gene_names)
-    hvg_mask = torch.tensor(hvg_mask)
     
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
@@ -150,7 +147,8 @@ def baseline_vcc_inference():
     dm.setup(stage="fit")
     
     predictor = BaselinePredictor(checkpoint_path)
-    adata = ad.read_h5ad("/mnt/hdd2/tan/competition_support_set_sorted/competition_train.h5", backed="r")
+    adata = ad.read_h5ad("/mnt/hdd2/tan/competition_support_set_sorted/competition_train.h5")
+    hvg_mask = np.where(adata.var["highly_variable"])[0]
     control_adata = adata[adata.obs["target_gene"] == "non-targeting"]
     batch_data = control_adata.obs["batch_var"]
     cell_type = "ARC_H1"
@@ -166,9 +164,9 @@ def baseline_vcc_inference():
         # Randomly select n_cells from control_adata
         control_indices = np.random.choice(range(len(control_adata)), size=n_cells, replace=False)
         X_ctrl = control_adata.X[control_indices]
+        X_ctrl = X_ctrl[:, hvg_mask]
         X_ctrl = X_ctrl.toarray()
         X_ctrl = torch.from_numpy(X_ctrl).float()
-        X_ctrl = X_ctrl[:, hvg_mask]
         X_ctrl = X_ctrl.unsqueeze(0)  # Add batch dimension [1, S, E]
         
         # Get batch and perturbation embeddings
@@ -205,7 +203,7 @@ def baseline_vcc_inference():
     pert_names = np.array(pert_names)
 
     # Save results
-    path = "baseline_vcc_inference_pds_noenergy.h5ad"
+    path = "baseline_vcc_inference_hvg_transformer.h5ad"
     ad.AnnData(
         X=X,
         obs=pd.DataFrame(

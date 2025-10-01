@@ -40,15 +40,14 @@ class BaselineModel(PerturbationModel):
         self,
         mean_target_map: torch.Tensor,
         mean_target_addresses: List[str],
-        d_h: int = 512,  # Hidden dimension
-        d_f: int = 256,  # Bottleneck dimension 
+        d_h: int = 672,  # Hidden dimension
+        d_f: int = 512,  # Bottleneck dimension 
         n_genes: int = 18080,  # Number of genes (G)
         embedding_dim: int = 2058,  # Embedding dimension (E)
         pert_emb_dim: int = 5120,  # Perturbation embedding dimension
         n_cell_types: int = None,  # Number of cell types (will be set from data)
         n_batches: int = None,  # Number of batches (will be set from data)
-        dropout: float = 0.2,
-        hvg_mask: torch.Tensor = None,
+        dropout: float = 0.1,
         use_nb: bool = True,
         num_mc_samples: int = 0,
         **kwargs
@@ -61,7 +60,6 @@ class BaselineModel(PerturbationModel):
         self.pert_emb_dim = pert_emb_dim
         self.n_cell_types = n_cell_types
         self.n_batches = n_batches
-        self.hvg_mask = hvg_mask
         self.use_nb = use_nb
         self.num_mc_samples = num_mc_samples
         self.mean_target_map = mean_target_map
@@ -202,10 +200,11 @@ class BaselineModel(PerturbationModel):
         mask = torch.ones_like(all_idx, dtype=torch.bool)
         mask[idx.unique()] = False
         neg_pool = all_idx[mask]
-        neg_sel = neg_pool[torch.randint(0, neg_pool.numel(), (K,))]  # [K]
+        # neg_sel = neg_pool[torch.randint(0, neg_pool.numel(), (K,))]  # [K]
+        neg_sel = neg_pool[:K]  # [K]
         neg_means = self.mean_target_map.to(pred.device)[neg_sel]
         d_other = (pred[:, None, :] - neg_means[None, :, :]).abs().sum(dim=-1)  # [B,K]
-        margin = 50.0  # tune
+        margin = 25.0  # tune
         loss = F.relu(margin + d_same[:, None] - d_other).mean()
         return loss
 
@@ -265,10 +264,9 @@ class BaselineModel(PerturbationModel):
     def training_step(self, batch, batch_idx):
         """Training step supporting Negative Binomial likelihood on gene counts."""
         pert_emb = batch["pert_emb"]
-        ctrl_cell_data = batch["ctrl_cell_g"]
+        ctrl_cell_emb = batch["ctrl_cell_emb"]
+        pert_cell_emb = batch["pert_cell_emb"]
         pert_cell_data = batch["pert_cell_g"]
-        ctrl_cell_data_hvg = ctrl_cell_data[:, :, self.hvg_mask]
-        pert_cell_data_hvg = pert_cell_data[:, :, self.hvg_mask]
         covariates = {
             "cell_type_onehot": batch["cell_type_onehot"],
             "batch_onehot": batch["batch_onehot"],
@@ -277,30 +275,29 @@ class BaselineModel(PerturbationModel):
         
         pert_names = batch["pert_name"]
         self.mean_target_map = self.mean_target_map.to(self.device)
-        pred, pred_emb = self.forward(ctrl_cell_data_hvg, pert_emb, covariates)
+        pred, pred_emb = self.forward(ctrl_cell_emb, pert_emb, covariates)
         # GEARS losses (tune gamma, lambda, tau as needed)
-        with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
-                              dtype=torch.float32, enabled=self.device=='cuda'):
-            loss_gears, l_auto, l_dir = gears_autofocus_direction_loss(
-                pred_emb, pert_cell_data_hvg, ctrl_cell_data_hvg, gamma=1.0, lam=0.2, tau=0.0
-            )
+        #with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
+        #                      dtype=torch.float32, enabled=self.device=='cuda'):
+        #    loss_gears, l_auto, l_dir = gears_autofocus_direction_loss(
+        #        pred_emb, pert_cell_emb, ctrl_cell_emb, gamma=1.0, lam=0.2, tau=0.0
+        #    )
         B = pred.shape[0]
 
-        #loss_pds = self.calculate_loss_centroid(pred, pert_names)
-        loss = loss_gears
+        loss_mse_gene = F.mse_loss(pred, pert_cell_data)
+        loss_mse_hvg = F.mse_loss(pred_emb, pert_cell_emb)
+
+        loss = 0.1 * loss_mse_gene + 0.9 * loss_mse_hvg
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
-        #self.log("train_loss_pds", loss_pds, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("train_loss_gears", loss_gears, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("train_loss_gears_auto", l_auto, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("train_loss_gears_dir", l_dir, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("train_loss_mse_gene", loss_mse_gene, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("train_loss_mse_hvg", loss_mse_hvg, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
     
     def validation_step(self, batch, batch_idx):
         """Validation step supporting Negative Binomial likelihood on gene counts."""
+        ctrl_cell_emb = batch["ctrl_cell_emb"]
+        pert_cell_emb = batch["pert_cell_emb"]
         pert_cell_data = batch["pert_cell_g"]
-        ctrl_cell_data = batch["ctrl_cell_g"]
-        ctrl_cell_data_hvg = ctrl_cell_data[:, :, self.hvg_mask]
-        pert_cell_data_hvg = pert_cell_data[:, :, self.hvg_mask]
         
         pert_emb = batch["pert_emb"]
         
@@ -309,20 +306,19 @@ class BaselineModel(PerturbationModel):
             "batch_onehot": batch["batch_onehot"],
         }
         
-        pred, pred_emb = self.forward(ctrl_cell_data_hvg, pert_emb, covariates)
+        pred, pred_emb = self.forward(ctrl_cell_emb, pert_emb, covariates)
         # GEARS losses (tune gamma, lambda, tau as needed)
-        with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
-                              dtype=torch.float32, enabled=self.device=='cuda'):
-            loss_gears, l_auto, l_dir = gears_autofocus_direction_loss(
-                pred_emb, pert_cell_data_hvg, ctrl_cell_data_hvg, gamma=1.0, lam=0.2, tau=0.0
-            )
+        #with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
+        #                      dtype=torch.float32, enabled=self.device=='cuda'):
+        #    loss_gears, l_auto, l_dir = gears_autofocus_direction_loss(
+        #        pred_emb, pert_cell_emb, ctrl_cell_emb, gamma=1.0, lam=0.2, tau=0.0
+        #    )
         B = pred.shape[0]
         pert_names = batch["pert_name"]
-        #loss_pds = self.calculate_loss_centroid(pred, pert_names)
-        loss = loss_gears
+        loss_mse_gene = F.mse_loss(pred, pert_cell_data)
+        loss_mse_hvg = F.mse_loss(pred_emb, pert_cell_emb)
+        loss = 0.1 * loss_mse_gene + 0.9 * loss_mse_hvg
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
-        #self.log("val_loss_pds", loss_pds, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("val_loss_gears", loss_gears, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("val_loss_gears_auto", l_auto, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("val_loss_gears_dir", l_dir, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("val_loss_mse_gene", loss_mse_gene, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("val_loss_mse_hvg", loss_mse_hvg, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
