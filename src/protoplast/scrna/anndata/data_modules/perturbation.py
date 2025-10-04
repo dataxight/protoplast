@@ -1,6 +1,8 @@
 import logging
 from copy import deepcopy
 from pathlib import Path
+import os
+import pickle
 
 import anndata
 import h5py
@@ -73,7 +75,7 @@ class PerturbationDataset(DistributedAnnDataset):
         self.cell_noise = cell_noise
         self.gene_noise = gene_noise
         self.adatas = None
-
+        self.loss_weight_dicts = None
         self.pert_embedding = torch.load(pert_embedding_file)
 
         # Initialize control region tracking per cell type
@@ -263,9 +265,6 @@ class PerturbationDataset(DistributedAnnDataset):
             X = X[indices]
             barcodes = barcodes[indices]
 
-        if self.hvg_only:
-            hvg_mask = np.where(np.array(self.adata_vars[file_i]["highly_variable"]))[0]
-            X = X[:, hvg_mask]
         return X, barcodes
 
     def __len__(self):
@@ -279,10 +278,14 @@ class PerturbationDataset(DistributedAnnDataset):
         if self.adata_obs is None:
             self.adata_obs = []
             self.adata_vars = []
+            self.loss_weight_dicts = []
             for f in self.files:
                 adata = anndata.read_h5ad(f, backed="r")
                 self.adata_obs.append(deepcopy(adata.obs))
                 self.adata_vars.append(deepcopy(adata.var))
+                basename = os.path.basename(f)
+                dirname = os.path.dirname(f)
+                self.loss_weight_dicts.append(pickle.load(open(f'{dirname}/degs/{basename}_loss_weight_dict.pkl', 'rb')))
         if self.h5files is None:
             self.h5files = [h5py.File(f, 'r', libver='latest', swmr=True) for f in self.files]
         if self.adatas is None:
@@ -320,6 +323,11 @@ class PerturbationDataset(DistributedAnnDataset):
                     cell_type_onehot = self.get_celltype_onehot(cell_type)
                     batch_onehots = [self.get_batch_onehot(batch) for batch in batches]
 
+                    loss_weight_dict = self.loss_weight_dicts[file_i]
+                    default_loss_weight = (np.ones(X_pert.shape[1]) / X_pert.shape[1]) ** 2
+                    loss_weight = np.array(loss_weight_dict.get(target, default_loss_weight))
+                    loss_weight = np.nan_to_num(loss_weight, nan=0.0) * 100
+                    
                     # Get barcodes for perturbation cells if needed
                     pert_barcodes = None
                     if self.barcodes:
@@ -327,18 +335,27 @@ class PerturbationDataset(DistributedAnnDataset):
 
                     if self.hvg_only:
                         hvg_mask = np.where(np.array(self.adata_vars[file_i]["highly_variable"]))[0]
+                        loss_weight_emb = loss_weight[hvg_mask]
                         X_pert_hvg = X_pert[:, hvg_mask]
+                        X_ctrl_hvg = X_ctrl[:, hvg_mask]
+                    else:
+                        loss_weight_emb = loss_weight
+                        X_pert_hvg = X_pert
+                        X_ctrl_hvg = X_ctrl
 
                     # Create sample dictionary
                     sample = {
                         "pert_cell_g": X_pert.astype(np.float32), # scipy csr matrix [S, G]
-                        "pert_cell_emb": X_pert_hvg.astype(np.float32), # tensor [S, 2058]
-                        "ctrl_cell_emb": X_ctrl.astype(np.float32), # tensor [S, 2058]
+                        "ctrl_cell_g": X_ctrl.astype(np.float32), # scipy csr matrix [S, G]
+                        "pert_cell_emb": X_pert_hvg.astype(np.float32), # tensor [S, E]
+                        "ctrl_cell_emb": X_ctrl_hvg.astype(np.float32), # tensor [S, E]
                         "pert_emb": pert_emb, # tensor [5102]
                         "pert_name": np.array([target]),
                         "cell_type": np.array([cell_type]), # str
                         "cell_type_onehot": torch.stack([cell_type_onehot] * self.group_size_S), # [S, n_cell_type]
                         "batch_onehot": torch.stack(batch_onehots), # tensor [S, n_batches]
+                        "loss_weight_emb": torch.tensor(loss_weight_emb), # tensor [E]
+                        "loss_weight_gene": torch.tensor(loss_weight), # tensor [G]
                     }
 
                     # Add barcodes if enabled
@@ -588,7 +605,7 @@ class PerturbationDataModule(AnnDataModule):
 
             
 
-            if key in ['pert_cell_g']:
+            if key in ['pert_cell_g', 'ctrl_cell_g', 'ctrl_cell_emb', 'pert_cell_emb']:
                 # Convert scipy sparse matrices to torch sparse tensors and stack
                 torch_sparse_tensors = []
                 for val in values:
@@ -608,9 +625,6 @@ class PerturbationDataModule(AnnDataModule):
                 # Stack sparse tensors
                 collated[key] = torch.stack(torch_sparse_tensors)
 
-            elif key in ['pert_cell_emb', 'ctrl_cell_emb']:
-                # concat tensors
-                collated[key] = torch.stack(values)
             elif key in ['pert_emb', 'cell_type_onehot', 'batch_onehot']:
                 # Stack regular tensors
                 collated[key] = torch.stack(values)
@@ -699,6 +713,8 @@ if __name__ == "__main__":
             print(batch["pert_cell_g"][0])
             print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
             print(batch["pert_cell_emb"][0])
+            print("ctrl_cell_g shape:", batch['ctrl_cell_g'].shape)
+            print(batch["ctrl_cell_g"][0])
             print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
             print(batch["ctrl_cell_emb"][0])
             print("cell_type_onehot shape:", batch['cell_type_onehot'].shape)
@@ -706,6 +722,10 @@ if __name__ == "__main__":
             print("pert_emb shape:", batch['pert_emb'].shape)
             print("pert_name:", batch['pert_name'])
             print("cell_type:", batch['cell_type'])
+            print("loss_weight_emb shape:", batch['loss_weight_emb'].shape)
+            print(batch["loss_weight_emb"][0])
+            print("loss_weight_gene shape:", batch['loss_weight_gene'].shape)
+            print(batch["loss_weight_gene"][0])
             # barcodes
             print("pert_cell_barcode shape:", batch['pert_cell_barcode'])
             print("ctrl_cell_barcode shape:", batch['ctrl_cell_barcode'])
