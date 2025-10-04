@@ -8,6 +8,7 @@ from typing import Any
 import lightning as L
 import torch
 import math
+import numpy as np
 from typing import Literal, Optional
 
 def mmd2_rff_batched(
@@ -97,6 +98,51 @@ def energy_distance_batched(
         return ed  # [B]
 
 
+def loss_fct(pred: torch.Tensor, 
+            y: torch.Tensor, 
+            perts: np.ndarray, 
+            loss_weight: torch.Tensor,
+            ctrl: torch.Tensor = None, 
+            direction_lambda: float = 1e-3, 
+            dict_filter: dict = None, 
+            use_mse_loss: bool = False):
+    """
+    Main MSE Loss function, includes direction loss
+
+    Args:
+        pred (torch.tensor): predicted values
+        y (torch.tensor): true values
+        perts (list): list of perturbations
+        ctrl (str): control perturbation
+        direction_lambda (float): direction loss weight hyperparameter
+        dict_filter (dict): dictionary of perturbations to conditions
+        loss_weights_dict (dict): dictionary of loss weights for each perturbation
+        use_mse_loss (bool): whether to use MSE loss
+
+    """
+    gamma = 2
+    mse_p = torch.nn.MSELoss()
+    losses = torch.tensor(0.0, requires_grad=True).to(pred.device)
+
+    for p in set(perts):
+        pert_idx = np.where(perts == p)[0] # [N]
+        pred_p = pred[pert_idx].mean(dim=1) # [N, G]
+        y_p = y[pert_idx].mean(dim=1) # [N, G]
+        ctrl_p = ctrl[pert_idx].mean(dim=1) # [N, G]
+        weights = loss_weight[pert_idx] # [N, G]
+        if not use_mse_loss:
+            losses = losses + torch.sum(weights * (pred_p - y_p)**(2 + gamma))/pred_p.shape[0]/pred_p.shape[1]
+        else:
+            losses = losses + torch.sum(weights * (pred_p - y_p)**2)/pred_p.shape[0]/pred_p.shape[1]
+
+        ## direction loss
+        if not use_mse_loss:
+            losses = losses + torch.sum(weights * direction_lambda *
+                                (torch.sign(y_p - ctrl_p) -
+                                 torch.sign(pred_p - ctrl_p))**2)/\
+                                 pred_p.shape[0]/pred_p.shape[1]
+    return losses/(len(set(perts)))
+
 class PerturbationModel(L.LightningModule, ABC):
     """
     Base class for perturbation prediction models.
@@ -185,6 +231,8 @@ class PerturbationModel(L.LightningModule, ABC):
         pert_cell_emb = batch["pert_cell_emb"].to_dense()  # [B, S, G]
         ctrl_cell_emb = batch["ctrl_cell_emb"].to_dense()  # [B, S, G]
         pert_emb = batch["pert_emb"]  # [B, 5120]
+        loss_weight_emb = batch["loss_weight_emb"]  # [B, E]
+        loss_weight_gene = batch["loss_weight_gene"]  # [B, G]
 
         # Covariates: cell_type_onehot [B, S, n_cell_types], batch_onehot [B, S, n_batches]
         covariates = {
@@ -192,7 +240,7 @@ class PerturbationModel(L.LightningModule, ABC):
             "batch_onehot": batch["batch_onehot"]
         }
 
-        return pert_cell_emb, ctrl_cell_emb, pert_emb, covariates
+        return pert_cell_emb, ctrl_cell_emb, pert_emb, covariates, loss_weight_emb, loss_weight_gene
 
     @abstractmethod
     def forward(self, ctrl_cell_emb, pert_emb, covariates):

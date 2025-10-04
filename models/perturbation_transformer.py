@@ -51,7 +51,7 @@ class PerturbationTransformer(BaselineModel):
     Transformer-based perturbation prediction model.
     """
     
-    def __init__(self, n_transformer_layers: int = 16, n_heads: int = 16, d_ff: int = 2048, **kwargs):
+    def __init__(self, n_transformer_layers: int = 8, n_heads: int = 16, d_ff: int = 1024, **kwargs):
         super().__init__(**kwargs)
         self.residual_encoder_transformer = ResidualEncoder(
             d_h=self.d_h,

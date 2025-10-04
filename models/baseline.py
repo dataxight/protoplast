@@ -17,7 +17,7 @@ import torch.nn.functional as F
 from typing import Any, Dict, List
 import numpy as np
 
-from .base import PerturbationModel, mmd2_rff_batched, energy_distance_batched
+from .base import PerturbationModel, mmd2_rff_batched, energy_distance_batched, loss_fct
 from .nn.mlp import MLP
 from .nn.gears_loss import gears_autofocus_direction_loss
 from geomloss import SamplesLoss
@@ -267,14 +267,15 @@ class BaselineModel(PerturbationModel):
         ctrl_cell_emb = batch["ctrl_cell_emb"]
         pert_cell_emb = batch["pert_cell_emb"]
         pert_cell_data = batch["pert_cell_g"]
+        ctrl_cell_data = batch["ctrl_cell_g"]
         covariates = {
             "cell_type_onehot": batch["cell_type_onehot"],
             "batch_onehot": batch["batch_onehot"],
         }
-
-        
+        loss_weight_emb = batch["loss_weight_emb"]
+        loss_weight_gene = batch["loss_weight_gene"]
         pert_names = batch["pert_name"]
-        self.mean_target_map = self.mean_target_map.to(self.device)
+        # self.mean_target_map = self.mean_target_map.to(self.device)
         pred, pred_emb = self.forward(ctrl_cell_emb, pert_emb, covariates)
         # GEARS losses (tune gamma, lambda, tau as needed)
         #with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
@@ -283,14 +284,12 @@ class BaselineModel(PerturbationModel):
         #        pred_emb, pert_cell_emb, ctrl_cell_emb, gamma=1.0, lam=0.2, tau=0.0
         #    )
         B = pred.shape[0]
-
-        loss_mse_gene = F.mse_loss(pred, pert_cell_data)
-        loss_mse_hvg = F.mse_loss(pred_emb, pert_cell_emb)
-
-        loss = 0.1 * loss_mse_gene + 0.9 * loss_mse_hvg
+        # loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
+        loss_hvg = loss_fct(pred_emb, pert_cell_emb, pert_names, loss_weight_emb, ctrl_cell_emb, direction_lambda=1e-3)
+        loss = loss_hvg
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
-        self.log("train_loss_mse_gene", loss_mse_gene, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("train_loss_mse_hvg", loss_mse_hvg, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        # self.log("train_loss_all_gene", loss_all_gene, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        # self.log("train_loss_hvg", loss_hvg, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
     
     def validation_step(self, batch, batch_idx):
@@ -298,7 +297,10 @@ class BaselineModel(PerturbationModel):
         ctrl_cell_emb = batch["ctrl_cell_emb"]
         pert_cell_emb = batch["pert_cell_emb"]
         pert_cell_data = batch["pert_cell_g"]
-        
+        ctrl_cell_data = batch["ctrl_cell_g"]
+        loss_weight_emb = batch["loss_weight_emb"]
+        loss_weight_gene = batch["loss_weight_gene"]
+        pert_names = batch["pert_name"]
         pert_emb = batch["pert_emb"]
         
         covariates = {
@@ -315,10 +317,10 @@ class BaselineModel(PerturbationModel):
         #    )
         B = pred.shape[0]
         pert_names = batch["pert_name"]
-        loss_mse_gene = F.mse_loss(pred, pert_cell_data)
-        loss_mse_hvg = F.mse_loss(pred_emb, pert_cell_emb)
-        loss = 0.1 * loss_mse_gene + 0.9 * loss_mse_hvg
+        # loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
+        loss_hvg = loss_fct(pred_emb, pert_cell_emb, pert_names, loss_weight_emb, ctrl_cell_emb, direction_lambda=1e-3)
+        loss = loss_hvg
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
-        self.log("val_loss_mse_gene", loss_mse_gene, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("val_loss_mse_hvg", loss_mse_hvg, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        # self.log("val_loss_all_gene", loss_all_gene, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        # self.log("val_loss_hvg", loss_hvg, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         return loss

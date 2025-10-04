@@ -99,7 +99,7 @@ class BaselinePredictor:
                               dtype=torch.float16, enabled=self.device=='cuda'):
                 predictions, emb = self.model(ctrl_cell_emb, pert_emb, covariates)
         
-        return predictions 
+        return predictions, emb 
     
     def predict_batch(self, batch_data):
         """
@@ -129,7 +129,7 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer/baseline-epoch=19-val_loss=0.3139.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer-weight/baseline-epoch=19-val_loss=0.0137.ckpt"
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation.csv"
@@ -179,13 +179,14 @@ def baseline_vcc_inference():
         }
         
         # Predict perturbation effects
-        X_pert_hat = predictor.predict(X_ctrl, pert_emb, covariates)
+        X_pert_hat, emb = predictor.predict(X_ctrl, pert_emb, covariates)
         
         # Store results
         pert_names += list(np.repeat(gene, X_ctrl.shape[1]))
         
         # Reshape predictions to [S, G] and concatenate
         predictions = X_pert_hat.squeeze(0)  # Remove batch dimension
+        predictions[:, hvg_mask] = emb.squeeze(0)
         
         X = predictions if X is None else torch.cat([X, predictions], dim=0)
 
@@ -203,8 +204,8 @@ def baseline_vcc_inference():
     pert_names = np.array(pert_names)
 
     # Save results
-    path = "baseline_vcc_inference_hvg_transformer.h5ad"
-    ad.AnnData(
+    path = "baseline_vcc_inference_hvg_transformer_weight.h5ad"
+    adata = ad.AnnData(
         X=X,
         obs=pd.DataFrame(
             {
@@ -213,7 +214,8 @@ def baseline_vcc_inference():
             index=np.arange(X.shape[0]).astype(str),
         ),
         var=pd.DataFrame(index=gene_names),
-    ).write_h5ad(path)
+    )
+    adata.write_h5ad(path)
     
     print(f"\n🎉 Baseline VCC inference completed successfully!")
     print(f"Results saved to {path}")
@@ -224,7 +226,7 @@ def baseline_validation_inference():
     Run inference on validation data using the baseline model.
     """
     # checkpoint_path = "checkpoints/baseline/baseline-best.ckpt"  # Update with actual path
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-mmd/baseline-epoch=28-val_loss=7.6366.ckpt"  # Update with actual path
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer-weight/baseline-epoch=06-val_loss=0.0359.ckpt"  # Update with actual path
     
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
