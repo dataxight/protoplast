@@ -283,11 +283,22 @@ class BaselineModel(PerturbationModel):
         #    loss_gears, l_auto, l_dir = gears_autofocus_direction_loss(
         #        pred_emb, pert_cell_emb, ctrl_cell_emb, gamma=1.0, lam=0.2, tau=0.0
         #    )
-        B = pred.shape[0]
+        B, S, G = pred.shape
         loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
         loss_hvg = loss_fct(pred_emb, pert_cell_emb, pert_names, loss_weight_emb, ctrl_cell_emb, direction_lambda=1e-3)
-        loss = 0.1 * loss_all_gene + 0.9 * loss_hvg
+        loss_mse = 0.1 * loss_all_gene + 0.9 * loss_hvg
+        pert_cell_sum = pert_cell_data.sum(dim=-1, keepdim=True)
+        pred_sum = pred.sum(dim=-1, keepdim=True)
+        eps = 1e-12
+        pert_cell_data_scaled = pert_cell_data / (pert_cell_sum.clamp_min(eps))
+        pred_scaled = pred / (pred_sum.clamp_min(eps))
+        a = torch.full((B, S), 1.0 / S, device=self.device)
+        b = torch.full((B, S), 1.0 / S, device=self.device)
+        loss_ot = self.ot_loss(a, pred_scaled, b, pert_cell_data_scaled).mean()
+        loss = 0.5 * loss_mse + 0.5 * loss_ot
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
+        self.log("train_loss_mse", loss_mse, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("train_loss_ot", loss_ot, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         # self.log("train_loss_all_gene", loss_all_gene, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         # self.log("train_loss_hvg", loss_hvg, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
@@ -315,12 +326,21 @@ class BaselineModel(PerturbationModel):
         #    loss_gears, l_auto, l_dir = gears_autofocus_direction_loss(
         #        pred_emb, pert_cell_emb, ctrl_cell_emb, gamma=1.0, lam=0.2, tau=0.0
         #    )
-        B = pred.shape[0]
+        B, S, G = pred.shape
         pert_names = batch["pert_name"]
         loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
         loss_hvg = loss_fct(pred_emb, pert_cell_emb, pert_names, loss_weight_emb, ctrl_cell_emb, direction_lambda=1e-3)
-        loss = 0.1 * loss_all_gene + 0.9 * loss_hvg
+        loss_mse = 0.1 * loss_all_gene + 0.9 * loss_hvg
+        pert_cell_sum = pert_cell_data.sum(dim=-1, keepdim=True)
+        pred_sum = pred.sum(dim=-1, keepdim=True)
+        eps = 1e-12
+        pert_cell_data_scaled = pert_cell_data / (pert_cell_sum.clamp_min(eps))
+        pred_scaled = pred / (pred_sum.clamp_min(eps))
+        a = torch.full((B, S), 1.0 / S, device=self.device)
+        b = torch.full((B, S), 1.0 / S, device=self.device)
+        loss_ot = self.ot_loss(a, pred_scaled, b, pert_cell_data_scaled).mean()
+        loss = 0.5 * loss_mse + 0.5 * loss_ot
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
-        # self.log("val_loss_all_gene", loss_all_gene, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
-        # self.log("val_loss_hvg", loss_hvg, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("val_loss_mse", loss_mse, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("val_loss_ot", loss_ot, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
