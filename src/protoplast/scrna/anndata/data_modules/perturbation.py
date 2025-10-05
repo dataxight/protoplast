@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import scipy.sparse
 import torch
+import tqdm
 import torch.distributed as td
 from anndata._core.sparse_dataset import sparse_dataset
 from line_profiler import profile
@@ -207,17 +208,19 @@ class PerturbationDataset(DistributedAnnDataset):
         X = self._get_mat_by_range(self.h5files[file_i], start, end)
 
         # Get targets in this region
-        targets = adata_obs[self.target_label][start:end].values
+        targets = adata_obs[self.target_label][start:end].values.tolist()
         target_counts = pd.Series(targets).value_counts()
         target_cumsum = target_counts.cumsum()
         target_cumsum = np.insert(target_cumsum.values, 0, 0)
+        # print(start, end, target_counts, target_cumsum, targets, np.unique(targets))
 
         for i in range(1, len(target_counts) + 1):
             start_i, end_i = target_cumsum[i-1], target_cumsum[i]
-            target = target_counts.index[i-1]
+            target = targets[start_i]
 
             X_pert = X[start_i:end_i]
             original_cell_indices = np.arange(start + start_i, start + end_i)
+            # assert adata_obs[self.target_label][original_cell_indices][0] == target, "Target mismatch"
 
             for j in range(0, X_pert.shape[0], self.group_size_S):
                 X_pert_group = X_pert[j:j+self.group_size_S]
@@ -705,7 +708,12 @@ if __name__ == "__main__":
     # Test train dataloader
     if dm.indices['train_n_items'] > 0:
         print("\n=== Testing Training Data ===")
-        for i, batch in enumerate(dm.train_ds):
+        total_cells = 0
+        len_train_ds = len(dm.train_ds)
+        for i, batch in tqdm.tqdm(enumerate(dm.train_ds), total=len_train_ds):
+            total_cells += batch['pert_cell_g'].shape[0]
+            if i > len_train_ds:
+                break
             print("Batch keys:", batch.keys())
             # print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
             # print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
@@ -730,3 +738,11 @@ if __name__ == "__main__":
             print("pert_cell_barcode shape:", batch['pert_cell_barcode'])
             print("ctrl_cell_barcode shape:", batch['ctrl_cell_barcode'])
             break
+        # print(f"Total train cells: {total_cells}")
+        # total_cells = 0
+        # len_val_ds = len(dm.val_ds)
+        # for i, batch in tqdm.tqdm(enumerate(dm.val_ds), total=len_val_ds):
+            # if i > len_val_ds:
+                # break
+            # total_cells += batch['pert_cell_g'].shape[0]
+        # print(f"Total val cells: {total_cells}")
