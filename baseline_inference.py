@@ -226,7 +226,7 @@ def baseline_validation_inference():
     Run inference on validation data using the baseline model.
     """
     # checkpoint_path = "checkpoints/baseline/baseline-best.ckpt"  # Update with actual path
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer-weight/baseline-epoch=06-val_loss=0.0359.ckpt"  # Update with actual path
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer-weight/baseline-epoch=04-val_loss=0.1091.ckpt"
     
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
@@ -255,7 +255,7 @@ def baseline_validation_inference():
                 break
             print(f"Processing batch {i+1} / {len(val_loader)}: {batch['pert_name']}")
             
-            ctrl_cell_emb = batch["ctrl_cell_g"]
+            ctrl_cell_emb = batch["ctrl_cell_emb"]
             pert_emb = batch["pert_emb"]
             covariates = {
                 "cell_type_onehot": batch["cell_type_onehot"],
@@ -266,7 +266,7 @@ def baseline_validation_inference():
             pert_names += list(np.repeat(batch["pert_name"], ctrl_cell_emb.shape[1]))
             
             # Predict
-            predictions = predictor.predict(ctrl_cell_emb, pert_emb, covariates)  # [B, S, G]
+            predictions, emb = predictor.predict(ctrl_cell_emb, pert_emb, covariates)  # [B, S, G]
             
             # Reshape to [B*S, G]
             predictions = predictions.view(-1, predictions.shape[-1])
@@ -274,8 +274,13 @@ def baseline_validation_inference():
             X = predictions if X is None else torch.cat([X, predictions], dim=0)
 
         # Convert to numpy
-        X = X.cpu().numpy()
-        pert_names = np.array(pert_names)
+        X_ctrl = batch["ctrl_cell_g"].to_dense()
+        X_ctrl = X_ctrl.view(-1, X_ctrl.shape[-1]).numpy().astype(np.float32)
+        X = X.cpu().numpy().astype(np.float32)
+        X = np.concat([X, X_ctrl])
+        X = sp.csr_matrix(X)
+        print(X.shape)
+        pert_names = np.array(pert_names + ["non-targeting"] * X_ctrl.shape[0])
 
         # Save results
         gene_names = pd.read_csv("./gene_names.csv", header=None)[0].tolist()
@@ -309,4 +314,4 @@ if __name__ == "__main__":
     # baseline_validation_inference()
     
     # For VCC competition inference, uncomment:
-    baseline_vcc_inference()
+    baseline_validation_inference()
