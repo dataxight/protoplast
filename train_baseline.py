@@ -148,7 +148,7 @@ def main():
             pert_emb_dim=pert_emb_dim,
             n_cell_types=n_cell_types,
             n_batches=n_batches,
-            dropout=0.2,
+            dropout=0.1,
             mean_target_map=mean_target_map,
             mean_target_addresses=mean_target_addresses,
             lr=1e-3,
@@ -166,7 +166,7 @@ def main():
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
         mode="min",
-        save_top_k=5,
+        save_top_k=3,
         dirpath="checkpoints/baseline-hvg-transformer-weight/",
         filename="baseline-{epoch:02d}-{val_loss:.4f}"
     )
@@ -183,14 +183,14 @@ def main():
     # Create trainer
     logging.getLogger("pytorch_lightning").setLevel(logging.DEBUG)
     trainer = L.Trainer(
-        max_epochs=100,
+        max_epochs=20,
         callbacks=[checkpoint_callback],
         logger=logger,
         accelerator="auto",
         devices=1,
         precision="16-mixed",  # Use mixed precision for efficiency
         gradient_clip_val=1.0,
-        log_every_n_steps=20,
+        log_every_n_steps=5,
         check_val_every_n_epoch=1,
         enable_progress_bar=True,
         num_sanity_val_steps=0,

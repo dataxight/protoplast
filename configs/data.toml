@@ -5,10 +5,11 @@
 # ===============================
 [datasets]
 #replogle_h1 = "/ephemeral/vcc/competition_support_set_sorted/{competition_train,hepg2,jurkat,k562_gwps,k562,rpe1}.h5"
-replogle_h1 = "/mnt/hdd2/tan/competition_support_set_sorted/{competition_train,jurkat,k562_gwps,k562,rpe1}.h5"
+#replogle_h1 = "/mnt/hdd2/tan/competition_support_set_sorted/{competition_train,jurkat,k562_gwps,k562,rpe1}.h5"
 #hepg2 = "/mnt/hdd2/tan/competition_support_set_sorted/hepg2.h5"
-jiang = "/mnt/hdd2/tan/competition_support_set_sorted/jiang_{a549,bxpc3,hap1,ht29}.h5" 
-mcfaline = "/mnt/hdd2/tan/competition_support_set_sorted/mcfaline_{a172,t98g,u87mg}.h5" 
+#jiang = "/mnt/hdd2/tan/competition_support_set_sorted/jiang_{a549,bxpc3,hap1,ht29}.h5" 
+#mcfaline = "/mnt/hdd2/tan/competition_support_set_sorted/mcfaline_{a172,t98g,u87mg}.h5" 
+competition = "/mnt/hdd2/tan/competition_support_set_sorted/competition_train.h5"
 
 #replogle_h1 = "/mnt/hdd2/tan/competition_support_set_sorted/{competition_train,k562_gwps,rpe1}.h5"
 # ===============================
@@ -17,9 +18,9 @@ mcfaline = "/mnt/hdd2/tan/competition_support_set_sorted/mcfaline_{a172,t98g,u87
 # unless overridden by zeroshot/fewshot rules.
 # ===============================
 [training]
-replogle_h1 = "train"
-jiang = "train"
-mcfaline = "train"
+competition = "train"
+#jiang = "train"
+#mcfaline = "train"
 #hepg2 = "test"
 
 # ===============================
@@ -36,14 +37,23 @@ mcfaline = "train"
 [fewshot]
 # Example: for cell type ARC_H1 in dataset replogle_h1,
 # send the listed perturbations to val split.
-[fewshot."replogle_h1.k562_gwps"]
-val = ['ARPC2', 'COX6C', 'DPH2', 'EIF3H', 'HDAC3', 'HMGCR', 'HTATSF1', 'JAZF1', 'MAT2A']
-[fewshot."replogle_h1.rpe1"]
-val = ['PPP2R3C',
- 'SMARCB1',
- 'SMARCE1',
- 'STRAP',
- 'SUPV3L1',
- 'UQCRB',
- 'USF2',
- 'WAC']
+#[fewshot."replogle_h1.k562_gwps"]
+#val = ['ARPC2', 'COX6C', 'DPH2', 'EIF3H', 'HDAC3', 'HMGCR', 'HTATSF1', 'JAZF1', 'MAT2A']
+#[fewshot."replogle_h1.rpe1"]
+#val = ['PPP2R3C',
+# 'SMARCB1',
+# 'SMARCE1',
+# 'STRAP',
+# 'SUPV3L1',
+# 'UQCRB',
+# 'USF2',
+# 'WAC']
+[fewshot."competition.competition_train"]
+val = ['ACAT2', 'AKT2', 'TET1', 'BIRC2', 'ZNF714', 'SOX2', 'TGFBR2',
+       'EIF4B', 'DNAJA3', 'DAXX', 'OXA1L', 'DHX36', 'EPHB4', 'PRR12',
+       'BRD9', 'PAGR1', 'CDCA2', 'ACAT2', 'SV2A', 'STAT1', 'ZNF562',
+       'TSC22D4', 'CENPO', 'FDPS', 'HMGN1', 'CASP2', 'TWF2', 'TGFBR2',
+       'HMGN1', 'MKI67', 'EWSR1', 'MED13L', 'TAZ', 'MAPKAPK2', 'ATP1B1',
+       'ATP6V0C', 'EPHB4', 'CENPO', 'UQCRQ', 'MED13', 'EWSR1', 'CLDN7',
+       'NREP', 'SALL4', 'RNF2', 'CHMP3', 'AKT2', 'ATP6V0C', 'FOXH1',
+       'INSIG1']

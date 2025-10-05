@@ -284,9 +284,9 @@ class BaselineModel(PerturbationModel):
         #        pred_emb, pert_cell_emb, ctrl_cell_emb, gamma=1.0, lam=0.2, tau=0.0
         #    )
         B = pred.shape[0]
-        # loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
+        loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
         loss_hvg = loss_fct(pred_emb, pert_cell_emb, pert_names, loss_weight_emb, ctrl_cell_emb, direction_lambda=1e-3)
-        loss = loss_hvg
+        loss = 0.1 * loss_all_gene + 0.9 * loss_hvg
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
         # self.log("train_loss_all_gene", loss_all_gene, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         # self.log("train_loss_hvg", loss_hvg, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
@@ -317,9 +317,9 @@ class BaselineModel(PerturbationModel):
         #    )
         B = pred.shape[0]
         pert_names = batch["pert_name"]
-        # loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
+        loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
         loss_hvg = loss_fct(pred_emb, pert_cell_emb, pert_names, loss_weight_emb, ctrl_cell_emb, direction_lambda=1e-3)
-        loss = loss_hvg
+        loss = 0.1 * loss_all_gene + 0.9 * loss_hvg
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
         # self.log("val_loss_all_gene", loss_all_gene, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         # self.log("val_loss_hvg", loss_hvg, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)

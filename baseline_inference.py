@@ -129,7 +129,7 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer-weight/baseline-epoch=19-val_loss=0.0137.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer-weight/baseline-epoch=04-val_loss=0.1091.ckpt"
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation.csv"
@@ -186,7 +186,7 @@ def baseline_vcc_inference():
         
         # Reshape predictions to [S, G] and concatenate
         predictions = X_pert_hat.squeeze(0)  # Remove batch dimension
-        predictions[:, hvg_mask] = emb.squeeze(0)
+        # predictions[:, hvg_mask] = emb.squeeze(0)
         
         X = predictions if X is None else torch.cat([X, predictions], dim=0)
 
@@ -204,7 +204,7 @@ def baseline_vcc_inference():
     pert_names = np.array(pert_names)
 
     # Save results
-    path = "baseline_vcc_inference_hvg_transformer_weight.h5ad"
+    path = "baseline_vcc_inference_hvg_transformer_weight_comp_mse.h5ad"
     adata = ad.AnnData(
         X=X,
         obs=pd.DataFrame(
