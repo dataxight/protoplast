@@ -124,7 +124,6 @@ class BaselinePredictor:
         
         return self.predict(ctrl_cell_emb, pert_emb, covariates)
 
-
 def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
@@ -226,7 +225,7 @@ def baseline_validation_inference():
     Run inference on validation data using the baseline model.
     """
     # checkpoint_path = "checkpoints/baseline/baseline-best.ckpt"  # Update with actual path
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer-weight/baseline-epoch=15-val_loss=0.0376.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-sampling/baseline-epoch=13-val_loss=3.9436.ckpt"
     
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
@@ -314,7 +313,7 @@ if __name__ == "__main__":
     # test_baseline_inference()
     
     # If you have validation data available, uncomment:
-    # baseline_validation_inference()
+    baseline_validation_inference()
     
     # For VCC competition inference, uncomment:
-    baseline_vcc_inference()
+    # baseline_vcc_inference()

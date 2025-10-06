@@ -122,7 +122,11 @@ def main():
     
     sample_batch = next(iter(train_loader))
     
-    n_genes = sample_batch["pert_cell_g"].shape[-1]
+    if "pert_cell_g" in sample_batch:
+        n_genes = sample_batch["pert_cell_g"].shape[-1]
+    else:
+        print("pert_cell_g is not available, assuming using all genes for embedding")
+        n_genes = sample_batch["pert_cell_emb"].shape[-1]
     pert_emb_dim = sample_batch["pert_emb"].shape[-1]
     embedding_dim = sample_batch["pert_cell_emb"].shape[-1]
     n_cell_types = sample_batch["cell_type_onehot"].shape[-1]
@@ -167,7 +171,7 @@ def main():
         monitor="val_loss",
         mode="min",
         save_top_k=3,
-        dirpath="checkpoints/baseline-hvg-transformer-weight/",
+        dirpath="checkpoints/baseline-scvi-sampling/",
         filename="baseline-{epoch:02d}-{val_loss:.4f}"
     )
     
@@ -178,12 +182,12 @@ def main():
     )
     
     # Set up logger
-    logger = CSVLogger("logs", name="baseline-hvg-transformer-weight")
+    logger = CSVLogger("logs", name="baseline-scvi-sampling")
     
     # Create trainer
     logging.getLogger("pytorch_lightning").setLevel(logging.DEBUG)
     trainer = L.Trainer(
-        max_epochs=20,
+        max_epochs=50,
         callbacks=[checkpoint_callback],
         logger=logger,
         accelerator="auto",

@@ -50,7 +50,7 @@ class BaselineModel(PerturbationModel):
         n_batches: int = None,  # Number of batches (will be set from data)
         dropout: float = 0.1,
         use_nb: bool = True,
-        num_mc_samples: int = 0,
+        num_mc_samples: int = 1,
         kl_weight: float = 1e-3,
         **kwargs
     ):
@@ -117,14 +117,6 @@ class BaselineModel(PerturbationModel):
             n_layers=4,
             dropout=dropout,
             activation="gelu"
-        )
-        
-        # Bottleneck layer: up-down-up from E to d_f to G
-        self.bottleneck = nn.Sequential(
-            nn.Linear(embedding_dim, d_f),  # Up
-            nn.GELU(),
-            nn.Linear(d_f, n_genes),  # Down-up to genes
-            nn.ReLU()
         )
 
         self.norm = nn.LayerNorm(d_h)
@@ -321,8 +313,8 @@ class BaselineModel(PerturbationModel):
         pert_emb = batch["pert_emb"]
         ctrl_cell_emb = batch["ctrl_cell_emb"]
         pert_cell_emb = batch["pert_cell_emb"]
-        pert_cell_data = batch["pert_cell_g"]
-        ctrl_cell_data = batch["ctrl_cell_g"]
+        pert_cell_data = batch["pert_cell_emb"]
+        ctrl_cell_data = batch["ctrl_cell_emb"]
         covariates = {
             "cell_type_onehot": batch["cell_type_onehot"],
             "batch_onehot": batch["batch_onehot"],
@@ -341,7 +333,7 @@ class BaselineModel(PerturbationModel):
         B, S, G = pred.shape
         loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
         kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
-        loss= loss_all_gene + self.kl_weight * kl
+        loss= 0.9*loss_all_gene + 0.1*self.kl_weight * kl
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("train_kl", kl, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("train_loss_gene", loss_all_gene, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
@@ -351,8 +343,8 @@ class BaselineModel(PerturbationModel):
         """Validation step supporting Negative Binomial likelihood on gene counts."""
         ctrl_cell_emb = batch["ctrl_cell_emb"]
         pert_cell_emb = batch["pert_cell_emb"]
-        pert_cell_data = batch["pert_cell_g"]
-        ctrl_cell_data = batch["ctrl_cell_g"]
+        pert_cell_data = batch["pert_cell_emb"]
+        ctrl_cell_data = batch["ctrl_cell_emb"]
         loss_weight_emb = batch["loss_weight_emb"]
         loss_weight_gene = batch["loss_weight_gene"]
         pert_names = batch["pert_name"]
@@ -374,7 +366,7 @@ class BaselineModel(PerturbationModel):
         pert_names = batch["pert_name"]
         loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
         kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
-        loss = loss_all_gene + self.kl_weight * kl
+        loss = 0.9*loss_all_gene + 0.1*self.kl_weight * kl
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("val_kl", kl, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("val_loss_gene", loss_all_gene, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
