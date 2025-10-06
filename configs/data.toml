@@ -9,7 +9,7 @@
 #hepg2 = "/mnt/hdd2/tan/competition_support_set_sorted/hepg2.h5"
 #jiang = "/mnt/hdd2/tan/competition_support_set_sorted/jiang_{a549,bxpc3,hap1,ht29}.h5" 
 #mcfaline = "/mnt/hdd2/tan/competition_support_set_sorted/mcfaline_{a172,t98g,u87mg}.h5" 
-competition = "/mnt/hdd2/tan/competition_support_set_sorted/competition_train_emb.h5"
+competition = "/mnt/hdd2/tan/competition_support_set_sorted/competition_train.h5"
 
 #replogle_h1 = "/mnt/hdd2/tan/competition_support_set_sorted/{competition_train,k562_gwps,rpe1}.h5"
 # ===============================
@@ -48,7 +48,7 @@ competition = "train"
 # 'UQCRB',
 # 'USF2',
 # 'WAC']
-[fewshot."competition.competition_train_emb"]
+[fewshot."competition.competition_train"]
 val = ['ACAT2',
  'AKT2',
  'ATP1B1',

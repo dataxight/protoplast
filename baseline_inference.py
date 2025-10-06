@@ -44,7 +44,7 @@ class BaselinePredictor:
                 'd_h': 672,
                 'd_f': 512,
                 'n_genes': 18080,
-                'embedding_dim': 2000,
+                'embedding_dim': 18080,
                 'pert_emb_dim': 5120,
                 'dropout': 0.1
             }
@@ -128,7 +128,7 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer-weight/baseline-epoch=15-val_loss=0.0376.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-sampling/baseline-epoch=45-val_loss=1.7563.ckpt"
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation.csv"
@@ -225,7 +225,7 @@ def baseline_validation_inference():
     Run inference on validation data using the baseline model.
     """
     # checkpoint_path = "checkpoints/baseline/baseline-best.ckpt"  # Update with actual path
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-sampling/baseline-epoch=13-val_loss=3.9436.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-sampling/baseline-epoch=45-val_loss=1.7563.ckpt"
     
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
@@ -274,7 +274,10 @@ def baseline_validation_inference():
             X = predictions if X is None else torch.cat([X, predictions], dim=0)
 
         # Convert to numpy
-        X_ctrl = batch["ctrl_cell_g"].to_dense()
+        if "ctrl_cell_g" in batch:
+            X_ctrl = batch["ctrl_cell_g"].to_dense()
+        else:
+            X_ctrl = batch["ctrl_cell_emb"].to_dense()
         X_ctrl = X_ctrl.view(-1, X_ctrl.shape[-1]).numpy().astype(np.float32)
         X = X.cpu().numpy().astype(np.float32)
         X = np.concat([X, X_ctrl])
