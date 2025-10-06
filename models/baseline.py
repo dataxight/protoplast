@@ -313,8 +313,8 @@ class BaselineModel(PerturbationModel):
         pert_emb = batch["pert_emb"]
         ctrl_cell_emb = batch["ctrl_cell_emb"]
         pert_cell_emb = batch["pert_cell_emb"]
-        pert_cell_data = batch["pert_cell_emb"]
-        ctrl_cell_data = batch["ctrl_cell_emb"]
+        pert_cell_data = batch["pert_cell_g"]
+        ctrl_cell_data = batch["ctrl_cell_g"]
         covariates = {
             "cell_type_onehot": batch["cell_type_onehot"],
             "batch_onehot": batch["batch_onehot"],
@@ -343,8 +343,8 @@ class BaselineModel(PerturbationModel):
         """Validation step supporting Negative Binomial likelihood on gene counts."""
         ctrl_cell_emb = batch["ctrl_cell_emb"]
         pert_cell_emb = batch["pert_cell_emb"]
-        pert_cell_data = batch["pert_cell_emb"]
-        ctrl_cell_data = batch["ctrl_cell_emb"]
+        pert_cell_data = batch["pert_cell_g"]
+        ctrl_cell_data = batch["ctrl_cell_g"]
         loss_weight_emb = batch["loss_weight_emb"]
         loss_weight_gene = batch["loss_weight_gene"]
         pert_names = batch["pert_name"]
@@ -354,19 +354,15 @@ class BaselineModel(PerturbationModel):
             "cell_type_onehot": batch["cell_type_onehot"],
             "batch_onehot": batch["batch_onehot"],
         }
-        
-        pred= self.forward(ctrl_cell_emb, pert_emb, covariates)
-        # GEARS losses (tune gamma, lambda, tau as needed)
-        #with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
-        #                      dtype=torch.float32, enabled=self.device=='cuda'):
-        #    loss_gears, l_auto, l_dir = gears_autofocus_direction_loss(
-        #        pred_emb, pert_cell_emb, ctrl_cell_emb, gamma=1.0, lam=0.2, tau=0.0
-        #    )
-        B, S, G = pred.shape
-        pert_names = batch["pert_name"]
-        loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
-        kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
-        loss = 0.9*loss_all_gene + 0.1*self.kl_weight * kl
+
+        # no grad
+        with torch.no_grad():
+            pred= self.forward(ctrl_cell_emb, pert_emb, covariates)
+            B, S, G = pred.shape
+            pert_names = batch["pert_name"]
+            loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
+            kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
+            loss = 0.9*loss_all_gene + 0.1*self.kl_weight * kl
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("val_kl", kl, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("val_loss_gene", loss_all_gene, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
