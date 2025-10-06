@@ -226,7 +226,7 @@ def baseline_validation_inference():
     Run inference on validation data using the baseline model.
     """
     # checkpoint_path = "checkpoints/baseline/baseline-best.ckpt"  # Update with actual path
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer-weight/baseline-epoch=06-val_loss=0.0987.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer-weight/baseline-epoch=10-val_loss=5.5165.ckpt"
     
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
@@ -279,8 +279,10 @@ def baseline_validation_inference():
         X = X.cpu().numpy().astype(np.float32)
         X = np.concat([X, X_ctrl])
         X = sp.csr_matrix(X)
-        print(X.shape)
         pert_names = np.array(pert_names + ["non-targeting"] * X_ctrl.shape[0])
+        print(X.shape)
+        print(X_ctrl.shape)
+        print(pert_names.shape)
 
         # Save results
         gene_names = pd.read_csv("./gene_names.csv", header=None)[0].tolist()
