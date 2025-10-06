@@ -19,14 +19,14 @@
 
 # Dynamically get version from installed package metadata
 try:
-	from importlib.metadata import version, PackageNotFoundError
+    from importlib.metadata import version, PackageNotFoundError
 except ImportError:
-	from importlib_metadata import version, PackageNotFoundError  # type: ignore
+    from importlib_metadata import version, PackageNotFoundError  # type: ignore
 
 try:
-	__version__ = version("protoplast")
+    __version__ = version("protoplast")
 except PackageNotFoundError:
-	__version__ = "unknown"
+    __version__ = "unknown"
 
 from protoplast.scrna.anndata.lightning_models import LinearClassifier
 from protoplast.scrna.anndata.torch_dataloader import DistributedAnnDataset, DistributedCellLineAnnDataset
