@@ -47,7 +47,7 @@ def load_model(checkpoint_path: str, device: str, mean_target_map, mean_target_a
         }
     
     # Create model with hyperparameters
-    model = PerturbationTransformer(
+    model = BaselineModel(
         mean_target_map=hparams.get('mean_target_map', {}),
         mean_target_addresses=hparams.get('mean_target_addresses', {}),
         d_h=hparams.get('d_h', 672),
@@ -140,7 +140,7 @@ def main():
         model = load_model(args.checkpoint_path, "cuda", mean_target_map, mean_target_addresses)
     else:
         print("Create model from scratch")
-        model = PerturbationTransformer(
+        model = BaselineModel(
             d_h=672,  # Hidden dimension
             d_f=512,  # Bottleneck dimension
             n_genes=n_genes,

@@ -21,6 +21,7 @@ from .base import PerturbationModel, mmd2_rff_batched, energy_distance_batched, 
 from .nn.mlp import MLP
 from .nn.gears_loss import gears_autofocus_direction_loss
 from geomloss import SamplesLoss
+from .nn.scvi_like import Encoder as ScviEncoder, DecoderSCVI
 
 
 class BaselineModel(PerturbationModel):
@@ -50,6 +51,7 @@ class BaselineModel(PerturbationModel):
         dropout: float = 0.1,
         use_nb: bool = True,
         num_mc_samples: int = 0,
+        kl_weight: float = 1e-3,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -65,6 +67,7 @@ class BaselineModel(PerturbationModel):
         self.mean_target_map = mean_target_map
         self.mean_target_addresses = mean_target_addresses
         self.dropout = dropout
+        self.kl_weight = kl_weight
 
         # mean_target_map.to(self.device)
 
@@ -101,7 +104,7 @@ class BaselineModel(PerturbationModel):
             input_dim=d_h,
             hidden_dim=d_h,
             output_dim=d_h,
-            n_layers=2,
+            n_layers=4,
             dropout=dropout,
             activation="gelu"
         )
@@ -127,6 +130,24 @@ class BaselineModel(PerturbationModel):
         self.norm = nn.LayerNorm(d_h)
 
         self.ot_loss = SamplesLoss("sinkhorn", p=2, blur=0.05, scaling=0.9)
+
+        # scVI-style latent path: q(z|H) and decoder to counts
+        self.z_encoder = ScviEncoder(
+            n_input=d_h,
+            n_output=d_h,
+            n_layers=2,
+            n_hidden=d_h,
+            dropout_rate=dropout,
+        )
+        self.z_decoder = DecoderSCVI(
+            n_input=d_h,
+            n_output=n_genes,
+            n_layers=2,
+            n_hidden=d_h,
+            scale_activation="softmax",
+        )
+        # fixed library size 1e4 in log-space
+        self.register_buffer("fixed_log_library", torch.tensor(np.log(1e4), dtype=torch.float32))
 
     def _refine_H(self, H):
         # baseline path: simple residual MLP
@@ -208,6 +229,14 @@ class BaselineModel(PerturbationModel):
         loss = F.relu(margin + d_same[:, None] - d_other).mean()
         return loss
 
+    def _kl_normal_standard(self, mean: torch.Tensor, var: torch.Tensor) -> torch.Tensor:
+        """KL(q||p) where q=N(mean,var) and p=N(0,I). Returns mean over batch.
+        mean/var shaped [BS, D].
+        """
+        # 0.5 * sum(mu^2 + var - log var - 1)
+        kl = 0.5 * (mean.pow(2) + var - var.clamp_min(1e-8).log() - 1.0)
+        return kl.sum(dim=-1).mean()
+
     def forward(self, ctrl_cell_emb, pert_emb, covariates):
         """
         Forward pass implementing the baseline architecture.
@@ -249,17 +278,43 @@ class BaselineModel(PerturbationModel):
         if "cell_type_onehot" in covariates and self.cell_type_embedding is not None:
             H_batch += self.cell_type_embedding(covariates["cell_type_onehot"])
         
-        # 4. Combine encodings: H = H_ctrl + H_batch + H_pert
+        # 4. Combine encodings and refine
         H = H_ctrl + H_batch + H_pert  # [B, S, d_h]
         H = self._refine_H(self.norm(H))
-        
-        # 5. Project back to embedding space: MLP(d_h, E)
-        emb_output = self.projection_to_emb(H)  # [B, S, E]
-        
-        # 6. Bottleneck layer: up-down-up from E to d_f to G with ReLU
-        gene_output = self.bottleneck(emb_output)  # [B, S, G]
-        
-        return gene_output, emb_output
+
+        # Infer latent z ~ N(mu, var) using scVI-like encoder
+        BS = B * S
+        H_flat = H.reshape(BS, self.d_h)
+        q_m, q_v, z_flat = self.z_encoder(H_flat)
+        # KL against standard normal
+        self.last_kl = self._kl_normal_standard(q_m, q_v)
+        z = z_flat.reshape(B, S, self.d_h)
+
+        # Project latent to embedding space
+        # emb_output = self.projection_to_emb(z)  # [B, S, E]
+
+        # Decode to Gamma-Poisson (NB) params with dropout; fixed library size 1e4
+        lib = self.fixed_log_library.expand(BS, 1)
+        px_scale, px_r, px_rate, px_dropout = self.z_decoder(
+            dispersion="gene-cell", z=z_flat, library=lib
+        )
+        # Either sample from Gamma-Poisson with dropout or use expectation
+        if self.num_mc_samples and self.num_mc_samples > 0:
+            theta = F.softplus(px_r) + 1e-4  # inverse dispersion > 0
+            rate = theta / (px_rate.clamp_min(1e-8))
+            gamma_dist = torch.distributions.Gamma(concentration=theta, rate=rate)
+            lam = gamma_dist.rsample()  # [BS, G]
+            counts = torch.poisson(lam)
+            dropout_mask = torch.bernoulli(torch.sigmoid(px_dropout)).bool()
+            counts = counts.masked_fill(dropout_mask, 0.0)
+            out = counts
+        else:
+            dropout_p = torch.sigmoid(px_dropout)
+            out = (1.0 - dropout_p) * px_rate  # expectation under ZINB
+        gene_output = out.reshape(B, S, self.n_genes)
+        gene_output = torch.log1p(gene_output)
+
+        return gene_output
 
     def training_step(self, batch, batch_idx):
         """Training step supporting Negative Binomial likelihood on gene counts."""
@@ -276,7 +331,7 @@ class BaselineModel(PerturbationModel):
         loss_weight_gene = batch["loss_weight_gene"]
         pert_names = batch["pert_name"]
         # self.mean_target_map = self.mean_target_map.to(self.device)
-        pred, pred_emb = self.forward(ctrl_cell_emb, pert_emb, covariates)
+        pred = self.forward(ctrl_cell_emb, pert_emb, covariates)
         # GEARS losses (tune gamma, lambda, tau as needed)
         #with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
         #                      dtype=torch.float32, enabled=self.device=='cuda'):
@@ -285,12 +340,11 @@ class BaselineModel(PerturbationModel):
         #    )
         B, S, G = pred.shape
         loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
-        loss_hvg = loss_fct(pred_emb, pert_cell_emb, pert_names, loss_weight_emb, ctrl_cell_emb, direction_lambda=1e-3)
-        loss_ed = energy_distance_batched(pred_emb, pert_cell_emb, reduction="mean")
-        loss= 0.1 * loss_all_gene + 0.5 * loss_hvg + 0.4 * loss_ed
+        kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
+        loss= loss_all_gene + self.kl_weight * kl
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
-        self.log("train_loss_hvg", loss_hvg, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("train_loss_ed", loss_ed, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("train_kl", kl, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("train_loss_gene", loss_all_gene, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
     
     def validation_step(self, batch, batch_idx):
@@ -309,7 +363,7 @@ class BaselineModel(PerturbationModel):
             "batch_onehot": batch["batch_onehot"],
         }
         
-        pred, pred_emb = self.forward(ctrl_cell_emb, pert_emb, covariates)
+        pred= self.forward(ctrl_cell_emb, pert_emb, covariates)
         # GEARS losses (tune gamma, lambda, tau as needed)
         #with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
         #                      dtype=torch.float32, enabled=self.device=='cuda'):
@@ -319,10 +373,9 @@ class BaselineModel(PerturbationModel):
         B, S, G = pred.shape
         pert_names = batch["pert_name"]
         loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
-        loss_hvg = loss_fct(pred_emb, pert_cell_emb, pert_names, loss_weight_emb, ctrl_cell_emb, direction_lambda=1e-3)
-        loss_ed = energy_distance_batched(pred_emb, pert_cell_emb, reduction="mean")
-        loss = 0.1 * loss_all_gene + 0.5 * loss_hvg + 0.4 * loss_ed
+        kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
+        loss = loss_all_gene + self.kl_weight * kl
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
-        self.log("val_loss_hvg", loss_hvg, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("val_loss_ed", loss_ed, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("val_kl", kl, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("val_loss_gene", loss_all_gene, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         return loss

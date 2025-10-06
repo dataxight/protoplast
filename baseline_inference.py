@@ -50,7 +50,7 @@ class BaselinePredictor:
             }
         
         # Create model with hyperparameters
-        model = PerturbationTransformer(
+        model = BaselineModel(
             mean_target_map=hparams.get('mean_target_map', {}),
             mean_target_addresses=hparams.get('mean_target_addresses', {}),
             d_h=hparams.get('d_h', 512),
@@ -97,9 +97,9 @@ class BaselinePredictor:
         with torch.no_grad():
             with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
                               dtype=torch.float16, enabled=self.device=='cuda'):
-                predictions, emb = self.model(ctrl_cell_emb, pert_emb, covariates)
+                predictions = self.model(ctrl_cell_emb, pert_emb, covariates)
         
-        return predictions, emb 
+        return predictions
     
     def predict_batch(self, batch_data):
         """
@@ -129,7 +129,7 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer-weight/baseline-epoch=04-val_loss=0.1091.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer-weight/baseline-epoch=15-val_loss=0.0376.ckpt"
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation.csv"
@@ -179,7 +179,7 @@ def baseline_vcc_inference():
         }
         
         # Predict perturbation effects
-        X_pert_hat, emb = predictor.predict(X_ctrl, pert_emb, covariates)
+        X_pert_hat = predictor.predict(X_ctrl, pert_emb, covariates)
         
         # Store results
         pert_names += list(np.repeat(gene, X_ctrl.shape[1]))
@@ -226,7 +226,7 @@ def baseline_validation_inference():
     Run inference on validation data using the baseline model.
     """
     # checkpoint_path = "checkpoints/baseline/baseline-best.ckpt"  # Update with actual path
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer-weight/baseline-epoch=10-val_loss=5.5165.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-hvg-transformer-weight/baseline-epoch=15-val_loss=0.0376.ckpt"
     
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
@@ -266,7 +266,8 @@ def baseline_validation_inference():
             pert_names += list(np.repeat(batch["pert_name"], ctrl_cell_emb.shape[1]))
             
             # Predict
-            predictions, emb = predictor.predict(ctrl_cell_emb, pert_emb, covariates)  # [B, S, G]
+            # predictions, emb = predictor.predict(ctrl_cell_emb, pert_emb, covariates)  # [B, S, G]
+            predictions = predictor.predict(ctrl_cell_emb, pert_emb, covariates)  # [B, S, G]
             
             # Reshape to [B*S, G]
             predictions = predictions.view(-1, predictions.shape[-1])
@@ -316,4 +317,4 @@ if __name__ == "__main__":
     # baseline_validation_inference()
     
     # For VCC competition inference, uncomment:
-    baseline_validation_inference()
+    baseline_vcc_inference()
