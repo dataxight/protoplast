@@ -313,13 +313,15 @@ class BaselineModel(PerturbationModel):
         pert_emb = batch["pert_emb"]
         ctrl_cell_emb = batch["ctrl_cell_emb"]
         pert_cell_emb = batch["pert_cell_emb"]
-        pert_cell_data = batch["pert_cell_g"]
-        ctrl_cell_data = batch["ctrl_cell_g"]
+        #pert_cell_data = batch["pert_cell_g"]
+        #ctrl_cell_data = batch["ctrl_cell_g"]
+        pert_cell_data = batch["pert_cell_emb"]
+        ctrl_cell_data = batch["ctrl_cell_emb"]
         covariates = {
             "cell_type_onehot": batch["cell_type_onehot"],
             "batch_onehot": batch["batch_onehot"],
         }
-        loss_weight_emb = batch["loss_weight_emb"]
+        # loss_weight_emb = batch["loss_weight_emb"]
         loss_weight_gene = batch["loss_weight_gene"]
         pert_names = batch["pert_name"]
         # self.mean_target_map = self.mean_target_map.to(self.device)
@@ -343,9 +345,11 @@ class BaselineModel(PerturbationModel):
         """Validation step supporting Negative Binomial likelihood on gene counts."""
         ctrl_cell_emb = batch["ctrl_cell_emb"]
         pert_cell_emb = batch["pert_cell_emb"]
-        pert_cell_data = batch["pert_cell_g"]
-        ctrl_cell_data = batch["ctrl_cell_g"]
-        loss_weight_emb = batch["loss_weight_emb"]
+        #pert_cell_data = batch["pert_cell_g"]
+        #ctrl_cell_data = batch["ctrl_cell_g"]
+        pert_cell_data = batch["pert_cell_emb"]
+        ctrl_cell_data = batch["ctrl_cell_emb"]
+        # loss_weight_emb = batch["loss_weight_emb"]
         loss_weight_gene = batch["loss_weight_gene"]
         pert_names = batch["pert_name"]
         pert_emb = batch["pert_emb"]

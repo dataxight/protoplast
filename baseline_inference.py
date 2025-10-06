@@ -128,10 +128,10 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-sampling/baseline-epoch=45-val_loss=1.7563.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-sampling/baseline-epoch=00-val_loss=0.0111.ckpt"
     
     # Define our path
-    pert_counts_path = "./pert_counts_Validation.csv"
+    pert_counts_path = "./pert_counts_Validation_local.csv"
     pert_counts = pd.read_csv(pert_counts_path)
     gene_names = pd.read_csv("./gene_names.csv", header=None)
     gene_names = gene_names[0].tolist()
@@ -163,7 +163,7 @@ def baseline_vcc_inference():
         # Randomly select n_cells from control_adata
         control_indices = np.random.choice(range(len(control_adata)), size=n_cells, replace=False)
         X_ctrl = control_adata.X[control_indices]
-        X_ctrl = X_ctrl[:, hvg_mask]
+        #X_ctrl = X_ctrl[:, hvg_mask]
         X_ctrl = X_ctrl.toarray()
         X_ctrl = torch.from_numpy(X_ctrl).float()
         X_ctrl = X_ctrl.unsqueeze(0)  # Add batch dimension [1, S, E]
@@ -203,7 +203,7 @@ def baseline_vcc_inference():
     pert_names = np.array(pert_names)
 
     # Save results
-    path = "baseline_vcc_inference_hvg_transformer_weight_comp_mse.h5ad"
+    path = "baseline_vcc_inference.h5ad"
     adata = ad.AnnData(
         X=X,
         obs=pd.DataFrame(
@@ -225,7 +225,7 @@ def baseline_validation_inference():
     Run inference on validation data using the baseline model.
     """
     # checkpoint_path = "checkpoints/baseline/baseline-best.ckpt"  # Update with actual path
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-sampling/baseline-epoch=09-val_loss=0.0407.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-sampling/baseline-epoch=11-val_loss=0.0654.ckpt"
     
     dm = PerturbationDataModule(
         config_path="configs/data.toml",

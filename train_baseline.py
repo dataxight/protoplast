@@ -100,8 +100,8 @@ def main():
         config_path="configs/data.toml",
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt",
         batch_size=32,
-        group_size_S=256,
-        num_workers=6
+        group_size_S=64,
+        num_workers=8
     )
     dm.setup(stage="fit")
     
