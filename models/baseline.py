@@ -17,7 +17,7 @@ import torch.nn.functional as F
 from typing import Any, Dict, List
 import numpy as np
 
-from .base import PerturbationModel, mmd2_rff_batched, energy_distance_batched, loss_fct
+from .base import PerturbationModel, mmd2_rff_batched, energy_distance_batched, loss_fct, loss_fct_vectorized
 from .nn.mlp import MLP
 from .nn.gears_loss import gears_autofocus_direction_loss
 from geomloss import SamplesLoss
@@ -283,7 +283,10 @@ class BaselineModel(PerturbationModel):
         z = z_flat.reshape(B, S, self.d_h)
 
         # Project latent to embedding space
-        # emb_output = self.projection_to_emb(z)  # [B, S, E]
+        emb_rate = self.projection_to_emb(z)  # [B, S, E]
+        emb_scale = torch.softmax(emb_rate, dim=-1)
+        emb_out = emb_scale * ctrl_cell_emb.sum(dim=2)[:, :, None]
+
 
         # Decode to Gamma-Poisson (NB) params with dropout; fixed library size 1e4
         lib = self.fixed_log_library.expand(BS, 1)
@@ -292,7 +295,9 @@ class BaselineModel(PerturbationModel):
         )
         # Either sample from Gamma-Poisson with dropout or use expectation
         if self.num_mc_samples and self.num_mc_samples > 0:
+            DISPERSION_SCALE = 0.5
             theta = F.softplus(px_r) + 1e-4  # inverse dispersion > 0
+            theta = theta * DISPERSION_SCALE
             rate = theta / (px_rate.clamp_min(1e-8))
             gamma_dist = torch.distributions.Gamma(concentration=theta, rate=rate)
             lam = gamma_dist.rsample()  # [BS, G]
@@ -306,50 +311,46 @@ class BaselineModel(PerturbationModel):
         gene_output = out.reshape(B, S, self.n_genes)
         gene_output = torch.log1p(gene_output)
 
-        return gene_output
+        return gene_output, emb_out
 
     def training_step(self, batch, batch_idx):
         """Training step supporting Negative Binomial likelihood on gene counts."""
         pert_emb = batch["pert_emb"]
         ctrl_cell_emb = batch["ctrl_cell_emb"]
         pert_cell_emb = batch["pert_cell_emb"]
-        #pert_cell_data = batch["pert_cell_g"]
-        #ctrl_cell_data = batch["ctrl_cell_g"]
-        pert_cell_data = batch["pert_cell_emb"]
-        ctrl_cell_data = batch["ctrl_cell_emb"]
+        pert_cell_data = batch["pert_cell_g"]
+        ctrl_cell_data = batch["ctrl_cell_g"]
+        # pert_cell_data = batch["pert_cell_emb"]
+        # ctrl_cell_data = batch["ctrl_cell_emb"]
         covariates = {
             "cell_type_onehot": batch["cell_type_onehot"],
             "batch_onehot": batch["batch_onehot"],
         }
-        # loss_weight_emb = batch["loss_weight_emb"]
+        loss_weight_emb = batch["loss_weight_emb"]
         loss_weight_gene = batch["loss_weight_gene"]
         pert_names = batch["pert_name"]
         # self.mean_target_map = self.mean_target_map.to(self.device)
-        pred = self.forward(ctrl_cell_emb, pert_emb, covariates)
-        # GEARS losses (tune gamma, lambda, tau as needed)
-        #with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
-        #                      dtype=torch.float32, enabled=self.device=='cuda'):
-        #    loss_gears, l_auto, l_dir = gears_autofocus_direction_loss(
-        #        pred_emb, pert_cell_emb, ctrl_cell_emb, gamma=1.0, lam=0.2, tau=0.0
-        #    )
+        pred, emb_out = self.forward(ctrl_cell_emb, pert_emb, covariates)
         B, S, G = pred.shape
-        loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
+        loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3, use_mse_loss=True)
+        loss_all_emb = loss_fct(emb_out, pert_cell_emb, pert_names, loss_weight_emb, ctrl_cell_emb, direction_lambda=1e-3, use_mse_loss=True)
         kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
-        loss= 0.9*loss_all_gene + 0.1*self.kl_weight * kl
+        loss= 0.8*loss_all_gene + 0.1*self.kl_weight * kl + 0.1*loss_all_emb
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("train_kl", kl, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("train_loss_gene", loss_all_gene, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("train_loss_emb", loss_all_emb, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
     
     def validation_step(self, batch, batch_idx):
         """Validation step supporting Negative Binomial likelihood on gene counts."""
         ctrl_cell_emb = batch["ctrl_cell_emb"]
         pert_cell_emb = batch["pert_cell_emb"]
-        #pert_cell_data = batch["pert_cell_g"]
-        #ctrl_cell_data = batch["ctrl_cell_g"]
-        pert_cell_data = batch["pert_cell_emb"]
-        ctrl_cell_data = batch["ctrl_cell_emb"]
-        # loss_weight_emb = batch["loss_weight_emb"]
+        pert_cell_data = batch["pert_cell_g"]
+        ctrl_cell_data = batch["ctrl_cell_g"]
+        # pert_cell_data = batch["pert_cell_emb"]
+        # ctrl_cell_data = batch["ctrl_cell_emb"]
+        loss_weight_emb = batch["loss_weight_emb"]
         loss_weight_gene = batch["loss_weight_gene"]
         pert_names = batch["pert_name"]
         pert_emb = batch["pert_emb"]
@@ -361,13 +362,15 @@ class BaselineModel(PerturbationModel):
 
         # no grad
         with torch.no_grad():
-            pred= self.forward(ctrl_cell_emb, pert_emb, covariates)
+            pred, emb_out = self.forward(ctrl_cell_emb, pert_emb, covariates)
             B, S, G = pred.shape
             pert_names = batch["pert_name"]
             loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
+            loss_all_emb = loss_fct(emb_out, pert_cell_emb, pert_names, loss_weight_emb, ctrl_cell_emb, direction_lambda=1e-3, use_mse_loss=True)
             kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
-            loss = 0.9*loss_all_gene + 0.1*self.kl_weight * kl
+            loss = 0.8*loss_all_gene + 0.1*self.kl_weight * kl + 0.1*loss_all_emb
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("val_kl", kl, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("val_loss_gene", loss_all_gene, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("val_loss_emb", loss_all_emb, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         return loss

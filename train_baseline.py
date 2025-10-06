@@ -99,8 +99,8 @@ def main():
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt",
-        batch_size=32,
-        group_size_S=64,
+        batch_size=16,
+        group_size_S=128,
         num_workers=8
     )
     dm.setup(stage="fit")
@@ -168,11 +168,11 @@ def main():
     
     # Set up callbacks
     checkpoint_callback = ModelCheckpoint(
-        monitor="val_loss",
+        monitor="train_loss_epoch",
         mode="min",
         save_top_k=3,
         dirpath="checkpoints/baseline-scvi-sampling/",
-        filename="baseline-{epoch:02d}-{val_loss:.4f}"
+        filename="baseline-{epoch:02d}-{train_loss_epoch:.4f}"
     )
     
     early_stopping = EarlyStopping(

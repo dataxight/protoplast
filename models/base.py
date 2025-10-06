@@ -143,6 +143,72 @@ def loss_fct(pred: torch.Tensor,
                                  pred_p.shape[0]/pred_p.shape[1]
     return losses/(len(set(perts)))
 
+def loss_fct_vectorized(pred: torch.Tensor, 
+            y: torch.Tensor, 
+            perts: torch.Tensor,
+            loss_weight: torch.Tensor,
+            ctrl: torch.Tensor = None, 
+            direction_lambda: float = 1e-3, 
+            dict_filter: dict = None, 
+            use_mse_loss: bool = False):
+    """Vectorized implementation"""
+    gamma = 2
+    device = pred.device
+    
+    # Handle string perturbations by mapping to integers
+    if not isinstance(perts, torch.Tensor):
+        if perts.dtype.kind in ['U', 'S', 'O']:  # Unicode, byte string, or object
+            # Map string perturbations to integers
+            unique_strs, inverse = np.unique(perts, return_inverse=True)
+            perts = torch.from_numpy(inverse).to(device)
+        else:
+            perts = torch.from_numpy(perts).to(device)
+    elif perts.device != device:
+        perts = perts.to(device)
+    
+    pred_mean = pred.mean(dim=1)  # [N, G]
+    y_mean = y.mean(dim=1)  # [N, G]
+    ctrl_mean = ctrl.mean(dim=1)  # [N, G]
+    
+    error = pred_mean - y_mean
+    
+    if not use_mse_loss:
+        main_loss = loss_weight * (error) ** (2 + gamma)
+    else:
+        main_loss = loss_weight * (error) ** 2
+    
+    if not use_mse_loss:
+        sign_diff = torch.sign(y_mean - ctrl_mean) - torch.sign(pred_mean - ctrl_mean)
+        dir_loss = loss_weight * direction_lambda * (sign_diff ** 2)
+        total_loss_per_sample = main_loss + dir_loss  # [N, G]
+    else:
+        total_loss_per_sample = main_loss  # [N, G]
+    
+    unique_perts, inverse_indices = torch.unique(perts, return_inverse=True)
+    n_perts = len(unique_perts)
+    
+    # For each perturbation, we need to:
+    # 1. Sum all losses for samples in that perturbation
+    # 2. Divide by (num_samples_in_pert * num_genes)
+    
+    # Sum losses for each perturbation
+    loss_per_pert = torch.zeros(n_perts, device=device)
+    sample_count_per_pert = torch.zeros(n_perts, device=device)
+    
+    # Sum the total loss across genes for each sample
+    sample_losses = total_loss_per_sample.sum(dim=1)  # [N]
+    
+    # Scatter add to group by perturbation
+    loss_per_pert.scatter_add_(0, inverse_indices, sample_losses)
+    sample_count_per_pert.scatter_add_(0, inverse_indices, torch.ones(pred.shape[0], device=device))
+    
+    # Divide by (num_samples * num_genes) for each perturbation
+    num_genes = pred_mean.shape[1]  # This is G, not T!
+    avg_loss_per_pert = loss_per_pert / (sample_count_per_pert * num_genes)
+    
+    # Average across perturbations
+    return avg_loss_per_pert.mean()
+
 class PerturbationModel(L.LightningModule, ABC):
     """
     Base class for perturbation prediction models.

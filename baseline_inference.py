@@ -128,7 +128,7 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-sampling/baseline-epoch=00-val_loss=0.0111.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-sampling/baseline-epoch=14-train_loss_epoch=0.0965.ckpt"
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation_local.csv"
@@ -316,7 +316,7 @@ if __name__ == "__main__":
     # test_baseline_inference()
     
     # If you have validation data available, uncomment:
-    baseline_validation_inference()
+    #baseline_validation_inference()
     
     # For VCC competition inference, uncomment:
-    # baseline_vcc_inference()
+    baseline_vcc_inference()
