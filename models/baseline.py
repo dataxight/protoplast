@@ -50,7 +50,7 @@ class BaselineModel(PerturbationModel):
         n_batches: int = None,  # Number of batches (will be set from data)
         dropout: float = 0.1,
         use_nb: bool = True,
-        num_mc_samples: int = 1,
+        num_mc_samples: int = 0,
         kl_weight: float = 1e-3,
         **kwargs
     ):
@@ -127,14 +127,14 @@ class BaselineModel(PerturbationModel):
         self.z_encoder = ScviEncoder(
             n_input=d_h,
             n_output=d_h,
-            n_layers=2,
+            n_layers=4,
             n_hidden=d_h,
             dropout_rate=dropout,
         )
         self.z_decoder = DecoderSCVI(
             n_input=d_h,
             n_output=n_genes,
-            n_layers=2,
+            n_layers=4,
             n_hidden=d_h,
             scale_activation="softmax",
         )
@@ -272,7 +272,7 @@ class BaselineModel(PerturbationModel):
         
         # 4. Combine encodings and refine
         H = H_ctrl + H_batch + H_pert  # [B, S, d_h]
-        H = self._refine_H(self.norm(H))
+        H = self._refine_H(H)
 
         # Infer latent z ~ N(mu, var) using scVI-like encoder
         BS = B * S
@@ -302,7 +302,7 @@ class BaselineModel(PerturbationModel):
             out = counts
         else:
             dropout_p = torch.sigmoid(px_dropout)
-            out = (1.0 - dropout_p) * px_rate  # expectation under ZINB
+            out = (1.0 - dropout_p) * px_rate # expectation under ZINB
         gene_output = out.reshape(B, S, self.n_genes)
         gene_output = torch.log1p(gene_output)
 

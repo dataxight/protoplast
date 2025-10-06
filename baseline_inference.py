@@ -225,7 +225,7 @@ def baseline_validation_inference():
     Run inference on validation data using the baseline model.
     """
     # checkpoint_path = "checkpoints/baseline/baseline-best.ckpt"  # Update with actual path
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-sampling/baseline-epoch=45-val_loss=1.7563.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-sampling/baseline-epoch=09-val_loss=0.0407.ckpt"
     
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
