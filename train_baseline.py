@@ -99,9 +99,9 @@ def main():
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt",
-        batch_size=8,
+        batch_size=64,
         group_size_S=64,
-        num_workers=24
+        num_workers=8
     )
     dm.setup(stage="fit")
     
@@ -171,7 +171,7 @@ def main():
         monitor="val_loss",
         mode="min",
         save_top_k=3,
-        dirpath="checkpoints/baseline-scvi-sampling/",
+        dirpath="checkpoints/baseline-scvi-centroid/",
         filename="baseline-{epoch:02d}-{val_loss:.4f}"
     )
     
@@ -182,7 +182,7 @@ def main():
     )
     
     # Set up logger
-    logger = CSVLogger("logs", name="baseline-scvi-sampling")
+    logger = CSVLogger("logs", name="baseline-scvi-centroid")
     
     # Create trainer
     logging.getLogger("pytorch_lightning").setLevel(logging.DEBUG)

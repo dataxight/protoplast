@@ -109,15 +109,15 @@ class BaselineModel(PerturbationModel):
             activation="gelu"
         )
         
-        # Projection back to embedding space: MLP(d_h, E)
-        self.projection_to_emb = MLP(
-            input_dim=d_h,
-            hidden_dim=d_h,
-            output_dim=embedding_dim,
-            n_layers=4,
-            dropout=dropout,
-            activation="gelu"
-        )
+        # # Projection back to embedding space: MLP(d_h, E)
+        # self.projection_to_emb = MLP(
+        #     input_dim=d_h,
+        #     hidden_dim=d_h,
+        #     output_dim=embedding_dim,
+        #     n_layers=4,
+        #     dropout=dropout,
+        #     activation="gelu"
+        # )
 
         self.norm = nn.LayerNorm(d_h)
 
@@ -217,7 +217,7 @@ class BaselineModel(PerturbationModel):
         neg_sel = neg_pool[:K]  # [K]
         neg_means = self.mean_target_map.to(pred.device)[neg_sel]
         d_other = (pred[:, None, :] - neg_means[None, :, :]).abs().sum(dim=-1)  # [B,K]
-        margin = 25.0  # tune
+        margin = 10.0  # tune
         loss = F.relu(margin + d_same[:, None] - d_other).mean()
         return loss
 
@@ -326,15 +326,18 @@ class BaselineModel(PerturbationModel):
         }
         loss_weight_gene = batch["loss_weight_gene"]
         pert_names = batch["pert_name"]
-        # self.mean_target_map = self.mean_target_map.to(self.device)
+        self.mean_target_map = self.mean_target_map.to(self.device)
         pred = self.forward(ctrl_cell_emb, pert_emb, covariates)
+        loss_centroid = self.calculate_loss_centroid(pred, pert_names)
+
         B, S, G = pred.shape
         loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
         kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
-        loss= loss_all_gene + self.kl_weight * kl
+        loss= loss_all_gene + self.kl_weight * kl + loss_centroid
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("train_kl", kl, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("train_loss_gene", loss_all_gene, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("train_loss_centroid", loss_centroid, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
     
     def validation_step(self, batch, batch_idx):
@@ -356,11 +359,13 @@ class BaselineModel(PerturbationModel):
         with torch.no_grad():
             pred = self.forward(ctrl_cell_emb, pert_emb, covariates)
             B, S, G = pred.shape
+            loss_centroid = self.calculate_loss_centroid(pred, pert_names)
             pert_names = batch["pert_name"]
             loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
             kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
-            loss = loss_all_gene + self.kl_weight * kl
+            loss = loss_all_gene + self.kl_weight * kl + loss_centroid
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("val_kl", kl, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("val_loss_gene", loss_all_gene, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("val_loss_centroid", loss_centroid, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
