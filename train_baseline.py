@@ -99,9 +99,9 @@ def main():
     dm = PerturbationDataModule(
         config_path="configs/data.toml",
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt",
-        batch_size=16,
-        group_size_S=128,
-        num_workers=8
+        batch_size=8,
+        group_size_S=64,
+        num_workers=24
     )
     dm.setup(stage="fit")
     
@@ -187,7 +187,7 @@ def main():
     # Create trainer
     logging.getLogger("pytorch_lightning").setLevel(logging.DEBUG)
     trainer = L.Trainer(
-        max_epochs=50,
+        max_epochs=20,
         callbacks=[checkpoint_callback],
         logger=logger,
         accelerator="auto",
