@@ -101,14 +101,9 @@ class RayTrainRunner:
             self.ray_trainer_strategy = ray_trainer_strategy
 
         # Init ray cluster
-        DEFAULT_RUNTIME_ENV_CONFIG = {
-            "working_dir": os.getenv("PWD"),  # Allow ray workers to inherit venv at $PWD if there is any
-        }
         if runtime_env_config is None:
-            runtime_env_config = DEFAULT_RUNTIME_ENV_CONFIG
-        ray.init(
-            address=address, runtime_env={**DEFAULT_RUNTIME_ENV_CONFIG, **runtime_env_config}, ignore_reinit_error=True
-        )
+            runtime_env_config = {}
+        ray.init(address=address, runtime_env=runtime_env_config, ignore_reinit_error=True)
 
         self.resources = ray.cluster_resources()
 
