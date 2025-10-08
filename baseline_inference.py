@@ -128,7 +128,7 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-sampling/best.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-centroid/last.ckpt"
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation_val.csv"

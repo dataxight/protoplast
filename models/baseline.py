@@ -216,9 +216,25 @@ class BaselineModel(PerturbationModel):
         # neg_sel = neg_pool[torch.randint(0, neg_pool.numel(), (K,))]  # [K]
         neg_sel = neg_pool[:K]  # [K]
         neg_means = self.mean_target_map.to(pred.device)[neg_sel]
+        # TODO: mean this across batch
         d_other = (pred[:, None, :] - neg_means[None, :, :]).abs().sum(dim=-1)  # [B,K]
-        margin = 10.0  # tune
-        loss = F.relu(margin + d_same[:, None] - d_other).mean()
+        # margin = 10.0  # tune
+        loss = F.relu(d_same[:, None] - d_other).mean()
+        return loss
+
+    def l1_loss(self, pred, pert_names: np.ndarray):
+        """
+        Calculate the L1 loss between the predicted and true values.
+        """
+        B, S, G = pred.shape
+        unique_pert_names, inverse_indices = np.unique(pert_names, return_inverse=True)
+        n_unique_perts = len(unique_pert_names)
+        pred = pred.mean(dim=1) # [B, G]
+        pred_norm = F.normalize(pred, p=2, dim=1)
+        cos_similarity = torch.matmul(pred_norm, pred_norm.T)
+        cos_dist = 1 - cos_similarity
+        cos_dist_sum = cos_dist.sum(dim=1)
+        loss = cos_dist_sum.sum() / (B - n_unique_perts)
         return loss
 
     def _kl_normal_standard(self, mean: torch.Tensor, var: torch.Tensor) -> torch.Tensor:
@@ -328,7 +344,8 @@ class BaselineModel(PerturbationModel):
         pert_names = batch["pert_name"]
         self.mean_target_map = self.mean_target_map.to(self.device)
         pred = self.forward(ctrl_cell_emb, pert_emb, covariates)
-        loss_centroid = self.calculate_loss_centroid(pred, pert_names)
+        # loss_centroid = self.calculate_loss_centroid(pred, pert_names)
+        loss_centroid = self.l1_loss(pred, pert_names)
 
         B, S, G = pred.shape
         loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
@@ -359,7 +376,7 @@ class BaselineModel(PerturbationModel):
         with torch.no_grad():
             pred = self.forward(ctrl_cell_emb, pert_emb, covariates)
             B, S, G = pred.shape
-            loss_centroid = self.calculate_loss_centroid(pred, pert_names)
+            loss_centroid = self.l1_loss(pred, pert_names)
             pert_names = batch["pert_name"]
             loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
             kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))

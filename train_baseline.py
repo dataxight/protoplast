@@ -84,6 +84,7 @@ def main():
     #parser.add_argument("--gene-names", type=str, help="Path to gene names", required=True)
     parser.add_argument("--checkpoint-path", type=str, help="Path to the recent checkpoint path", required=False)
     parser.add_argument("--from-epoch", type=int, help="Start from this epoch", required=False)
+    parser.add_argument("--max-epoch", type=int, help="Max epoch", required=False, default=20)
 
     args = parser.parse_args()
    
@@ -100,7 +101,7 @@ def main():
         config_path="configs/data.toml",
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt",
         batch_size=64,
-        group_size_S=64,
+        group_size_S=128,
         num_workers=8
     )
     dm.setup(stage="fit")
@@ -170,7 +171,7 @@ def main():
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
         mode="min",
-        save_top_k=3,
+        save_top_k=10,
         dirpath="checkpoints/baseline-scvi-centroid/",
         filename="baseline-{epoch:02d}-{val_loss:.4f}"
     )
@@ -187,7 +188,7 @@ def main():
     # Create trainer
     logging.getLogger("pytorch_lightning").setLevel(logging.DEBUG)
     trainer = L.Trainer(
-        max_epochs=20,
+        max_epochs=args.max_epoch,
         callbacks=[checkpoint_callback],
         logger=logger,
         accelerator="auto",
