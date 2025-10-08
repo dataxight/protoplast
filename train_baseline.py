@@ -38,6 +38,7 @@ def load_model(checkpoint_path: str, device: str, mean_target_map, mean_target_a
         hparams = {
             'd_h': 672,
             'd_f': 512,
+            'n_perts': 151,
             'n_genes': 18080,
             'embedding_dim': 2000,
             'pert_emb_dim': 5120,
@@ -132,6 +133,7 @@ def main():
     embedding_dim = sample_batch["pert_cell_emb"].shape[-1]
     n_cell_types = sample_batch["cell_type_onehot"].shape[-1]
     n_batches = sample_batch["batch_onehot"].shape[-1]
+    n_perts = sample_batch["pert_onehot"].shape[-1]
     
     print(f"Data dimensions:")
     print(f"  n_genes: {n_genes}")
@@ -148,6 +150,7 @@ def main():
         model = BaselineModel(
             d_h=672,  # Hidden dimension
             d_f=512,  # Bottleneck dimension
+            n_perts=n_perts,
             n_genes=n_genes,
             embedding_dim=embedding_dim,
             pert_emb_dim=pert_emb_dim,
@@ -172,7 +175,7 @@ def main():
         monitor="val_loss",
         mode="min",
         save_top_k=10,
-        dirpath="checkpoints/baseline-scvi-centroid/",
+        dirpath="checkpoints/baseline-scvi-cls/",
         filename="baseline-{epoch:02d}-{val_loss:.4f}"
     )
     
@@ -183,7 +186,7 @@ def main():
     )
     
     # Set up logger
-    logger = CSVLogger("logs", name="baseline-scvi-centroid")
+    logger = CSVLogger("logs", name="baseline-scvi-cls")
     
     # Create trainer
     logging.getLogger("pytorch_lightning").setLevel(logging.DEBUG)
