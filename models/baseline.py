@@ -358,7 +358,7 @@ class BaselineModel(PerturbationModel):
         pert_cell_emb = batch["pert_cell_emb"]
         pert_cell_data = batch["pert_cell_g"]
         ctrl_cell_data = batch["ctrl_cell_g"]
-        pert_onehot = batch["pert_onehot"]
+        pert_onehot = batch["pert_onehot"] # [B, n_perts]
         covariates = {
             "cell_type_onehot": batch["cell_type_onehot"],
             "batch_onehot": batch["batch_onehot"],
@@ -368,28 +368,22 @@ class BaselineModel(PerturbationModel):
         self.mean_target_map = self.mean_target_map.to(self.device)
         pred = self.forward(ctrl_cell_emb, pert_emb, covariates)
         # loss_centroid = self.calculate_loss_centroid(pred, pert_names)
-        loss_centroid = self.l1_loss(pred, pert_names)
+        # loss_centroid = self.l1_loss(pred, pert_names)
 
         B, S, G = pred.shape
         loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
         kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
         # Classification loss (targets from provided pert_onehot)
         logits = self.last_cls_logits  # [B, n_perts]
-        if pert_onehot.dim() == 3:
-            # [B, S, C] -> aggregate over S
-            target_cls = pert_onehot.float().mean(dim=1).argmax(dim=-1)
-        else:
-            # [B, C]
-            target_cls = pert_onehot.argmax(dim=-1)
+        target_cls = pert_onehot.argmax(dim=-1)
         cls_loss = F.cross_entropy(logits, target_cls)
         with torch.no_grad():
             pred_cls = logits.argmax(dim=-1)
             cls_acc = (pred_cls == target_cls).float().mean()
-        loss = loss_all_gene + self.kl_weight * kl + loss_centroid + self.cls_weight * cls_loss
+        loss = loss_all_gene + self.kl_weight * kl + self.cls_weight * cls_loss
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("train_kl", kl, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("train_loss_gene", loss_all_gene, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("train_loss_centroid", loss_centroid, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("train_loss_cls", cls_loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("train_acc_cls", cls_acc, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
@@ -420,18 +414,14 @@ class BaselineModel(PerturbationModel):
             kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
             # Classification loss and accuracy using pert_onehot
             logits = self.last_cls_logits  # [B, n_perts]
-            if pert_onehot.dim() == 3:
-                target_cls = pert_onehot.float().mean(dim=1).argmax(dim=-1)
-            else:
-                target_cls = pert_onehot.argmax(dim=-1)
+            target_cls = pert_onehot.argmax(dim=-1)
             cls_loss = F.cross_entropy(logits, target_cls)
             pred_cls = logits.argmax(dim=-1)
             cls_acc = (pred_cls == target_cls).float().mean()
-            loss = loss_all_gene + self.kl_weight * kl + loss_centroid + self.cls_weight * cls_loss
+            loss = loss_all_gene + self.kl_weight * kl + self.cls_weight * cls_loss
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("val_kl", kl, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("val_loss_gene", loss_all_gene, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("val_loss_centroid", loss_centroid, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("val_loss_cls", cls_loss, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("val_acc_cls", cls_acc, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         return loss

@@ -45,12 +45,14 @@ class BaselinePredictor:
                 'd_f': 512,
                 'n_genes': 18080,
                 'embedding_dim': 2000,
+                'n_perts': 151,
                 'pert_emb_dim': 5120,
                 'dropout': 0.1
             }
         
         # Create model with hyperparameters
         model = BaselineModel(
+            n_perts=hparams.get('n_perts', 151),
             mean_target_map=hparams.get('mean_target_map', {}),
             mean_target_addresses=hparams.get('mean_target_addresses', {}),
             d_h=hparams.get('d_h', 512),
@@ -128,7 +130,7 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-centroid/last.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-cls/last.ckpt"
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation_val.csv"
