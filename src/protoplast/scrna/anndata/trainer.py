@@ -189,13 +189,14 @@ class RayTrainRunner:
             scaling_config = ray.train.ScalingConfig(
                 num_workers=num_workers, use_gpu=True, resources_per_worker=resource_per_worker
             )
+            resource_per_worker["GPU"] = num_workers
         else:
             if num_workers is None:
                 num_workers = max(int((self.resources.get("CPU", 2) - 1) / thread_per_worker), 1)
             scaling_config = ray.train.ScalingConfig(
                 num_workers=num_workers, use_gpu=False, resources_per_worker=resource_per_worker
             )
-        print(f"Using {num_workers} workers with {resource_per_worker} each")
+        print(f"Using {num_workers} workers with {resource_per_worker}")
         start = time.time()
         shuffle_strategy = self.shuffle_strategy(
             file_paths,
