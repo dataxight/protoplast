@@ -49,6 +49,7 @@ def load_model(checkpoint_path: str, device: str, mean_target_map, mean_target_a
     
     # Create model with hyperparameters
     model = BaselineModel(
+        n_perts=hparams.get('n_perts', 151),
         mean_target_map=hparams.get('mean_target_map', {}),
         mean_target_addresses=hparams.get('mean_target_addresses', {}),
         d_h=hparams.get('d_h', 672),
