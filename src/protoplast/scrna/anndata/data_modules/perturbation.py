@@ -134,6 +134,11 @@ class PerturbationDataset(DistributedAnnDataset):
         self.cell_types_onehot_map = make_onehot_encoding_map(np.unique(cell_types_flattened))
         logger.info(f"Total unique cell types: {len(self.cell_types_onehot_map)}")
 
+        # Build onehot mapping for perturbations
+        pert_names_flattened = np.concatenate([ad.obs[self.target_label].tolist() for ad in adatas]).flatten()
+        self.pert_names_onehot_map = make_onehot_encoding_map(np.unique(pert_names_flattened))
+        logger.info(f"Total unique perturbation names: {len(self.pert_names_onehot_map)}")
+
         batches_flattened = np.concatenate([
             [f"f{i}_"] * ad.n_obs + ad.obs[self.batch_label].tolist() for i, ad in enumerate(adatas)
         ]).flatten()
@@ -183,6 +188,10 @@ class PerturbationDataset(DistributedAnnDataset):
             # create all zero embedding
             self.pert_embedding[pert_id] = torch.zeros(next(iter(self.pert_embedding.values())).shape[0])
         return self.pert_embedding[pert_id]
+
+    def get_pert_name_onehot(self, pert_name: str):
+        """Get onehot encoding for perturbation name."""
+        return self.pert_names_onehot_map[pert_name]
 
     def get_celltype_onehot(self, cell_type: str):
         """Get onehot encoding for cell type."""
@@ -325,6 +334,7 @@ class PerturbationDataset(DistributedAnnDataset):
                     pert_emb = self._get_pert_embedding(target)
                     cell_type_onehot = self.get_celltype_onehot(cell_type)
                     batch_onehots = [self.get_batch_onehot(batch) for batch in batches]
+                    pert_onehot = self.get_pert_name_onehot(target)
 
                     loss_weight_dict = self.loss_weight_dicts[file_i]
                     default_loss_weight = (np.ones(X_pert.shape[1]) / X_pert.shape[1]) ** 2
@@ -357,6 +367,7 @@ class PerturbationDataset(DistributedAnnDataset):
                         "cell_type": np.array([cell_type]), # str
                         "cell_type_onehot": torch.stack([cell_type_onehot] * self.group_size_S), # [S, n_cell_type]
                         "batch_onehot": torch.stack(batch_onehots), # tensor [S, n_batches]
+                        "pert_onehot": pert_onehot, # tensor [n_pert_names]
                         "loss_weight_emb": torch.tensor(loss_weight_emb), # tensor [E]
                         "loss_weight_gene": torch.tensor(loss_weight), # tensor [G]
                     }
@@ -576,15 +587,19 @@ class PerturbationDataModule(AnnDataModule):
                 regions.sort()
 
                 # Group regions into blocks
-                current_start = regions[0][0]
-                for region_start, region_end in regions:
-                    # If we've reached block size or it's the last region, create a block
+                current_start, current_end = regions[0]
+                for region_start, region_end in regions[1:]:
+                    # If we've reached block size or it's the last region or not extending the current block, create a block
                     if (region_end - current_start >= block_size or
-                        (region_start, region_end) == regions[-1]):
-                        indices[f"{split_name}_indices"].append((file_i, current_start, region_end))
-                        if (region_start, region_end) != regions[-1]:
-                            current_start = region_end
-
+                        (region_start, region_end) == regions[-1] or
+                        region_start != current_end):
+                        indices[f"{split_name}_indices"].append((file_i, current_start, current_end))
+                        current_start, current_end = region_start, region_end
+                        # last region
+                        if (region_start, region_end) == regions[-1]:
+                            indices[f"{split_name}_indices"].append((file_i, region_start, region_end))
+                    else:
+                        current_end = region_end
         indices["train_n_items"] = n_items["train"]
         indices["val_n_items"] = n_items["val"]
         indices["test_n_items"] = n_items["test"]
@@ -612,6 +627,8 @@ class PerturbationDataModule(AnnDataModule):
                 # Convert scipy sparse matrices to torch sparse tensors and stack
                 torch_sparse_tensors = []
                 for val in values:
+                    if isinstance(val, np.ndarray):
+                        val = torch.from_numpy(val)
                     if scipy.sparse.issparse(val):
                         # Convert to COO format first, as we can't stack csr tensors
                         # because of the error"Sparse CSR tensors do not have is_contiguous"
