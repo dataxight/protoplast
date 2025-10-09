@@ -225,7 +225,8 @@ class RayTrainRunner:
             "shuffle_strategy": shuffle_strategy,
             "enable_progress_bar": self.enable_progress_bar,
             "scratch_path" : os.path.join(self.result_storage_path, "scratch.plt"),
-            "scratch_content": str(uuid.uuid4())
+            "scratch_content": str(uuid.uuid4()),
+            "enable_progress_bar": self.enable_progress_bar,
         }
         my_train_func = self._trainer()
         par_trainer = ray.train.torch.TorchTrainer(
