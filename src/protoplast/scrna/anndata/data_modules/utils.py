@@ -233,7 +233,7 @@ def compute_and_save_target_means(
 
 if __name__ == "__main__":
     import glob
-    files = glob.glob("/mnt/hdd2/tan/competition_support_set_sorted/*.h5")
+    files = glob.glob("/mnt/hdd2/tan/competition_support_set_sorted/competition_train.h5")
     tensor_output_path = "./competition_support_mean.torch"
     index_output_path = "./competition_support_mean_index.pkl"
     compute_and_save_target_means(files, tensor_output_path, index_output_path)
