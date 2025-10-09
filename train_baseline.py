@@ -80,8 +80,9 @@ def main():
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Train baseline perturbation model")
-    parser.add_argument("--mean-target-map", type=str, help="Path to mean target map", required=True)
-    parser.add_argument("--mean-target-addresses", type=str, help="Path to mean target addresses", required=True)
+    parser.add_argument("--mean-target-map", type=str, help="Path to mean target map", required=False)
+    parser.add_argument("--mean-target-addresses", type=str, help="Path to mean target addresses", required=False)
+    parser.add_argument("--data-config", type=str, help="Path to data config TOML file", required=True)
     # parser.add_argument("--hvg-gene-names", type=str, help="Path to hvg gene names", required=True)
     #parser.add_argument("--gene-names", type=str, help="Path to gene names", required=True)
     parser.add_argument("--checkpoint-path", type=str, help="Path to the recent checkpoint path", required=False)
@@ -100,7 +101,7 @@ def main():
     
     # Set up data module
     dm = PerturbationDataModule(
-        config_path="configs/data.toml",
+        config_path=args.data_config,
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt",
         batch_size=64,
         group_size_S=128,
@@ -108,7 +109,10 @@ def main():
     )
     dm.setup(stage="fit")
     
-    mean_target_map, mean_target_addresses = torch.load(args.mean_target_map, map_location="cpu"), pickle.load(open(args.mean_target_addresses, "rb"))
+    if args.mean_target_map and args.mean_target_addresses:
+        mean_target_map, mean_target_addresses = torch.load(args.mean_target_map, map_location="cpu"), pickle.load(open(args.mean_target_addresses, "rb"))
+    else:
+        mean_target_map, mean_target_addresses = {}, {}
     
     # Infer dimensions from the first batch
     train_loader = dm.train_dataloader()
