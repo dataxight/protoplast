@@ -1,9 +1,11 @@
 # Core dependencies for perturbation transformer model
 torch>=2.0.0
+torch-vision>=0.15.0
 lightning>=2.0.0
 geomloss>=0.2.4
 wandb>=0.15.0
 line-profiler
+anndata
 
 # Data processing
 numpy>=1.21.0
@@ -11,7 +13,4 @@ pandas>=1.3.0
 scipy>=1.7.0
 
 # For the protoplast data module (adjust version as needed)
-# protoplast
-
-# Optional: for better performance
-torch-vision>=0.15.0
+git+https://github.com/dataxight/protoplast.git@pert-datamodule
