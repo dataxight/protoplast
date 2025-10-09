@@ -44,7 +44,7 @@ class BaselinePredictor:
                 'd_h': 672,
                 'd_f': 512,
                 'n_genes': 18080,
-                'embedding_dim': 2000,
+                'embedding_dim': 128,
                 'n_perts': 151,
                 'pert_emb_dim': 5120,
                 'dropout': 0.1
@@ -130,7 +130,7 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-cls/last.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-cls/best.ckpt"
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation_val.csv"
@@ -148,7 +148,7 @@ def baseline_vcc_inference():
     dm.setup(stage="fit")
     
     predictor = BaselinePredictor(checkpoint_path)
-    adata = ad.read_h5ad("/mnt/hdd2/tan/competition_support_set_sorted/competition_train.h5")
+    adata = ad.read_h5ad("./competition_train_with_emb.h5")
     hvg_mask = np.where(adata.var["highly_variable"])[0]
     control_adata = adata[adata.obs["target_gene"] == "non-targeting"]
     batch_data = control_adata.obs["batch_var"]
@@ -164,8 +164,8 @@ def baseline_vcc_inference():
         
         # Randomly select n_cells from control_adata
         control_indices = np.random.choice(range(len(control_adata)), size=n_cells, replace=False)
-        X_ctrl = control_adata.X[control_indices]
-        X_ctrl = X_ctrl[:, hvg_mask]
+        X_ctrl = control_adata.obsm["X_emb"][control_indices]
+        #X_ctrl = X_ctrl[:, hvg_mask]
         X_ctrl = X_ctrl.toarray()
         X_ctrl = torch.from_numpy(X_ctrl).float()
         X_ctrl = X_ctrl.unsqueeze(0)  # Add batch dimension [1, S, E]
