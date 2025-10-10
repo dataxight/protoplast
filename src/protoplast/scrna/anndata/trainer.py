@@ -130,6 +130,7 @@ class RayTrainRunner:
         random_seed: int | None = 42,
         resource_per_worker: dict | None = None,
         is_shuffled: bool = False,
+        enable_progress_bar: bool = True,
         **kwargs,
     ):
         """Start the training
@@ -166,6 +167,8 @@ class RayTrainRunner:
             you can adjust the seed here, by default 42
         resource_per_worker : dict | None, optional
             This get pass to Ray you can specify how much CPU or GPU each Ray process get, by default None
+        enable_progress_bar : bool
+            Whether to enable Trainer progress bar or not, by default True
         Returns
         -------
         Result
@@ -175,6 +178,7 @@ class RayTrainRunner:
         self.prefetch_factor = prefetch_factor
         self.max_epochs = max_epochs
         self.kwargs = kwargs
+        self.enable_progress_bar = enable_progress_bar
         if not resource_per_worker:
             if not thread_per_worker:
                 print("Setting thread_per_worker to half of the available CPUs capped at 4")
@@ -213,7 +217,12 @@ class RayTrainRunner:
         kwargs.pop("pre_fetch_then_batch", None)
         indices = shuffle_strategy.split()
         print(f"Data splitting time: {time.time() - start:.2f} seconds")
-        train_config = {"indices": indices, "ckpt_path": ckpt_path, "shuffle_strategy": shuffle_strategy}
+        train_config = {
+            "indices": indices,
+            "ckpt_path": ckpt_path,
+            "shuffle_strategy": shuffle_strategy,
+            "enable_progress_bar": self.enable_progress_bar,
+        }
         my_train_func = self._trainer()
         par_trainer = ray.train.torch.TorchTrainer(
             my_train_func,
@@ -260,6 +269,7 @@ class RayTrainRunner:
                 plugins=[ray.train.lightning.RayLightningEnvironment()],
                 callbacks=[ray.train.lightning.RayTrainReportCallback()],
                 enable_checkpointing=True,
+                enable_progress_bar=config.get("enable_progress_bar", True),
             )
             trainer = ray.train.lightning.prepare_trainer(trainer)
             trainer.fit(model, datamodule=ann_dm, ckpt_path=ckpt_path)

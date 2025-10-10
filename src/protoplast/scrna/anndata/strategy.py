@@ -37,6 +37,8 @@ def ann_split_data(
     drop_remainder_warning_pct: float = 0.05,
 ):
     def to_batches(n):
+        if batch_size >= n:
+            return [(0, n)]
         batches = []
         for i in range(0, n, batch_size):
             if i + batch_size > n:
