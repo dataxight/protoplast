@@ -32,4 +32,4 @@ def test_trainer(tmp_path: Path):
         model_keys=["num_genes", "num_classes"],
     )
     assert isinstance(trainer, RayTrainRunner)
-    trainer.train([str(test_h5ad_path)])
+    trainer.train([str(test_h5ad_path)], result_storage_path=str(tmp_path / "results"))

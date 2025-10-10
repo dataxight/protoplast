@@ -19,16 +19,19 @@ import fsspec
 import h5py
 
 
-def open_fsspec(filename: str):
+def get_fsspec(filename: str, mode="rb"):
     parsed = urlparse(filename)
     scheme = parsed.scheme.lower()
-
     if scheme == "dnanexus":
         fs = fsspec.filesystem("dnanexus")
-        file = fs.open(filename, mode="rb")
+        file = fs.open(filename, mode=mode)
     else:
         # For local files or other supported fsspec schemes
         fs, path = fsspec.core.url_to_fs(filename)
-        file = fs.open(path, mode="rb")
+        file = fs.open(path, mode=mode)
+    return file
 
+
+def open_fsspec(filename: str):
+    file = get_fsspec(filename)
     return h5py.File(file, "r")
