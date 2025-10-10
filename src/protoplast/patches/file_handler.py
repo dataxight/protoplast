@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 import fsspec
 import h5py
 
+
 def get_fsspec(filename: str, mode="rb"):
     parsed = urlparse(filename)
     scheme = parsed.scheme.lower()

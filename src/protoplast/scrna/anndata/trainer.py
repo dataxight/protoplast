@@ -15,6 +15,7 @@
 
 import os
 import time
+import uuid
 import warnings
 from collections.abc import Callable
 
@@ -28,10 +29,10 @@ import torch
 from beartype import beartype
 from lightning.pytorch.strategies import Strategy
 
+from protoplast.patches.file_handler import get_fsspec
+
 from .strategy import SequentialShuffleStrategy, ShuffleStrategy
 from .torch_dataloader import AnnDataModule, DistributedAnnDataset, cell_line_metadata_cb
-from protoplast.patches.file_handler import get_fsspec
-import uuid
 
 
 class RayTrainRunner:
@@ -224,7 +225,7 @@ class RayTrainRunner:
             "ckpt_path": ckpt_path,
             "shuffle_strategy": shuffle_strategy,
             "enable_progress_bar": self.enable_progress_bar,
-            "scratch_path" : os.path.join(self.result_storage_path, "scratch.plt"),
+            "scratch_path": os.path.join(self.result_storage_path, "scratch.plt"),
             "scratch_content": str(uuid.uuid4()),
         }
         my_train_func = self._trainer()
@@ -234,8 +235,9 @@ class RayTrainRunner:
             train_loop_config=train_config,
             run_config=ray.train.RunConfig(storage_path=self.result_storage_path),
         )
-        
+
         print("Writing scratch content to share storage")
+        os.makedirs(self.result_storage_path, exist_ok=True)
         file = get_fsspec(train_config["scratch_path"], mode="w")
         file.write(train_config["scratch_content"])
         file.close()
@@ -261,8 +263,10 @@ class RayTrainRunner:
             read_content = file.read()
             file.close()
             if scratch_content != read_content:
-                raise Exception("The worker have no access to the head node content please check storage path" \
-                "and make sure the worker have access to them")
+                raise Exception(
+                    "The worker have no access to the head node content please check storage path"
+                    "and make sure the worker have access to them"
+                )
             num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
             print(f"=========Starting the training on {rank} with num threads: {num_threads}=========")
             model_params = indices.metadata
