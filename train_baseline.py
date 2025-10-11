@@ -181,11 +181,11 @@ def main():
     
     # Set up callbacks
     checkpoint_callback = ModelCheckpoint(
-        monitor="val_loss",
+        monitor="train_loss",
         mode="min",
         save_top_k=3,
         dirpath="checkpoints/baseline-scvi-cls-heavy/",
-        filename="baseline-{epoch:02d}-{val_loss:.4f}"
+        filename="baseline-{epoch:02d}-{train_loss:.4f}"
     )
     
     early_stopping = EarlyStopping(
