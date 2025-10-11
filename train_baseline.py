@@ -167,7 +167,7 @@ def main():
             mean_target_addresses=mean_target_addresses,
             lr=1e-3,
             wd=1e-4,
-            supcon_weight=1.0,
+            cls_weight=1.0,
             recon_weight=0.1,
             kl_weight=1e-3
         )
@@ -184,7 +184,7 @@ def main():
         monitor="val_loss",
         mode="min",
         save_top_k=3,
-        dirpath="checkpoints/baseline-scvi-cls/",
+        dirpath="checkpoints/baseline-scvi-cls-heavy/",
         filename="baseline-{epoch:02d}-{val_loss:.4f}"
     )
     
@@ -195,7 +195,7 @@ def main():
     )
     
     # Set up logger
-    logger = CSVLogger("logs", name="baseline-scvi-cls")
+    logger = CSVLogger("logs", name="baseline-scvi-cls-heavy")
     
     # Create trainer
     logging.getLogger("pytorch_lightning").setLevel(logging.DEBUG)
