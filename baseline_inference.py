@@ -99,7 +99,8 @@ class BaselinePredictor:
         with torch.no_grad():
             with torch.autocast(device_type='cuda' if self.device=='cuda' else 'cpu', 
                               dtype=torch.float16, enabled=self.device=='cuda'):
-                predictions = self.model(ctrl_cell_emb, pert_emb, covariates)
+                out = self.model(ctrl_cell_emb, pert_emb, covariates)
+                predictions = out["gene_output"]
         
         return predictions
     
@@ -130,7 +131,7 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-cls/best.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-cls/best-constrast.ckpt"
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation_val.csv"

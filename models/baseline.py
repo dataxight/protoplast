@@ -71,6 +71,8 @@ class BaselineModel(PerturbationModel):
         self.dropout = dropout
         self.kl_weight = kl_weight
         self.cls_weight = kwargs.get("cls_weight", 1.0)
+        self.recon_weight = kwargs.get("recon_weight", 1.0)
+        self.supcon_weight = kwargs.get("supcon_weight", 1.0)
 
         # mean_target_map.to(self.device)
 
@@ -144,18 +146,26 @@ class BaselineModel(PerturbationModel):
         # fixed library size 1e4 in log-space
         self.register_buffer("fixed_log_library", torch.tensor(np.log(1e4), dtype=torch.float32))
 
-        # CNN-based classifier over latent sequence z (shape: [B, S, d_h])
-        # We treat d_h as channels and S as the sequence length for Conv1d.
-        # self.cls_cnn = nn.Sequential(
-        #     nn.Conv1d(self.d_h, self.d_h, kernel_size=3, padding=1),
-        #     nn.GELU(),
-        #     nn.Dropout(self.dropout),
-        #     nn.Conv1d(self.d_h, max(self.d_h // 2, 1), kernel_size=3, padding=1),
-        #     nn.GELU(),
-        #     nn.AdaptiveAvgPool1d(1),  # -> [B, C, 1]
-        # )
-        # self.cls_head = nn.Linear(max(self.d_h // 2, 1), self.n_perts)
-        # self.last_cls_logits = None
+    def _supcon_loss(self, z, labels, temperature: float = 0.1):
+        """
+        z: [B, S, D]; we'll pool to [B, D]
+        labels: [B] int64 class ids
+        """
+        z = z.mean(dim=1)                 # [B, D]
+        z = F.normalize(z, dim=-1)
+        sim = torch.matmul(z, z.T) / temperature  # [B, B]
+        B = z.size(0)
+        # labels = labels.view(-1, 1)
+        mask = (labels == labels.T).float()  # positives mask
+        logits = sim - torch.eye(B, device=z.device) * 1e9  # remove self-contrast
+        exp = torch.exp(logits)
+        denom = exp.sum(dim=1, keepdim=True)  # [B,1]
+        pos = (exp * mask).sum(dim=1, keepdim=True).clamp_min(1e-12)
+        loss = -(torch.log(pos) - torch.log(denom))
+        # ignore samples with no positives (singleton class in batch)
+        valid = (mask.sum(dim=1) > 1).float().view(B, 1)
+        loss = (loss * valid).sum() / valid.sum().clamp_min(1.0)
+        return loss
 
     def _refine_H(self, H):
         # baseline path: simple residual MLP
@@ -349,7 +359,7 @@ class BaselineModel(PerturbationModel):
         gene_output = out.reshape(B, S, self.n_genes)
         gene_output = torch.log1p(gene_output)
 
-        return gene_output
+        return {"gene_output": gene_output, "z": z}
 
     def training_step(self, batch, batch_idx):
         """Training step supporting Negative Binomial likelihood on gene counts."""
@@ -358,7 +368,7 @@ class BaselineModel(PerturbationModel):
         pert_cell_emb = batch["pert_cell_emb"]
         pert_cell_data = batch["pert_cell_g"]
         ctrl_cell_data = batch["ctrl_cell_g"]
-        pert_onehot = batch["pert_onehot"] # [B, n_perts]
+        pert_idx = batch["pert_idx"] # [B, n_perts]
         covariates = {
             "cell_type_onehot": batch["cell_type_onehot"],
             "batch_onehot": batch["batch_onehot"],
@@ -366,7 +376,9 @@ class BaselineModel(PerturbationModel):
         loss_weight_gene = batch["loss_weight_gene"]
         pert_names = batch["pert_name"]
         self.mean_target_map = self.mean_target_map.to(self.device)
-        pred = self.forward(ctrl_cell_emb, pert_emb, covariates)
+        out = self.forward(ctrl_cell_emb, pert_emb, covariates)
+        pred = out["gene_output"]
+        z = out["z"]
         # loss_centroid = self.calculate_loss_centroid(pred, pert_names)
         # loss_centroid = self.l1_loss(pred, pert_names)
 
@@ -380,10 +392,12 @@ class BaselineModel(PerturbationModel):
         # with torch.no_grad():
         #     pred_cls = logits.argmax(dim=-1)
         #     cls_acc = (pred_cls == target_cls).float().mean()
-        loss = loss_all_gene + self.kl_weight * kl #+ self.cls_weight * cls_loss
+        supcon_loss = self._supcon_loss(z, pert_idx)
+        loss = self.recon_weight * loss_all_gene + self.kl_weight * kl + self.supcon_weight * supcon_loss #+ self.cls_weight * cls_loss
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("train_kl", kl, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("train_loss_gene", loss_all_gene, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("train_supcon", supcon_loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         # self.log("train_loss_cls", cls_loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         # self.log("train_acc_cls", cls_acc, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         return loss
@@ -397,7 +411,7 @@ class BaselineModel(PerturbationModel):
         loss_weight_gene = batch["loss_weight_gene"]
         pert_names = batch["pert_name"]
         pert_emb = batch["pert_emb"]
-        pert_onehot = batch["pert_onehot"]
+        pert_idx = batch["pert_idx"]
         
         covariates = {
             "cell_type_onehot": batch["cell_type_onehot"],
@@ -406,7 +420,9 @@ class BaselineModel(PerturbationModel):
 
         # no grad
         with torch.no_grad():
-            pred = self.forward(ctrl_cell_emb, pert_emb, covariates)
+            out = self.forward(ctrl_cell_emb, pert_emb, covariates)
+            pred = out["gene_output"]
+            z = out["z"]
             B, S, G = pred.shape
             # loss_centroid = self.l1_loss(pred, pert_names)
             pert_names = batch["pert_name"]
@@ -418,10 +434,12 @@ class BaselineModel(PerturbationModel):
             # cls_loss = F.cross_entropy(logits, target_cls)
             # pred_cls = logits.argmax(dim=-1)
             # cls_acc = (pred_cls == target_cls).float().mean()
-            loss = loss_all_gene + self.kl_weight * kl #+ self.cls_weight * cls_loss
+            supcon_loss = self._supcon_loss(z, pert_idx)
+            loss = self.recon_weight * loss_all_gene + self.kl_weight * kl + self.supcon_weight * supcon_loss #+ self.cls_weight * cls_loss
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
         self.log("val_kl", kl, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("val_loss_gene", loss_all_gene, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        self.log("val_supcon", supcon_loss, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         # self.log("val_loss_cls", cls_loss, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         # self.log("val_acc_cls", cls_acc, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         return loss

@@ -40,7 +40,7 @@ def load_model(checkpoint_path: str, device: str, mean_target_map, mean_target_a
             'd_f': 512,
             'n_perts': 151,
             'n_genes': 18080,
-            'embedding_dim': 2000,
+            'embedding_dim': 128,
             'pert_emb_dim': 5120,
             'dropout': 0.1,
             'mean_target_map': mean_target_map,
@@ -138,7 +138,7 @@ def main():
     embedding_dim = sample_batch["pert_cell_emb"].shape[-1]
     n_cell_types = sample_batch["cell_type_onehot"].shape[-1]
     n_batches = sample_batch["batch_onehot"].shape[-1]
-    n_perts = sample_batch["pert_onehot"].shape[-1]
+    n_perts = 151
     
     print(f"Data dimensions:")
     print(f"  n_genes: {n_genes}")
@@ -165,7 +165,10 @@ def main():
             mean_target_map=mean_target_map,
             mean_target_addresses=mean_target_addresses,
             lr=1e-3,
-            wd=1e-4
+            wd=1e-4,
+            supcon_weight=1.0,
+            recon_weight=0.1,
+            kl_weight=1e-3
         )
     
         # Initialize embeddings based on data dimensions
@@ -179,7 +182,7 @@ def main():
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
         mode="min",
-        save_top_k=10,
+        save_top_k=3,
         dirpath="checkpoints/baseline-scvi-cls/",
         filename="baseline-{epoch:02d}-{val_loss:.4f}"
     )
