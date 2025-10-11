@@ -131,7 +131,7 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-cls/best-constrast.ckpt"
+    checkpoint_path = "checkpoints/baseline-scvi-cls/baseline-epoch=10-val_loss=0.1302.ckpt"
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation_val.csv"

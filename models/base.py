@@ -223,6 +223,7 @@ class PerturbationModel(L.LightningModule, ABC):
         lr_scheduler_interval: str | None = None,
         lr_scheduler_patience: int | None = None,
         lr_scheduler_factor: float | None = None,
+        **kwargs,
     ):
         super().__init__()
         self.datamodule = datamodule

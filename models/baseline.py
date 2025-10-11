@@ -52,7 +52,6 @@ class BaselineModel(PerturbationModel):
         dropout: float = 0.1,
         use_nb: bool = True,
         num_mc_samples: int = 0,
-        kl_weight: float = 1e-3,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -69,8 +68,7 @@ class BaselineModel(PerturbationModel):
         self.mean_target_map = mean_target_map
         self.mean_target_addresses = mean_target_addresses
         self.dropout = dropout
-        self.kl_weight = kl_weight
-        self.cls_weight = kwargs.get("cls_weight", 1.0)
+        self.kl_weight = kwargs.get("kl_weight", 1e-3)
         self.recon_weight = kwargs.get("recon_weight", 1.0)
         self.supcon_weight = kwargs.get("supcon_weight", 1.0)
 
