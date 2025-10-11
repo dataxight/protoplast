@@ -342,8 +342,8 @@ class BaselineModel(PerturbationModel):
         cls_loss = F.cross_entropy(logits, pert_idx)
 
         B, S, G = pred.shape
-        loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
-        kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
+        # loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
+        # kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
         # Classification loss (targets from provided pert_onehot)
         # logits = self.last_cls_logits  # [B, n_perts]
         # target_cls = pert_onehot.argmax(dim=-1)
@@ -352,10 +352,11 @@ class BaselineModel(PerturbationModel):
         #     pred_cls = logits.argmax(dim=-1)
         #     cls_acc = (pred_cls == target_cls).float().mean()
         # supcon_loss = self._supcon_loss(z, pert_idx)
-        loss = self.recon_weight * loss_all_gene + self.kl_weight * kl + self.cls_weight * cls_loss #+ self.supcon_weight * supcon_loss #+ self.cls_weight * cls_loss
+        # loss = self.recon_weight * loss_all_gene + self.kl_weight * kl + self.cls_weight * cls_loss #+ self.supcon_weight * supcon_loss #+ self.cls_weight * cls_loss
+        loss = self.cls_weight * cls_loss
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=B)
-        self.log("train_kl", kl, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("train_loss_gene", loss_all_gene, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        # self.log("train_kl", kl, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
+        # self.log("train_loss_gene", loss_all_gene, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         # self.log("train_supcon", supcon_loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("train_cls", cls_loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
         # self.log("train_loss_cls", cls_loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=B)
@@ -388,8 +389,8 @@ class BaselineModel(PerturbationModel):
             B, S, G = pred.shape
             # loss_centroid = self.l1_loss(pred, pert_names)
             pert_names = batch["pert_name"]
-            loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
-            kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
+            # loss_all_gene = loss_fct(pred, pert_cell_data, pert_names, loss_weight_gene, ctrl_cell_data, direction_lambda=1e-3)
+            # kl = getattr(self, "last_kl", torch.tensor(0.0, device=pred.device))
             # Classification loss and accuracy using pert_onehot
             # logits = self.last_cls_logits  # [B, n_perts]
             # target_cls = pert_onehot.argmax(dim=-1)
@@ -400,10 +401,11 @@ class BaselineModel(PerturbationModel):
             pooled = self.cls_pool(z_seq).squeeze(-1)  # [B, d_h]
             logits = self.cls_head(pooled)             # [B, n_perts]
             cls_loss = F.cross_entropy(logits, pert_idx)
-            loss = self.recon_weight * loss_all_gene + self.kl_weight * kl + self.cls_weight * cls_loss #+ self.supcon_weight * supcon_loss #+ self.cls_weight * cls_loss
+            # loss = self.recon_weight * loss_all_gene + self.kl_weight * kl + self.cls_weight * cls_loss #+ self.supcon_weight * supcon_loss #+ self.cls_weight * cls_loss
+            loss = self.cls_weight * cls_loss
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=B)
-        self.log("val_kl", kl, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
-        self.log("val_loss_gene", loss_all_gene, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        # self.log("val_kl", kl, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
+        # self.log("val_loss_gene", loss_all_gene, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         # self.log("val_supcon", supcon_loss, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         self.log("val_cls", cls_loss, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
         # self.log("val_loss_cls", cls_loss, on_step=False, on_epoch=True, prog_bar=False, batch_size=B)
