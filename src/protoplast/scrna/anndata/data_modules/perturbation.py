@@ -342,12 +342,12 @@ class PerturbationDataset(DistributedAnnDataset):
                     batches = self.adata_obs[file_i][self.batch_label].iloc[cell_indices].values
 
                     # Get pert embedding
-                    X_pert_emb = self.adatas[file_i].obsm["X_emb"][cell_indices]
+                    # X_pert_emb = self.adatas[file_i].obsm["X_emb"][cell_indices]
 
                     # Get control cells with matching covariates
                     X_ctrl, ctrl_barcodes = self.sampling_control(cell_type, file_i, self.group_size_S)
                     ctrl_indices = np.where(self.adata_obs[file_i].index.isin(ctrl_barcodes))[0]
-                    X_ctrl_emb = self.adatas[file_i].obsm["X_emb"][ctrl_indices]
+                    # X_ctrl_emb = self.adatas[file_i].obsm["X_emb"][ctrl_indices]
 
                     # Get embeddings and onehot encodings
                     pert_emb = self._get_pert_embedding(target)
@@ -365,15 +365,15 @@ class PerturbationDataset(DistributedAnnDataset):
                     if self.barcodes:
                         pert_barcodes = self.adata_obs[file_i].index[cell_indices].values
 
-                    # if self.hvg_only:
-                    #     hvg_mask = np.where(np.array(self.adata_vars[file_i]["highly_variable"]))[0]
-                    #     loss_weight_emb = loss_weight[hvg_mask]
-                    #     X_pert_hvg = X_pert[:, hvg_mask]
-                    #     X_ctrl_hvg = X_ctrl[:, hvg_mask]
-                    # else:
-                    #     loss_weight_emb = loss_weight
-                    #     X_pert_hvg = X_pert
-                    #     X_ctrl_hvg = X_ctrl
+                    if self.hvg_only:
+                        hvg_mask = np.where(np.array(self.adata_vars[file_i]["highly_variable"]))[0]
+                        loss_weight_emb = loss_weight[hvg_mask]
+                        X_pert_emb = X_pert[:, hvg_mask]
+                        X_ctrl_emb = X_ctrl[:, hvg_mask]
+                    else:
+                        loss_weight_emb = loss_weight
+                        X_pert_emb = X_pert
+                        X_ctrl_emb = X_ctrl
 
                     # Create sample dictionary
                     sample = {
