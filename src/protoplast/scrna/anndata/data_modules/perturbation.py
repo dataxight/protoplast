@@ -12,6 +12,8 @@ import scipy.sparse
 import torch
 import tqdm
 import torch.distributed as td
+from scipy.sparse import csr_matrix
+
 from anndata._core.sparse_dataset import sparse_dataset
 from line_profiler import profile
 from torch.utils.data import get_worker_info
@@ -21,11 +23,14 @@ from protoplast.scrna.anndata.torch_dataloader import AnnDataModule, Distributed
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-stream_handler = logging.StreamHandler()
-stream_handler.setFormatter(formatter)
-logger.addHandler(stream_handler)
 
+def slice_csr_rows(A, row_start, row_end):
+    row_end = min(row_end, A.shape[0])
+    start_ptr, end_ptr = A.indptr[row_start], A.indptr[row_end]
+    data = A.data[start_ptr:end_ptr]
+    indices = A.indices[start_ptr:end_ptr]
+    indptr = A.indptr[row_start:row_end+1] - start_ptr
+    return csr_matrix((data, indices, indptr), shape=(row_end - row_start, A.shape[1]))
 
 class PerturbationDataset(DistributedAnnDataset):
     """
@@ -81,12 +86,14 @@ class PerturbationDataset(DistributedAnnDataset):
 
         # Initialize control region tracking per cell type
         self.cell_type_ctrl_regions = {}  # {cell_type: (start, end)} per file
+        self.cell_type_ctrl_mat = {}  # {cell_type: scipy csr matrix} per file
 
         self._initialize_region_mappings()
         self._initialized_worker_info = False
         self.hvg_only = hvg_only
 
 
+    @profile
     def _get_mat_by_range(self, h5file: h5py.File, start: int, end: int):
         """Get matrix by range."""
         if len(self.sparse_keys) == 1:
@@ -121,6 +128,7 @@ class PerturbationDataset(DistributedAnnDataset):
             self.ray_rank = 0
             self.ray_size = 1
 
+    @profile
     def _initialize_region_mappings(self):
         """Initialize region mappings and control regions per cell type."""
         # Load adatas to analyze structure
@@ -136,8 +144,9 @@ class PerturbationDataset(DistributedAnnDataset):
 
         # Build onehot mapping for perturbations
         pert_names_flattened = np.concatenate([ad.obs[self.target_label].tolist() for ad in adatas]).flatten()
-        self.pert_names_onehot_map = make_onehot_encoding_map(np.unique(pert_names_flattened))
-        logger.info(f"Total unique perturbation names: {len(self.pert_names_onehot_map)}")
+        unique_pert_names = np.unique(pert_names_flattened)
+        self.pert_names_map = {name: i for i, name in enumerate(unique_pert_names)}
+        logger.info(f"Total unique perturbation names: {len(self.pert_names_map)}")
 
         batches_flattened = np.concatenate([
             [f"f{i}_"] * ad.n_obs + ad.obs[self.batch_label].tolist() for i, ad in enumerate(adatas)
@@ -155,9 +164,12 @@ class PerturbationDataset(DistributedAnnDataset):
                 ctrl_indices = np.where(ctrl_mask)[0]
                 ctrl_start, ctrl_end = ctrl_indices[0], ctrl_indices[-1] + 1
 
+                logger.info(f"Prefetch control matrix for cell type {cell_type} in file {file_i}")
                 if cell_type not in self.cell_type_ctrl_regions:
                     self.cell_type_ctrl_regions[cell_type] = {}
+                    self.cell_type_ctrl_mat[cell_type] = {}
                 self.cell_type_ctrl_regions[cell_type][file_i] = (ctrl_start, ctrl_end)
+                self.cell_type_ctrl_mat[cell_type][file_i] = adata.X[ctrl_start:ctrl_end]
 
         logger.info(f"Control regions per cell type: {dict(self.cell_type_ctrl_regions)}")
 
@@ -189,9 +201,9 @@ class PerturbationDataset(DistributedAnnDataset):
             self.pert_embedding[pert_id] = torch.zeros(next(iter(self.pert_embedding.values())).shape[0])
         return self.pert_embedding[pert_id]
 
-    def get_pert_name_onehot(self, pert_name: str):
-        """Get onehot encoding for perturbation name."""
-        return self.pert_names_onehot_map[pert_name]
+    def get_pert_name_idx(self, pert_name: str):
+        """Get index for perturbation name."""
+        return self.pert_names_map[pert_name]
 
     def get_celltype_onehot(self, cell_type: str):
         """Get onehot encoding for cell type."""
@@ -201,6 +213,7 @@ class PerturbationDataset(DistributedAnnDataset):
         """Get onehot encoding for batch."""
         return self.batches_onehot_map[batch]
 
+    @profile
     def _produce_data(self, file_i: int, start: int, end: int):
         """
         Produce perturbation data from a region by splitting into target-specific groups.
@@ -227,12 +240,15 @@ class PerturbationDataset(DistributedAnnDataset):
             start_i, end_i = target_cumsum[i-1], target_cumsum[i]
             target = targets[start_i]
 
-            X_pert = X[start_i:end_i]
+            # X_pert = X[start_i:end_i]
+            # X_pert = slice_csr_rows(X, start_i, end_i)
             original_cell_indices = np.arange(start + start_i, start + end_i)
             # assert adata_obs[self.target_label][original_cell_indices][0] == target, "Target mismatch"
 
-            for j in range(0, X_pert.shape[0], self.group_size_S):
-                X_pert_group = X_pert[j:j+self.group_size_S]
+            for j in range(0, end_i - start_i, self.group_size_S):
+                # X_pert_group = X_pert[j:j+self.group_size_S]
+                global_start, global_end = j + start_i, j + self.group_size_S + start_i
+                X_pert_group = slice_csr_rows(X, global_start, global_end)
                 cell_indices_group = original_cell_indices[j:j+self.group_size_S]
 
                 if X_pert_group.shape[0] < self.group_size_S:
@@ -242,7 +258,7 @@ class PerturbationDataset(DistributedAnnDataset):
                     cell_indices_group = cell_indices_group[sample_indices]
 
                 yield X_pert_group, cell_indices_group, target
-
+    @profile
     def sampling_control(self, cell_type: str, file_i: int, target_number: int):
         """
         Sample control cells matching covariate cell type and batch.
@@ -262,14 +278,17 @@ class PerturbationDataset(DistributedAnnDataset):
             raise ValueError(f"File index {file_i} not found in control regions for cell type {cell_type}")
 
         start, end = self.cell_type_ctrl_regions[cell_type][file_i]
+        mat = self.cell_type_ctrl_mat[cell_type][file_i]
 
         if (end - start) > target_number:
-            start_pos = start +np.random.randint(0, end - start - target_number + 1)
+            start_pos = np.random.randint(0, end - start - target_number + 1)
             end_pos = start_pos + target_number
-            X = self._get_mat_by_range(self.h5files[file_i], start_pos, end_pos)
+            X = slice_csr_rows(mat, start_pos, end_pos)
+            # X = mat[start_pos:end_pos]
             barcodes = self.adata_obs[file_i].index[start_pos:end_pos].values
         else:
-            X = self._get_mat_by_range(self.h5files[file_i], start, end)
+            X = slice_csr_rows(mat, start, end)
+            # X = mat[start:end]
             barcodes = self.adata_obs[file_i].index[start:end].values
         # if not enough cells, sample with replacement
         if X.shape[0] < target_number:
@@ -323,18 +342,18 @@ class PerturbationDataset(DistributedAnnDataset):
                     batches = self.adata_obs[file_i][self.batch_label].iloc[cell_indices].values
 
                     # Get pert embedding
-                    # X_pert_emb = self.adatas[file_i].obsm["X_state"][cell_indices]
+                    X_pert_emb = self.adatas[file_i].obsm["X_emb"][cell_indices]
 
                     # Get control cells with matching covariates
                     X_ctrl, ctrl_barcodes = self.sampling_control(cell_type, file_i, self.group_size_S)
                     ctrl_indices = np.where(self.adata_obs[file_i].index.isin(ctrl_barcodes))[0]
-                    # X_ctrl_emb = self.adatas[file_i].obsm["X_state"][ctrl_indices]
+                    X_ctrl_emb = self.adatas[file_i].obsm["X_emb"][ctrl_indices]
 
                     # Get embeddings and onehot encodings
                     pert_emb = self._get_pert_embedding(target)
                     cell_type_onehot = self.get_celltype_onehot(cell_type)
                     batch_onehots = [self.get_batch_onehot(batch) for batch in batches]
-                    pert_onehot = self.get_pert_name_onehot(target)
+                    pert_idx = self.get_pert_name_idx(target)
 
                     loss_weight_dict = self.loss_weight_dicts[file_i]
                     default_loss_weight = (np.ones(X_pert.shape[1]) / X_pert.shape[1]) ** 2
@@ -346,29 +365,29 @@ class PerturbationDataset(DistributedAnnDataset):
                     if self.barcodes:
                         pert_barcodes = self.adata_obs[file_i].index[cell_indices].values
 
-                    if self.hvg_only:
-                        hvg_mask = np.where(np.array(self.adata_vars[file_i]["highly_variable"]))[0]
-                        loss_weight_emb = loss_weight[hvg_mask]
-                        X_pert_hvg = X_pert[:, hvg_mask]
-                        X_ctrl_hvg = X_ctrl[:, hvg_mask]
-                    else:
-                        loss_weight_emb = loss_weight
-                        X_pert_hvg = X_pert
-                        X_ctrl_hvg = X_ctrl
+                    # if self.hvg_only:
+                    #     hvg_mask = np.where(np.array(self.adata_vars[file_i]["highly_variable"]))[0]
+                    #     loss_weight_emb = loss_weight[hvg_mask]
+                    #     X_pert_hvg = X_pert[:, hvg_mask]
+                    #     X_ctrl_hvg = X_ctrl[:, hvg_mask]
+                    # else:
+                    #     loss_weight_emb = loss_weight
+                    #     X_pert_hvg = X_pert
+                    #     X_ctrl_hvg = X_ctrl
 
                     # Create sample dictionary
                     sample = {
                         "pert_cell_g": X_pert.astype(np.float32), # scipy csr matrix [S, G]
                         "ctrl_cell_g": X_ctrl.astype(np.float32), # scipy csr matrix [S, G]
-                        "pert_cell_emb": X_pert_hvg.astype(np.float32), # tensor [S, E]
-                        "ctrl_cell_emb": X_ctrl_hvg.astype(np.float32), # tensor [S, E]
+                        "pert_cell_emb": X_pert_emb.astype(np.float32), # tensor [S, E]
+                        "ctrl_cell_emb": X_ctrl_emb.astype(np.float32), # tensor [S, E]
                         "pert_emb": pert_emb, # tensor [5102]
                         "pert_name": np.array([target]),
                         "cell_type": np.array([cell_type]), # str
                         "cell_type_onehot": torch.stack([cell_type_onehot] * self.group_size_S), # [S, n_cell_type]
                         "batch_onehot": torch.stack(batch_onehots), # tensor [S, n_batches]
-                        "pert_onehot": pert_onehot, # tensor [n_pert_names]
-                        "loss_weight_emb": torch.tensor(loss_weight_emb), # tensor [E]
+                        "pert_idx": torch.tensor([pert_idx], dtype=torch.long), # tensor [n_pert_names]
+                        # "loss_weight_emb": torch.tensor(loss_weight_emb), # tensor [E]
                         "loss_weight_gene": torch.tensor(loss_weight), # tensor [G]
                     }
 
@@ -731,31 +750,30 @@ if __name__ == "__main__":
             total_cells += batch['pert_cell_g'].shape[0]
             if i > len_train_ds:
                 break
-            print("Batch keys:", batch.keys())
-            # print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
-            # print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
-            print("pert_cell_g shape:", batch['pert_cell_g'].shape)
-            print(batch["pert_cell_g"][0])
-            print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
-            print(batch["pert_cell_emb"][0])
-            print("ctrl_cell_g shape:", batch['ctrl_cell_g'].shape)
-            print(batch["ctrl_cell_g"][0])
-            print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
-            print(batch["ctrl_cell_emb"][0])
-            print("cell_type_onehot shape:", batch['cell_type_onehot'].shape)
-            print("batch_onehot shape:", batch['batch_onehot'].shape)
-            print("pert_emb shape:", batch['pert_emb'].shape)
-            print("pert_name:", batch['pert_name'])
-            print("cell_type:", batch['cell_type'])
-            print("loss_weight_emb shape:", batch['loss_weight_emb'].shape)
-            print(batch["loss_weight_emb"][0])
-            print("loss_weight_gene shape:", batch['loss_weight_gene'].shape)
-            print(batch["loss_weight_gene"][0])
-            # barcodes
-            print("pert_cell_barcode shape:", batch['pert_cell_barcode'])
-            print("ctrl_cell_barcode shape:", batch['ctrl_cell_barcode'])
-            break
-        # print(f"Total train cells: {total_cells}")
+            #print("Batch keys:", batch.keys())
+            ## print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
+            ## print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
+            #print("pert_cell_g shape:", batch['pert_cell_g'].shape)
+            #print(batch["pert_cell_g"][0])
+            #print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
+            #print(batch["pert_cell_emb"][0])
+            #print("ctrl_cell_g shape:", batch['ctrl_cell_g'].shape)
+            #print(batch["ctrl_cell_g"][0])
+            #print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
+            #print(batch["ctrl_cell_emb"][0])
+            #print("cell_type_onehot shape:", batch['cell_type_onehot'].shape)
+            #print("batch_onehot shape:", batch['batch_onehot'].shape)
+            #print("pert_emb shape:", batch['pert_emb'].shape)
+            #print("pert_name:", batch['pert_name'])
+            #print("cell_type:", batch['cell_type'])
+            #print("loss_weight_emb shape:", batch['loss_weight_emb'].shape)
+            #print(batch["loss_weight_emb"][0])
+            #print("loss_weight_gene shape:", batch['loss_weight_gene'].shape)
+            #print(batch["loss_weight_gene"][0])
+            ## barcodes
+            #print("pert_cell_barcode shape:", batch['pert_cell_barcode'])
+            #print("ctrl_cell_barcode shape:", batch['ctrl_cell_barcode'])
+        print(f"Total train cells: {total_cells}")
         # total_cells = 0
         # len_val_ds = len(dm.val_ds)
         # for i, batch in tqdm.tqdm(enumerate(dm.val_ds), total=len_val_ds):
