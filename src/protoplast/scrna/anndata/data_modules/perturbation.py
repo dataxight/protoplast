@@ -212,7 +212,7 @@ class PerturbationDataset(DistributedAnnDataset):
     def get_batch_onehot(self, batch: str):
         """Get onehot encoding for batch."""
         return self.batches_onehot_map[batch]
-
+    
     @profile
     def _produce_data(self, file_i: int, start: int, end: int):
         """
@@ -310,6 +310,7 @@ class PerturbationDataset(DistributedAnnDataset):
             self.adata_obs = []
             self.adata_vars = []
             self.loss_weight_dicts = []
+            self.subtle_map_dicts = []
             for f in self.files:
                 adata = anndata.read_h5ad(f, backed="r")
                 self.adata_obs.append(deepcopy(adata.obs))
@@ -317,6 +318,7 @@ class PerturbationDataset(DistributedAnnDataset):
                 basename = os.path.basename(f)
                 dirname = os.path.dirname(f)
                 self.loss_weight_dicts.append(pickle.load(open(f'{dirname}/degs/{basename}_loss_weight_dict.pkl', 'rb')))
+                self.subtle_map_dicts.append(pickle.load(open(f'{dirname}/degs/{basename}_subtle_map.pkl', 'rb')))
         if self.h5files is None:
             self.h5files = [h5py.File(f, 'r', libver='latest', swmr=True) for f in self.files]
         if self.adatas is None:
@@ -359,6 +361,8 @@ class PerturbationDataset(DistributedAnnDataset):
                     default_loss_weight = (np.ones(X_pert.shape[1]) / X_pert.shape[1]) ** 2
                     loss_weight = np.array(loss_weight_dict.get(target, default_loss_weight))
                     loss_weight = np.nan_to_num(loss_weight, nan=0.0) * 100
+
+                    subtle_class = self.subtle_map_dicts[file_i].get(target, 1)
                     
                     # Get barcodes for perturbation cells if needed
                     pert_barcodes = None
@@ -387,7 +391,8 @@ class PerturbationDataset(DistributedAnnDataset):
                         "cell_type_onehot": torch.stack([cell_type_onehot] * self.group_size_S), # [S, n_cell_type]
                         "batch_onehot": torch.stack(batch_onehots), # tensor [S, n_batches]
                         "pert_idx": torch.tensor([pert_idx], dtype=torch.long), # tensor [n_pert_names]
-                        # "loss_weight_emb": torch.tensor(loss_weight_emb), # tensor [E]
+                        "subtle_class": torch.tensor([subtle_class], dtype=torch.long), # tensor [1]
+                        "loss_weight_emb": torch.tensor(loss_weight_emb), # tensor [E]
                         "loss_weight_gene": torch.tensor(loss_weight), # tensor [G]
                     }
 
