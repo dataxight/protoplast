@@ -44,7 +44,7 @@ class BaselinePredictor:
                 'd_h': 672,
                 'd_f': 512,
                 'n_genes': 18080,
-                'embedding_dim': 128,
+                'embedding_dim': 2000,
                 'n_perts': 151,
                 'pert_emb_dim': 5120,
                 'dropout': 0.1
@@ -131,7 +131,7 @@ def baseline_vcc_inference():
     """
     VCC inference using the baseline model.
     """
-    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi-cls-heavy/baseline-epoch=29-train_loss=2.3991.ckpt"
+    checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi/baseline-epoch=19-train_loss=0.4548.ckpt"
     
     # Define our path
     pert_counts_path = "./pert_counts_Validation_val.csv"
@@ -165,8 +165,9 @@ def baseline_vcc_inference():
         
         # Randomly select n_cells from control_adata
         control_indices = np.random.choice(range(len(control_adata)), size=n_cells, replace=False)
-        X_ctrl = control_adata.obsm["X_emb"][control_indices]
-        #X_ctrl = X_ctrl[:, hvg_mask]
+        # X_ctrl = control_adata.obsm["X_emb"][control_indices]
+        X_ctrl = control_adata.X[control_indices]
+        X_ctrl = X_ctrl[:, hvg_mask]
         X_ctrl = X_ctrl.toarray()
         X_ctrl = torch.from_numpy(X_ctrl).float()
         X_ctrl = X_ctrl.unsqueeze(0)  # Add batch dimension [1, S, E]

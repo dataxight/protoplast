@@ -105,8 +105,8 @@ def main():
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt",
         batch_size=64,
         group_size_S=64,
-        num_workers=16,
-        block_size=256
+        num_workers=8,
+        block_size=128
     )
     dm.setup(stage="fit")
     
@@ -167,8 +167,8 @@ def main():
             mean_target_addresses=mean_target_addresses,
             lr=1e-3,
             wd=1e-4,
-            cls_weight=1.0,
-            recon_weight=0.1,
+            cls_weight=0.1,
+            recon_weight=0.9,
             kl_weight=1e-3
         )
     
@@ -184,7 +184,7 @@ def main():
         monitor="train_loss",
         mode="min",
         save_top_k=3,
-        dirpath="checkpoints/baseline-scvi-cls-heavy/",
+        dirpath="checkpoints/baseline-scvi/",
         filename="baseline-{epoch:02d}-{train_loss:.4f}"
     )
     
@@ -195,7 +195,7 @@ def main():
     )
     
     # Set up logger
-    logger = CSVLogger("logs", name="baseline-scvi-cls-heavy")
+    logger = CSVLogger("logs", name="baseline-scvi")
     
     # Create trainer
     logging.getLogger("pytorch_lightning").setLevel(logging.DEBUG)
