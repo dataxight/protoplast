@@ -193,7 +193,7 @@ class RayTrainRunner:
                 thread_per_worker = min(int((self.resources.get("CPU", 2) - 1) / 2), 4)
             resource_per_worker = {"CPU": thread_per_worker}
         if is_gpu and self.resources.get("GPU", 0) == 0:
-            logger.warning("`is_gpu = True` but there is no GPU found. Fallback to CPU.", UserWarning, stacklevel=2)
+            logger.warning("`is_gpu = True` but there is no GPU found. Fallback to CPU.")
             is_gpu = False
         if is_gpu:
             if num_workers is None:
@@ -264,14 +264,18 @@ class RayTrainRunner:
             scratch_path = config.get("scratch_path")
             scratch_content = config.get("scratch_content")
             logger.debug("Verifying storage path on worker node")
-            file = get_fsspec(scratch_path, "r")
-            read_content = file.read()
-            file.close()
+            try:
+                file = get_fsspec(scratch_path, "r")
+                read_content = file.read()
+                file.close()
+            except Exception as e:
+                logger.error("Failed to access shared storage path: %s", scratch_path, exc_info=True)
+                raise Exception("Cannot access the shared storage. Please check your storage path.") from e
             if scratch_content != read_content:
-                raise Exception(
-                    "The worker have no access to the head node content please check storage path"
-                    "and make sure the worker have access to them"
+                logger.critical(
+                    f"Content mismatch detected for path: {scratch_path}.Worker cannot read expected head node content."
                 )
+                raise Exception("Content mismatch detected. Please check your shared storage setup.")
             num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
             logger.debug(f"=========Starting the training on {rank} with num threads: {num_threads}=========")
             model_params = indices.metadata
