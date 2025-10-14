@@ -13,8 +13,8 @@
 #   limitations under the License.
 
 
+import logging
 import random
-import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -22,6 +22,8 @@ from dataclasses import dataclass
 import anndata
 import torch
 from torch.utils.data._utils.collate import default_collate
+
+logger = logging.getLogger(__name__)
 
 
 def ann_split_data(
@@ -53,11 +55,11 @@ def ann_split_data(
             if drop_last:
                 dropped_n = sum(end - start for start, end in batches[-remainder:])
                 if dropped_n / n > drop_remainder_warning_pct:
-                    print(f"=========Warning: {dropped_n / n} of data is dropped")
+                    logger.warning(f"{dropped_n / n} of data is dropped")
                 batches = batches[:-remainder]
             else:
                 pad = total_workers - remainder
-                print("Duplicating data with", pad)
+                logger.info(f"Duplicating data with {pad}")
                 batches.extend(batches[-remainder:] * (pad // remainder))
                 batches.extend(batches[-(pad % remainder) :])
         return batches
@@ -77,7 +79,7 @@ def ann_split_data(
 
         n_obs = ad.n_obs
         if batch_size > n_obs:
-            warnings.warn(
+            logger.warning(
                 f"Batch size ({batch_size}) is greater than number of observations "
                 f"in file {fp} ({n_obs}). Only one batch will be created.",
                 stacklevel=2,
@@ -117,24 +119,16 @@ def ann_split_data(
         val_split = batches[:val_n]
         test_split = batches[val_n : val_n + test_n]
         train_split = batches[val_n + test_n :]
-        print(
-            "=========Length of val_split",
-            len(val_split),
-            "length of test_split",
-            len(test_split),
-            "length of train_split",
-            len(train_split),
+        logger.info(
+            f"Length of val_split: {len(val_split)} "
+            f"length of test_split: {len(test_split)}, length of train_split: {len(train_split)}"
         )
         val_split = drop_remainder(val_split)
         test_split = drop_remainder(test_split)
         train_split = drop_remainder(train_split)
-        print(
-            "=========Length of after dropping remainder val_split",
-            len(val_split),
-            "length of test_split",
-            len(test_split),
-            "length of train_split",
-            len(train_split),
+        logger.info(
+            f"Length of after dropping remainder val_split: {len(val_split)}, "
+            f"length of test_split: {len(test_split)}, length of train_split: {len(train_split)}"
         )
 
         validation_datas.append(val_split)

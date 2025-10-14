@@ -19,9 +19,9 @@
 
 # Dynamically get version from installed package metadata
 try:
-    from importlib.metadata import version, PackageNotFoundError
+    from importlib.metadata import PackageNotFoundError, version
 except ImportError:
-    from importlib_metadata import version, PackageNotFoundError  # type: ignore
+    from importlib_metadata import PackageNotFoundError, version  # type: ignore
 
 try:
     __version__ = version("protoplast")

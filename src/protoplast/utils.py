@@ -13,6 +13,9 @@
 #   limitations under the License.
 
 
+import logging
+import os
+import sys
 from typing import Any
 
 from daft import DataType
@@ -48,3 +51,25 @@ class ExpressionVisitorWithRequiredColumns(ExpressionVisitor[None]):
     def visit_function(self, name: str, args: list[Expression]) -> None:
         for arg in args:
             self.visit(arg)
+
+
+def setup_console_logging():
+    """
+    Configures the root logger to output to the console (stderr)
+    based on the LOG_LEVEL environment variable.
+    """
+    env_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    level_map = logging.getLevelNamesMapping()
+
+    if env_level not in level_map:
+        log_level = logging.INFO
+        print(f"Warning: Invalid LOG_LEVEL '{env_level}' provided. Defaulting to INFO.", file=sys.stderr)
+    else:
+        log_level = level_map[env_level]
+
+    logging.basicConfig(
+        level=log_level,
+        format="%(name)s - %(levelname)s - %(message)s",
+    )
+
+    logging.info(f"Logging initialized. Current level is: {logging.getLevelName(log_level)}")
