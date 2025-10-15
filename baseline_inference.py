@@ -134,7 +134,7 @@ def baseline_vcc_inference():
     checkpoint_path = "/home/tphan/Softwares/vcc-models/checkpoints/baseline-scvi/baseline-epoch=19-train_loss=0.4548.ckpt"
     
     # Define our path
-    pert_counts_path = "./pert_counts_Validation_val.csv"
+    pert_counts_path = "./pert_counts_Validation.csv"
     pert_counts = pd.read_csv(pert_counts_path)
     gene_names = pd.read_csv("./gene_names.csv", header=None)
     gene_names = gene_names[0].tolist()
@@ -149,7 +149,7 @@ def baseline_vcc_inference():
     dm.setup(stage="fit")
     
     predictor = BaselinePredictor(checkpoint_path)
-    adata = ad.read_h5ad("./competition_train_with_emb.h5")
+    adata = ad.read_h5ad("/mnt/hdd2/tan/competition_support_set_sorted/competition_train.h5")
     hvg_mask = np.where(adata.var["highly_variable"])[0]
     control_adata = adata[adata.obs["target_gene"] == "non-targeting"]
     batch_data = control_adata.obs["batch_var"]
