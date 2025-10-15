@@ -40,7 +40,7 @@ def load_model(checkpoint_path: str, device: str, mean_target_map, mean_target_a
             'd_f': 512,
             'n_perts': 151,
             'n_genes': 18080,
-            'embedding_dim': 128,
+            'embedding_dim': 2000,
             'pert_emb_dim': 5120,
             'dropout': 0.1,
             'mean_target_map': mean_target_map,
@@ -105,7 +105,7 @@ def main():
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt",
         batch_size=64,
         group_size_S=64,
-        num_workers=8,
+        num_workers=4,
         block_size=128
     )
     dm.setup(stage="fit")
