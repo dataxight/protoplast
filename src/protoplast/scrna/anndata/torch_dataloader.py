@@ -13,6 +13,7 @@
 #   limitations under the License.
 
 
+import logging
 import math
 import os
 from collections import Counter
@@ -32,6 +33,7 @@ from protoplast.patches.anndata_remote import apply_file_backing_patch
 
 from .strategy import ShuffleStrategy, SplitInfo
 
+logger = logging.getLogger(__name__)
 apply_file_backing_patch()
 apply_read_h5ad_backed_patch()
 
@@ -176,7 +178,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         try:
             world_size = td.get_world_size()
         except ValueError:
-            print("Not using tdd default to world size 1")
+            logging.warning("Not using tdd default to world size 1")
             world_size = 1
         if self.mini_batch_size:
             total_sample = sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])

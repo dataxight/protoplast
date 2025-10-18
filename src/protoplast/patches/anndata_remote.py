@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import logging
 from os import PathLike
 from pathlib import Path
 from typing import Literal
@@ -24,6 +25,8 @@ import h5py
 from anndata._core.file_backing import AnnDataFileManager as OriginalAnnDataFileManager
 
 from .file_handler import open_fsspec
+
+logging = logging.getLogger(__name__)
 
 
 def is_local_file(path: str) -> bool:

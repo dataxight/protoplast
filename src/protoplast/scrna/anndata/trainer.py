@@ -13,9 +13,10 @@
 #   limitations under the License.
 
 
+import logging
 import os
 import time
-import warnings
+import uuid
 from collections.abc import Callable
 
 import anndata
@@ -28,8 +29,14 @@ import torch
 from beartype import beartype
 from lightning.pytorch.strategies import Strategy
 
+from protoplast.patches.file_handler import get_fsspec
+
+from ...utils import setup_console_logging
 from .strategy import SequentialShuffleStrategy, ShuffleStrategy
 from .torch_dataloader import AnnDataModule, DistributedAnnDataset, cell_line_metadata_cb
+
+logger = logging.getLogger(__name__)
+setup_console_logging()
 
 
 class RayTrainRunner:
@@ -103,6 +110,7 @@ class RayTrainRunner:
         # Init ray cluster
         DEFAULT_RUNTIME_ENV_CONFIG = {
             "working_dir": os.getenv("PWD"),  # Allow ray workers to inherit venv at $PWD if there is any
+            "LOG_LEVEL": os.getenv("LOG_LEVEL", "INFO"),
         }
         if runtime_env_config is None:
             runtime_env_config = DEFAULT_RUNTIME_ENV_CONFIG
@@ -181,11 +189,11 @@ class RayTrainRunner:
         self.enable_progress_bar = enable_progress_bar
         if not resource_per_worker:
             if not thread_per_worker:
-                print("Setting thread_per_worker to half of the available CPUs capped at 4")
+                logger.info("Setting thread_per_worker to half of the available CPUs capped at 4")
                 thread_per_worker = min(int((self.resources.get("CPU", 2) - 1) / 2), 4)
             resource_per_worker = {"CPU": thread_per_worker}
         if is_gpu and self.resources.get("GPU", 0) == 0:
-            warnings.warn("`is_gpu = True` but there is no GPU found. Fallback to CPU.", UserWarning, stacklevel=2)
+            logger.warning("`is_gpu = True` but there is no GPU found. Fallback to CPU.")
             is_gpu = False
         if is_gpu:
             if num_workers is None:
@@ -200,7 +208,7 @@ class RayTrainRunner:
             scaling_config = ray.train.ScalingConfig(
                 num_workers=num_workers, use_gpu=False, resources_per_worker=resource_per_worker
             )
-        print(f"Using {num_workers} workers where each worker uses: {resource_per_worker}")
+        logger.info(f"Using {num_workers} workers where each worker uses: {resource_per_worker}")
         start = time.time()
         shuffle_strategy = self.shuffle_strategy(
             file_paths,
@@ -216,12 +224,14 @@ class RayTrainRunner:
         kwargs.pop("drop_last", None)
         kwargs.pop("pre_fetch_then_batch", None)
         indices = shuffle_strategy.split()
-        print(f"Data splitting time: {time.time() - start:.2f} seconds")
+        logger.debug(f"Data splitting time: {time.time() - start:.2f} seconds")
         train_config = {
             "indices": indices,
             "ckpt_path": ckpt_path,
             "shuffle_strategy": shuffle_strategy,
             "enable_progress_bar": self.enable_progress_bar,
+            "scratch_path": os.path.join(self.result_storage_path, "scratch.plt"),
+            "scratch_content": str(uuid.uuid4()),
         }
         my_train_func = self._trainer()
         par_trainer = ray.train.torch.TorchTrainer(
@@ -230,7 +240,14 @@ class RayTrainRunner:
             train_loop_config=train_config,
             run_config=ray.train.RunConfig(storage_path=self.result_storage_path),
         )
-        print("Spawning Ray worker and initiating distributed training")
+
+        logger.debug("Writing scratch content to share storage")
+        os.makedirs(self.result_storage_path, exist_ok=True)
+        file = get_fsspec(train_config["scratch_path"], mode="w")
+        file.write(train_config["scratch_content"])
+        file.close()
+
+        logger.debug("Spawning Ray worker and initiating distributed training")
         return par_trainer.fit()
 
     def _trainer(self):
@@ -244,8 +261,23 @@ class RayTrainRunner:
                 rank = 0
             indices = config.get("indices")
             ckpt_path = config.get("ckpt_path")
+            scratch_path = config.get("scratch_path")
+            scratch_content = config.get("scratch_content")
+            logger.debug("Verifying storage path on worker node")
+            try:
+                file = get_fsspec(scratch_path, "r")
+                read_content = file.read()
+                file.close()
+            except Exception as e:
+                logger.error("Failed to access shared storage path: %s", scratch_path, exc_info=True)
+                raise Exception("Cannot access the shared storage. Please check your storage path.") from e
+            if scratch_content != read_content:
+                logger.critical(
+                    f"Content mismatch detected for path: {scratch_path}.Worker cannot read expected head node content."
+                )
+                raise Exception("Content mismatch detected. Please check your shared storage setup.")
             num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
-            print(f"=========Starting the training on {rank} with num threads: {num_threads}=========")
+            logger.debug(f"=========Starting the training on {rank} with num threads: {num_threads}=========")
             model_params = indices.metadata
             shuffle_strategy = config.get("shuffle_strategy")
             ann_dm = AnnDataModule(
