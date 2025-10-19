@@ -52,6 +52,7 @@ class PerturbationDataset(DistributedAnnDataset):
     def __init__(
         self,
         pert_embedding_file: str,
+        hvg_file: str,
         cell_type_label: str = "cell_type",
         target_label: str = "target_gene",
         control_label: str = "non-targeting",
@@ -73,6 +74,7 @@ class PerturbationDataset(DistributedAnnDataset):
         self.batch_label = batch_label
         self.use_batches = use_batches
         self.pert_embedding_file = pert_embedding_file
+        self.hvg_file = hvg_file
         self.group_size_S = group_size_S
         self.barcodes = barcodes
         self.n_items = n_items
@@ -83,6 +85,10 @@ class PerturbationDataset(DistributedAnnDataset):
         self.adatas = None
         self.loss_weight_dicts = None
         self.pert_embedding = torch.load(pert_embedding_file)
+        if hvg_file is not None:
+            self._hvg_genes = open(hvg_file, "r").read().splitlines()
+        else:
+            self._hvg_genes = None
 
         # Initialize control region tracking per cell type
         self.cell_type_ctrl_regions = {}  # {cell_type: (start, end)} per file
@@ -308,7 +314,6 @@ class PerturbationDataset(DistributedAnnDataset):
             self.adata_obs = []
             self.adata_vars = []
             self.loss_weight_dicts = []
-            self.subtle_map_dicts = []
             for f in self.files:
                 adata = anndata.read_h5ad(f, backed="r")
                 self.adata_obs.append(deepcopy(adata.obs))
@@ -316,7 +321,8 @@ class PerturbationDataset(DistributedAnnDataset):
                 basename = os.path.basename(f)
                 dirname = os.path.dirname(f)
                 self.loss_weight_dicts.append(pickle.load(open(f'{dirname}/degs/{basename}_loss_weight_dict.pkl', 'rb')))
-                self.subtle_map_dicts.append(pickle.load(open(f'{dirname}/degs/{basename}_subtle_map.pkl', 'rb')))
+            if self._hvg_genes is not None:
+                self._hvg_mask = np.where(self.adata_vars[0].index.isin(self._hvg_genes))[0]
         if self.h5files is None:
             self.h5files = [h5py.File(f, 'r', libver='latest', swmr=True) for f in self.files]
         if self.adatas is None:
@@ -359,18 +365,16 @@ class PerturbationDataset(DistributedAnnDataset):
                     loss_weight = np.array(loss_weight_dict.get(target, default_loss_weight))
                     loss_weight = np.nan_to_num(loss_weight, nan=0.0) * 100
 
-                    subtle_class = self.subtle_map_dicts[file_i].get(target, 1)
-
                     # Get barcodes for perturbation cells if needed
                     pert_barcodes = None
                     if self.barcodes:
                         pert_barcodes = self.adata_obs[file_i].index[cell_indices].values
 
                     if self.hvg_only:
-                        hvg_mask = np.where(np.array(self.adata_vars[file_i]["highly_variable"]))[0]
-                        loss_weight_emb = loss_weight[hvg_mask]
-                        X_pert_emb = X_pert[:, hvg_mask]
-                        X_ctrl_emb = X_ctrl[:, hvg_mask]
+                        # hvg_mask = np.where(np.array(self.adata_vars[file_i]["highly_variable"]))[0]
+                        loss_weight_emb = loss_weight[self._hvg_mask]
+                        X_pert_emb = X_pert[:, self._hvg_mask]
+                        X_ctrl_emb = X_ctrl[:, self._hvg_mask]
                     else:
                         loss_weight_emb = loss_weight
                         X_pert_emb = X_pert
@@ -388,7 +392,6 @@ class PerturbationDataset(DistributedAnnDataset):
                         "cell_type_onehot": torch.stack([cell_type_onehot] * self.group_size_S), # [S, n_cell_type]
                         "batch_onehot": torch.stack(batch_onehots), # tensor [S, n_batches]
                         "pert_idx": torch.tensor([pert_idx], dtype=torch.long), # tensor [n_pert_names]
-                        "subtle_class": torch.tensor([subtle_class], dtype=torch.long), # tensor [1]
                         "loss_weight_emb": torch.tensor(loss_weight_emb), # tensor [E]
                         "loss_weight_gene": torch.tensor(loss_weight), # tensor [G]
                     }
@@ -447,6 +450,7 @@ class PerturbationDataModule(AnnDataModule):
         self,
         files: list[str] = None,
         pert_embedding_file: str = None,
+        hvg_file: str = None,
         config_path: str = None,
         num_workers: int = None,
         prefetch_factor: int = 2,
@@ -519,6 +523,7 @@ class PerturbationDataModule(AnnDataModule):
 
         # Store perturbation-specific parameters
         self.pert_embedding_file = pert_embedding_file
+        self.hvg_file = hvg_file
         self.cell_type_label = cell_type_label
         self.target_label = target_label
         self.control_label = control_label
@@ -692,6 +697,7 @@ class PerturbationDataModule(AnnDataModule):
         """Setup datasets for different stages."""
         dataset_kwargs = {
             'pert_embedding_file': self.pert_embedding_file,
+            'hvg_file': self.hvg_file,
             'cell_type_label': self.cell_type_label,
             'target_label': self.target_label,
             'control_label': self.control_label,
