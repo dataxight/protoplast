@@ -66,43 +66,35 @@ def ann_split_data(
         if remainder > 0:
             if drop_last:
                 # Calculate how many prefetched-batch will be dropped because the number of dropped mini-batches
-                # could get larger than prefetch factor
+                # could get larger than prefetch factor                
                 dropped_batch = remainder // prefetch_factor
                 dropped_mini_batch = remainder - (dropped_batch * prefetch_factor) # This is always less than prefetch_factor
                 
                 # Drop the full prefetched-batches first, if applied
+                logger.info(f"Dropping {remainder} mini-batches")
                 if dropped_batch > 0:
                     batches = batches[: -dropped_batch]
-                    
+
                 # Drop the remaining mini-batches from the last prefetched-batch
                 if dropped_mini_batch > 0:
                     batches[-1] = (batches[-1][0], batches[-1][1] - (dropped_mini_batch * batch_size))
                 
                 dropped_n = remainder * batch_size
                 if dropped_n / n > drop_remainder_warning_pct:
-                    logger.warning(f"{dropped_n / n} of data is dropped")
-                
-                
-                # dropped_n = sum(end - start for start, end in batches[-dropped_minibatch:])
-                # if dropped_n / n > drop_remainder_warning_pct:
-                #     logger.warning(f"{dropped_n / n} of data is dropped")
-                # batches = batches[:-dropped_minibatch]
+                    logger.warning(f"{dropped_n / n} of data is dropped")                                
+
             else:
                 # We need to pad *remainder* number of mini-batches so that
                 # total number of mini-batches is divisible by total_workers
                 added_batch = remainder // prefetch_factor
                 added_mini_batch = remainder - (added_batch * prefetch_factor)
                 
-                logger.info("Duplicating data")
+                logger.info(f"Duplicating {remainder} mini-batches")
                 if added_batch > 0:
                     batches.extend(batches[-added_batch:])
                 if added_mini_batch > 0:
                     batches.append((batches[-1][0], batches[-1][0] + (added_mini_batch * batch_size),))
-                
-                # pad = total_workers - remainder
-                # logger.info(f"Duplicating data with {pad}")
-                # batches.extend(batches[-remainder:] * (pad // remainder))
-                # batches.extend(batches[-(pad % remainder) :])
+    
         return batches
 
     if not rng:
@@ -121,8 +113,8 @@ def ann_split_data(
         n_obs = ad.n_obs
         if prefetch_size > n_obs:
             logger.warning(
-                f"Batch size ({prefetch_size}) is greater than number of observations "
-                f"in file {fp} ({n_obs}). Only one batch will be created.",
+                f"Prefetch size ({prefetch_size}) is greater than number of observations "
+                f"in file {fp} ({n_obs}). Only {math.ceil(n_obs / batch_size)} mini-batches will be created.",
                 stacklevel=2,
             )
 
@@ -130,7 +122,13 @@ def ann_split_data(
 
         # very extreme case, that we have number of mini-batches less than total_workers.
         # then we have to pad using the last range to make it divisible by total_workers
-        if len(batches) * prefetch_factor < total_workers:
+        total_mini_batches = sum(math.ceil((end - start) / batch_size) for start, end in batches)
+        if total_mini_batches < total_workers:
+            logger.warning(
+                f"Number of mini-batches ({total_mini_batches}) is less than total workers {total_workers} "
+                f"Duplicating last batch to make it compatible.",
+                stacklevel=2,
+            )
             padded_mini_batches = (len(batches) * prefetch_factor) % total_workers
             padded_batches = math.ceil(padded_mini_batches / prefetch_factor)
             batches += [batches[-1]] * padded_batches
