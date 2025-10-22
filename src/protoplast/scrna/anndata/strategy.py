@@ -20,6 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import anndata
+import math
 import torch
 from torch.utils.data._utils.collate import default_collate
 
@@ -37,31 +38,61 @@ def ann_split_data(
     is_shuffled: bool = True,
     drop_last: bool = True,
     drop_remainder_warning_pct: float = 0.05,
+    prefetch_factor: int = 1,
 ):
-    def to_batches(n):
-        if batch_size >= n:
+    # Adjust batch size based on prefetch factor
+    prefetch_size = batch_size * prefetch_factor
+    
+    def to_batches(n) -> list[tuple[int, int]]:
+        if prefetch_size >= n:
             return [(0, n)]
         batches = []
-        for i in range(0, n, batch_size):
-            if i + batch_size > n:
+        for i in range(0, n, prefetch_size):
+            if i + prefetch_size > n:
                 continue
-            batches.append((i, i + batch_size))
+            batches.append((i, i + prefetch_size))
         return batches
 
     def drop_remainder(batches):
+        # Number of samples in all batches
         n = sum(end - start for start, end in batches)
-        remainder = len(batches) % total_workers
+        
+        # Each worker should be assigned equal number of mini-batches
+        # This remainder is the number of extra mini-batches that cannot be evenly
+        # distributed among workers, not the number of prefetched batches
+        remainder = (len(batches) * prefetch_factor) % total_workers
         if remainder > 0:
             if drop_last:
-                dropped_n = sum(end - start for start, end in batches[-remainder:])
+                # Calculate how many prefetched-batch will be dropped because the number of dropped mini-batches
+                # could get larger than prefetch factor                
+                dropped_batch = remainder // prefetch_factor
+                dropped_mini_batch = remainder - (dropped_batch * prefetch_factor) # This is always less than prefetch_factor
+                
+                # Drop the full prefetched-batches first, if applied
+                logger.info(f"Dropping {remainder} mini-batches")
+                if dropped_batch > 0:
+                    batches = batches[: -dropped_batch]
+
+                # Drop the remaining mini-batches from the last prefetched-batch
+                if dropped_mini_batch > 0:
+                    batches[-1] = (batches[-1][0], batches[-1][1] - (dropped_mini_batch * batch_size))
+                
+                dropped_n = remainder * batch_size
                 if dropped_n / n > drop_remainder_warning_pct:
-                    logger.warning(f"{dropped_n / n} of data is dropped")
-                batches = batches[:-remainder]
+                    logger.warning(f"{dropped_n / n} of data is dropped")                                
+
             else:
-                pad = total_workers - remainder
-                logger.info(f"Duplicating data with {pad}")
-                batches.extend(batches[-remainder:] * (pad // remainder))
-                batches.extend(batches[-(pad % remainder) :])
+                # We need to pad *remainder* number of mini-batches so that
+                # total number of mini-batches is divisible by total_workers
+                added_batch = remainder // prefetch_factor
+                added_mini_batch = remainder - (added_batch * prefetch_factor)
+                
+                logger.info(f"Duplicating {remainder} mini-batches")
+                if added_batch > 0:
+                    batches.extend(batches[-added_batch:])
+                if added_mini_batch > 0:
+                    batches.append((batches[-1][0], batches[-1][0] + (added_mini_batch * batch_size),))
+    
         return batches
 
     if not rng:
@@ -78,19 +109,27 @@ def ann_split_data(
             metadata_cb(ad, metadata)
 
         n_obs = ad.n_obs
-        if batch_size > n_obs:
+        if prefetch_size > n_obs:
             logger.warning(
-                f"Batch size ({batch_size}) is greater than number of observations "
-                f"in file {fp} ({n_obs}). Only one batch will be created.",
+                f"Prefetch size ({prefetch_size}) is greater than number of observations "
+                f"in file {fp} ({n_obs}). Only {math.ceil(n_obs / batch_size)} mini-batches will be created.",
                 stacklevel=2,
             )
 
         batches = to_batches(n_obs)
 
-        # very extreme case, that we have number of batches less than total_workers.
+        # Very extreme case, that we have number of mini-batches less than total_workers.
         # then we have to pad using the last range to make it divisible by total_workers
-        if len(batches) < total_workers:
-            batches += [batches[-1]] * (total_workers - len(batches))
+        total_mini_batches = sum((end - start) // batch_size for start, end in batches)
+        if total_mini_batches < total_workers:
+            logger.warning(
+                f"Number of mini-batches ({total_mini_batches}) is less than total workers {total_workers} "
+                f"Duplicating last batch to make it compatible.",
+                stacklevel=2,
+            )
+            padded_mini_batches = total_workers - total_mini_batches
+            padded_batches = math.ceil(padded_mini_batches / prefetch_factor)
+            batches += [batches[-1]] * padded_batches
         if len(batches) == 0:
             raise Exception("This data is not compatiable with this worker combination")
 
@@ -123,6 +162,7 @@ def ann_split_data(
             f"Length of val_split: {len(val_split)} "
             f"length of test_split: {len(test_split)}, length of train_split: {len(train_split)}"
         )
+
         val_split = drop_remainder(val_split)
         test_split = drop_remainder(test_split)
         train_split = drop_remainder(train_split)
@@ -313,13 +353,9 @@ class SequentialShuffleStrategy(ShuffleStrategy):
         self.drop_last = drop_last
 
     def split(self) -> SplitInfo:
-        if self.pre_fetch_then_batch:
-            batch_size = self.batch_size * self.pre_fetch_then_batch
-        else:
-            batch_size = self.batch_size
         split_dict = ann_split_data(
             self.file_paths,
-            batch_size,
+            self.batch_size,
             self.total_workers,
             self.test_size,
             self.validation_size,
@@ -327,6 +363,7 @@ class SequentialShuffleStrategy(ShuffleStrategy):
             self.metadata_cb,
             self.is_shuffled,
             self.drop_last,
+            prefetch_factor=self.pre_fetch_then_batch,
         )
         # this will be passed to the dataset, inorder to know the mini batch size
         if self.pre_fetch_then_batch:
