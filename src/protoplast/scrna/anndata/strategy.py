@@ -20,6 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import anndata
+import math
 import torch
 from torch.utils.data._utils.collate import default_collate
 
@@ -127,10 +128,12 @@ def ann_split_data(
 
         batches = to_batches(n_obs)
 
-        # very extreme case, that we have number of batches less than total_workers.
+        # very extreme case, that we have number of mini-batches less than total_workers.
         # then we have to pad using the last range to make it divisible by total_workers
-        if len(batches) < total_workers:
-            batches += [batches[-1]] * (total_workers - len(batches))
+        if len(batches) * prefetch_factor < total_workers:
+            padded_mini_batches = (len(batches) * prefetch_factor) % total_workers
+            padded_batches = math.ceil(padded_mini_batches / prefetch_factor)
+            batches += [batches[-1]] * padded_batches
         if len(batches) == 0:
             raise Exception("This data is not compatiable with this worker combination")
 
