@@ -17,9 +17,9 @@ import logging
 import os
 import time
 import uuid
+import warnings
 from collections.abc import Callable
 from typing import Literal
-import warnings
 
 import anndata
 import lightning.pytorch as pl
@@ -317,7 +317,7 @@ def _get_accelerator() -> Literal["cpu", "auto"]:
     if torch.backends.mps.is_available():
         # TODO: Make RayDDPStrategy compatible with MPS
         accelerator = "cpu"
-        warnings.warn("RayTrainRunner does not support MPS accelarator yet. Fallback to CPU", UserWarning)
+        warnings.warn("RayTrainRunner does not support MPS accelarator yet. Fallback to CPU", UserWarning, stacklevel=2)
     else:
         accelerator = "auto"
     return accelerator
