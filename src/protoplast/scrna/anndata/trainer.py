@@ -17,7 +17,9 @@ import logging
 import os
 import time
 import uuid
+import warnings
 from collections.abc import Callable
+from typing import Literal
 
 import anndata
 import lightning.pytorch as pl
@@ -251,6 +253,7 @@ class RayTrainRunner:
         return par_trainer.fit()
 
     def _trainer(self):
+        warnings.filterwarnings(action="ignore", module="ray", category=DeprecationWarning)
         Model, Ds, model_keys = self.Model, self.Ds, self.model_keys
 
         def anndata_train_func(config):
@@ -296,7 +299,7 @@ class RayTrainRunner:
             trainer = pl.Trainer(
                 max_epochs=self.max_epochs,
                 devices="auto",
-                accelerator="auto",
+                accelerator=_get_accelerator(),
                 strategy=self.ray_trainer_strategy,
                 plugins=[ray.train.lightning.RayLightningEnvironment()],
                 callbacks=[ray.train.lightning.RayTrainReportCallback()],
@@ -307,3 +310,14 @@ class RayTrainRunner:
             trainer.fit(model, datamodule=ann_dm, ckpt_path=ckpt_path)
 
         return anndata_train_func
+
+
+def _get_accelerator() -> Literal["cpu", "auto"]:
+    """Get accelerator for RayTrainRunner"""
+    if torch.backends.mps.is_available():
+        # TODO: Make RayDDPStrategy compatible with MPS
+        accelerator = "cpu"
+        warnings.warn("RayTrainRunner does not support MPS accelarator yet. Fallback to CPU", UserWarning, stacklevel=2)
+    else:
+        accelerator = "auto"
+    return accelerator
