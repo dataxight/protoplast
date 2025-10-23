@@ -187,10 +187,10 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
     
     def __iter__(self):
         self._init_rank()
-        
+
         for fidx, f in enumerate(self.files):
             self.ad = anndata.read_h5ad(f, backed="r")
-                        
+
             total_mini_batches = 0
             if self.mini_batch_size is not None:
                 # We need to do ceil() because the last batch might be smaller than mini_batch_size
@@ -202,15 +202,15 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
                 total_mini_batches = len(self.batches[fidx])
 
             # Find range of the batches assigned to this worker
-            mini_batch_per_worker = total_mini_batches / self.total_workers # This number is ALWAYS divisble by total_workers
-            mini_batch_per_batch = (self.batches[fidx][0][1] - self.batches[fidx][0][0]) / self.mini_batch_size # Will be 1 if mini_batch_size is None
+            mini_batch_per_worker = total_mini_batches // self.total_workers # This number is ALWAYS divisble by total_workers
+            mini_batch_per_batch = (self.batches[fidx][0][1] - self.batches[fidx][0][0]) // self.mini_batch_size # Will be 1 if mini_batch_size is None
             
             start_mini_batch_gidx = self.global_rank * mini_batch_per_worker # a.k.a offset
             end_mini_batch_gidx = start_mini_batch_gidx + mini_batch_per_worker
 
-            start_batch_gidx = int(start_mini_batch_gidx // mini_batch_per_batch)
-            end_batch_gidx = int(end_mini_batch_gidx // mini_batch_per_batch)
-            
+            start_batch_gidx = start_mini_batch_gidx // mini_batch_per_batch
+            end_batch_gidx = end_mini_batch_gidx // mini_batch_per_batch
+
             yielded_mini_batches = 0
             for bidx in range(start_batch_gidx, end_batch_gidx + 1):
                 start, end = self.batches[fidx][bidx]
