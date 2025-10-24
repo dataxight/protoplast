@@ -59,13 +59,20 @@ def setup_console_logging():
     based on the LOG_LEVEL environment variable.
     """
     env_level = os.environ.get("LOG_LEVEL", "INFO").upper()
-    level_map = logging.getLevelNamesMapping()
 
-    if env_level not in level_map:
-        log_level = logging.INFO
-        print(f"Warning: Invalid LOG_LEVEL '{env_level}' provided. Defaulting to INFO.", file=sys.stderr)
+    if sys.version_info >= (3, 11):
+        level_map = logging.getLevelNamesMapping()
+        if env_level not in level_map:
+            log_level = logging.INFO
+            print(f"Warning: Invalid LOG_LEVEL '{env_level}' provided. Defaulting to INFO.", file=sys.stderr)
+        else:
+            log_level = level_map[env_level]
     else:
-        log_level = level_map[env_level]
+        log_level = logging.getLevelName(env_level)
+        if not isinstance(log_level, int):
+            # The level was invalid, so log_level is still a string.
+            print(f"Warning: Invalid LOG_LEVEL '{env_level}' provided. Defaulting to INFO.", file=sys.stderr)
+            log_level = logging.INFO
 
     logging.basicConfig(
         level=log_level,
