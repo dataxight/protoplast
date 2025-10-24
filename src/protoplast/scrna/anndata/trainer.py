@@ -22,6 +22,7 @@ from collections.abc import Callable
 from typing import Literal
 
 import anndata
+import fsspec
 import lightning.pytorch as pl
 import ray
 import ray.train
@@ -184,7 +185,7 @@ class RayTrainRunner:
         Result
             The training result from RayTrainer
         """
-        self.result_storage_path = result_storage_path
+        self.result_storage_path = os.path.expanduser(result_storage_path)
         self.prefetch_factor = prefetch_factor
         self.max_epochs = max_epochs
         self.kwargs = kwargs
@@ -244,8 +245,13 @@ class RayTrainRunner:
         )
 
         logger.debug("Writing scratch content to share storage")
-        os.makedirs(self.result_storage_path, exist_ok=True)
-        file = get_fsspec(train_config["scratch_path"], mode="w")
+        scratch_path = train_config["scratch_path"]
+        fs, path_on_fs = fsspec.core.url_to_fs(scratch_path)
+        parent_dir = os.path.dirname(path_on_fs)
+        if not fs.exists(parent_dir):
+            logger.debug(f"Ensuring directory exists: {parent_dir}")
+            fs.makedirs(parent_dir, exist_ok=True)
+        file = get_fsspec(scratch_path, mode="w")
         file.write(train_config["scratch_content"])
         file.close()
 
