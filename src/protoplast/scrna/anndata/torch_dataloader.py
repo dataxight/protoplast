@@ -184,34 +184,63 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             total_sample = sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
             return math.ceil(total_sample / self.mini_batch_size / world_size)
         return sum(1 for i in range(len(self.files)) for _ in self.batches[i]) / world_size
-
+    
     def __iter__(self):
         self._init_rank()
-        gidx = 0
-        total_iter = 0
+
         for fidx, f in enumerate(self.files):
             self.ad = anndata.read_h5ad(f, backed="r")
-            for start, end in self.batches[fidx]:
-                if not (gidx % self.total_workers) == self.global_rank:
-                    gidx += 1
-                    continue
+
+            total_mini_batches = 0
+            if self.mini_batch_size is not None:
+                # We need to do ceil() because the last batch might be smaller than mini_batch_size
+                # But all prior mini-batches are guaranteed to be of size mini_batch_size
+                total_mini_batches = sum(math.ceil((end - start) / self.mini_batch_size) for start, end in self.batches[fidx])
+            else:
+                # Treat whole batch as one mini-batch
+                self.mini_batch_size = self.batches[fidx][0][1] - self.batches[fidx][0][0]
+                total_mini_batches = len(self.batches[fidx])
+
+            # Find range of the batches assigned to this worker
+            mini_batch_per_worker = total_mini_batches // self.total_workers # This number is ALWAYS divisble by total_workers
+            mini_batch_per_batch = (self.batches[fidx][0][1] - self.batches[fidx][0][0]) // self.mini_batch_size # Will be 1 if mini_batch_size is None
+            
+            start_mini_batch_gidx = self.global_rank * mini_batch_per_worker # a.k.a offset
+            end_mini_batch_gidx = start_mini_batch_gidx + mini_batch_per_worker
+
+            start_batch_gidx = start_mini_batch_gidx // mini_batch_per_batch
+            end_batch_gidx = end_mini_batch_gidx // mini_batch_per_batch
+
+            yielded_mini_batches = 0
+            for bidx in range(start_batch_gidx, end_batch_gidx + 1):
+                start, end = self.batches[fidx][bidx]
+
+                # Locate the index of the starting mini-batch within this batch
+                # Only adjust the start for the first batch because it might be starting
+                # from the middle of the batch
+                if bidx == start_batch_gidx:
+                    # Local offset, in case size of a mini-batch equals to a batch, this will be 0
+                    local_start_mini_batch_idx = start_mini_batch_gidx % mini_batch_per_batch
+                    start = start + local_start_mini_batch_idx * self.mini_batch_size
+
+                # Fetch the whole block & start yielding data
                 X = self._get_mat_by_range(self.ad, start, end)
-                self.X = X
-                if self.mini_batch_size is None:
-                    # not fetch-then-batch approach, we yield everything
-                    yield self.transform(start, end)
-                    total_iter += 1
-                else:
-                    # fetch-then-batch approach
-                    for i in range(0, X.shape[0], self.mini_batch_size):
-                        # index on the X coordinates
-                        b_start, b_end = i, min(i + self.mini_batch_size, X.shape[0])
-                        # index on the adata coordinates
-                        global_start, global_end = start + i, min(start + i + self.mini_batch_size, end)
-                        self.X = X[b_start:b_end]
-                        yield self.transform(global_start, global_end)
-                        total_iter += 1
-                gidx += 1
+                for i in range(0, X.shape[0], self.mini_batch_size):
+                    # index on the X coordinates
+                    b_start, b_end = i, min(i + self.mini_batch_size, X.shape[0])
+                    
+                    # index on the adata coordinates
+                    global_start, global_end = start + i, min(start + i + self.mini_batch_size, end)
+                    self.X = X[b_start:b_end]
+                    
+                    yield self.transform(global_start, global_end)
+                    yielded_mini_batches += 1
+
+                    if yielded_mini_batches >= mini_batch_per_worker:
+                        break
+
+                if yielded_mini_batches >= mini_batch_per_worker:
+                    break
 
 
 class DistributedFileSharingAnnDataset(DistributedAnnDataset):
