@@ -33,3 +33,34 @@ def test_trainer(tmp_path: Path):
     )
     assert isinstance(trainer, RayTrainRunner)
     trainer.train([str(test_h5ad_path)], result_storage_path=str(tmp_path / "results"))
+
+
+def test_trainer_multi_gpu(tmp_path: Path):
+    import torch
+    """Test if RayTrainRunner can be initialized with multi-GPU setup."""
+    if torch.cuda.is_available():
+        device_count = torch.cuda.device_count()
+        if device_count > 1:
+            print(f"✅ More than one device available! Total: {device_count} GPUs.")
+            test_h5ad_path = tmp_path / "test_trainer_multi_gpu.h5ad"
+            _simulate_h5ad(n_cells=5000, n_genes=200, output_path=test_h5ad_path)
+            from protoplast import DistributedCellLineAnnDataset, LinearClassifier, RayTrainRunner
+
+            trainer = RayTrainRunner(
+                Ds=DistributedCellLineAnnDataset,
+                Model=LinearClassifier,
+                model_keys=["num_genes", "num_classes"],
+            )
+            assert isinstance(trainer, RayTrainRunner)
+            trainer.train(
+                [str(test_h5ad_path)], 
+                result_storage_path=str(tmp_path / "results_multi_gpu"),
+                num_workers=device_count
+            )
+
+        else:
+            print(f"⚠️ Only one or zero devices available. Count: {device_count} skipping multi-GPU test.")
+        
+    else:
+        print("❌ CUDA is not available. skipping multi-GPU test.")
+    
