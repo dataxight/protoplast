@@ -42,7 +42,7 @@ def ann_split_data(
 ):
     # Adjust batch size based on prefetch factor
     prefetch_size = batch_size * prefetch_factor
-    
+
     def to_batches(n) -> list[tuple[int, int]]:
         if prefetch_size >= n:
             return [(0, n)]
@@ -56,7 +56,7 @@ def ann_split_data(
     def drop_remainder(batches):
         # Number of samples in all batches
         n = sum(end - start for start, end in batches)
-        
+
         # Each worker should be assigned equal number of mini-batches
         # This remainder is the number of extra mini-batches that cannot be evenly
         # distributed among workers, not the number of prefetched batches
@@ -64,35 +64,45 @@ def ann_split_data(
         if remainder > 0:
             if drop_last:
                 # Calculate how many prefetched-batch will be dropped because the number of dropped mini-batches
-                # could get larger than prefetch factor                
+                # could get larger than prefetch factor
                 dropped_batch = remainder // prefetch_factor
-                dropped_mini_batch = remainder - (dropped_batch * prefetch_factor) # This is always less than prefetch_factor
-                
+                dropped_mini_batch = remainder - (
+                    dropped_batch * prefetch_factor
+                )  # This is always less than prefetch_factor
+
                 # Drop the full prefetched-batches first, if applied
                 logger.info(f"Dropping {remainder} mini-batches")
                 if dropped_batch > 0:
-                    batches = batches[: -dropped_batch]
+                    batches = batches[:-dropped_batch]
 
                 # Drop the remaining mini-batches from the last prefetched-batch
                 if dropped_mini_batch > 0:
-                    batches[-1] = (batches[-1][0], batches[-1][1] - (dropped_mini_batch * batch_size))
-                
+                    batches[-1] = (
+                        batches[-1][0],
+                        batches[-1][1] - (dropped_mini_batch * batch_size),
+                    )
+
                 dropped_n = remainder * batch_size
                 if dropped_n / n > drop_remainder_warning_pct:
-                    logger.warning(f"{dropped_n / n} of data is dropped")                                
+                    logger.warning(f"{dropped_n / n} of data is dropped")
 
             else:
                 # We need to pad *remainder* number of mini-batches so that
                 # total number of mini-batches is divisible by total_workers
                 added_batch = remainder // prefetch_factor
                 added_mini_batch = remainder - (added_batch * prefetch_factor)
-                
+
                 logger.info(f"Duplicating {remainder} mini-batches")
                 if added_batch > 0:
                     batches.extend(batches[-added_batch:])
                 if added_mini_batch > 0:
-                    batches.append((batches[-1][0], batches[-1][0] + (added_mini_batch * batch_size),))
-    
+                    batches.append(
+                        (
+                            batches[-1][0],
+                            batches[-1][0] + (added_mini_batch * batch_size),
+                        )
+                    )
+
         return batches
 
     if not rng:
@@ -429,7 +439,9 @@ class RandomShuffleStrategy(ShuffleStrategy):
             sample = items[0]
 
             # Sparse tensor
-            if isinstance(sample, torch.Tensor) and (sample.is_sparse or sample.is_sparse_csr):
+            if isinstance(sample, torch.Tensor) and (
+                sample.is_sparse or sample.is_sparse_csr
+            ):
                 return torch.stack(items)
 
             # Dense tensor
@@ -442,7 +454,9 @@ class RandomShuffleStrategy(ShuffleStrategy):
 
             # Tuple or list
             elif isinstance(sample, (tuple | list)):
-                return type(sample)(collate_item([b[i] for b in items]) for i in range(len(sample)))
+                return type(sample)(
+                    collate_item([b[i] for b in items]) for i in range(len(sample))
+                )
 
             # Fallback
             else:
