@@ -249,11 +249,15 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
 
                 if len(current_worker_batches) > 1:
                     # Offset the index of last mini-batch
-                    total_mini_batches_exclude_last = sum((end - start) // self.mini_batch_size for start, end in current_worker_batches[:-1])
+                    total_mini_batches_exclude_last = sum(
+                        (end - start) // self.mini_batch_size
+                        for start, end in current_worker_batches[:-1]
+                    )
                     remainder = mini_batch_per_worker - total_mini_batches_exclude_last
                     current_worker_batches[-1] = (
                         current_worker_batches[-1][0],
-                        current_worker_batches[-1][0] + remainder * self.mini_batch_size,
+                        current_worker_batches[-1][0]
+                        + remainder * self.mini_batch_size,
                     )
 
             # NOTE: Black magic to improve read performance during data yielding
