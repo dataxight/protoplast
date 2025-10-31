@@ -103,3 +103,6 @@ check: ## Run code quality tools.
 	#@uv run mypy
 	@echo "🚀 Checking for obsolete dependencies: Running deptry"
 	#@uv run deptry src
+
+bump-version:
+	@uv run bump-my-version bump --new-version ${version}
