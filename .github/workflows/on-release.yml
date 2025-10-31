@@ -50,7 +50,7 @@ jobs:
       # 4. Publish to TestPyPI (if it's a pre-release)
       - name: Publish to TestPyPI
         if: github.event.release.prerelease == true
-        run: uv publish --repository-url https://test.pypi.org/legacy/
+        run: uv publish --index testpypi
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.TEST_PYPI_TOKEN }}
 
