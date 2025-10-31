@@ -65,6 +65,10 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     if: github.event.release.prerelease == false && github.event.release.target_commitish == 'main'
+    # the scope is too big need to update workflow to build static file and use actions/deploy-pages instead
+    # but this will do for now
+    permissions:
+      contents: write
     steps:
       - name: Check out
         uses: actions/checkout@v4
