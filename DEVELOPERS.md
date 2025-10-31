@@ -4,5 +4,7 @@
 ## How to bump version?
 
 ```bash
-make bump-version version=1.1.1
+make bump-version version=x.x.x
 ```
+
+Please make sure `x.x.x` is not an existing tag.
