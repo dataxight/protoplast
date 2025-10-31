@@ -13,10 +13,47 @@
 #   limitations under the License.
 
 
+import logging
+import os
 from urllib.parse import urlparse
 
 import fsspec
 import h5py
+import s3fs
+import torch
+from fsspec.implementations.cached import WholeFileCacheFileSystem
+
+logger = logging.getLogger(__name__)
+
+
+IS_PROTORAY = bool(int(os.getenv("IS_PROTORAY", "0")))
+
+PROTORAY_CACHE_FS = os.environ.get("PROTORAY_CACHE_FS", "wholefile")
+PROTORAY_CACHE_DIR = os.environ.get("PROTORAY_CACHE_DIR", "/mnt/cache/1/fsspec_cache")
+
+CACHED_FS = os.environ.get("CACHED_FS", "readahead")
+CACHED_DIR = os.environ.get("CACHED_DIR", "/tmp/fsspec_cache")
+
+
+def _get_protoray_fs(fs):
+    logger.debug("Using Protoray Caching config")
+    if torch.cuda.is_available():
+        if PROTORAY_CACHE_FS == "wholefile":
+            fs = WholeFileCacheFileSystem(fs=fs, cache_storage=PROTORAY_CACHE_DIR)
+        else:
+            raise ValueError(f"Unsupported CACHED_FS value: {PROTORAY_CACHE_FS}")
+    else:
+        logger.debug("Not using caching for S3 no GPU detected")
+    return fs
+
+
+def _get_cached_fs(fs):
+    logger.debug("Using Caching config")
+    if CACHED_FS == "wholefile":
+        fs = WholeFileCacheFileSystem(fs=fs, cache_storage=CACHED_DIR)
+    else:
+        raise ValueError(f"Unsupported CACHED_FS value: {CACHED_FS}")
+    return fs
 
 
 def get_fsspec(filename: str, mode="rb"):
@@ -25,6 +62,14 @@ def get_fsspec(filename: str, mode="rb"):
     if scheme == "dnanexus":
         fs = fsspec.filesystem("dnanexus")
         file = fs.open(filename, mode=mode)
+    elif scheme == "s3":
+        fs = s3fs.S3FileSystem(anon=False)
+        full_s3_path = f"{parsed.netloc}/{parsed.path.lstrip('/')}"
+        if IS_PROTORAY:
+            fs = _get_protoray_fs(fs)
+        else:
+            fs = _get_cached_fs(fs)
+        file = fs.open(full_s3_path, mode=mode)
     else:
         # For local files or other supported fsspec schemes
         fs, path = fsspec.core.url_to_fs(filename)
