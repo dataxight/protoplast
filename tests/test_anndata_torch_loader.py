@@ -308,6 +308,42 @@ def test_load_simple(test_even_h5ad_file: str):
         total_n += 1
     assert total_n == len(train_loader)
 
+def test_load_multi_epoch_shuffling(test_uneven_h5ad_file: str):
+    strategy = SequentialShuffleStrategy(
+        [test_uneven_h5ad_file], batch_size=2, total_workers=1, test_size=0.0, validation_size=0.0, pre_fetch_then_batch=1
+    )
+    indices = strategy.split()
+    data_module = AnnDataModule(
+        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_key="X", shuffle_strategy=strategy
+    )
+    data_module.setup(stage="fit")
+    train_loader = data_module.train_dataloader()
+    loader_len = len(train_loader)
+    
+    num_epochs = 3
+    first_batches = [] # To store the first batch of each epoch for comparison
+    for _ in range(num_epochs):
+        total_n_in_epoch = 0
+        for i, data in enumerate(train_loader):
+            data = data_module.on_after_batch_transfer(data, i)
+            # Store the first batch for later comparison
+            if i == 0:
+                # We must .clone() to prevent tensors from being overwritten
+                first_batches.append(data.clone())      
+            n, m = data.shape
+            assert n > 0
+            assert m > 0
+            assert isinstance(data, torch.Tensor)
+            assert not data.is_sparse
+            assert not data.is_sparse_csr
+            total_n_in_epoch += 1
+        assert total_n_in_epoch == loader_len
+
+    assert len(first_batches) == num_epochs    
+    are_different_1 = not torch.allclose(first_batches[0], first_batches[1])
+    are_different_2 = not torch.allclose(first_batches[1], first_batches[2])
+    assert are_different_1 and are_different_2, "Data was identical between epochs. Shuffling is not working."
+
 
 def test_load_multi_epoch_shuffling(test_big_h5ad_file: str):
     strategy = SequentialShuffleStrategy(
