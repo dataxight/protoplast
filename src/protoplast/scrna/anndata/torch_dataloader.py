@@ -199,7 +199,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         self._init_rank()
-        print("Counter", self.counter)
+        logger.debug("Counter value: %d", self.counter)
         random.seed(self.counter * 100)
         for fidx, f in enumerate(self.files):
             self.ad = anndata.read_h5ad(f, backed="r")
