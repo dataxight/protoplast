@@ -92,6 +92,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         self.metadata = metadata
         self.batches = indices
         self.mini_batch_size = mini_batch_size
+        self.counter = 0
 
     @classmethod
     def create_distributed_ds(
@@ -198,10 +199,12 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         self._init_rank()
-
+        print("Counter", self.counter)
+        random.seed(self.counter * 100)
         for fidx, f in enumerate(self.files):
             self.ad = anndata.read_h5ad(f, backed="r")
-
+            # ensure each epoch have different data order
+            random.shuffle(self.batches[fidx])
             total_mini_batches = 0
             if self.mini_batch_size is not None:
                 total_mini_batches = sum(
@@ -288,6 +291,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
 
                 if yielded_mini_batches >= mini_batch_per_worker:
                     break
+        self.counter += 1
 
 
 class DistributedFileSharingAnnDataset(DistributedAnnDataset):
