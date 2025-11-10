@@ -24,6 +24,7 @@ import pandas as pd
 import pytest
 import torch
 import torch.distributed as dist
+from scipy import sparse
 from scipy.sparse import csr_matrix
 from torch.utils.data import DataLoader
 
@@ -92,6 +93,30 @@ def test_uneven_h5ad_file(tmp_path: pathlib.Path) -> str:
 
     # Write to tmp_path
     filepath = tmp_path / "test_uneven.h5ad"
+    adata.write_h5ad(filepath)
+    return str(filepath)
+
+
+@pytest.fixture(scope="function")
+def test_big_h5ad_file(tmp_path: pathlib.Path) -> str:
+    # Settings for auto-generation
+    n_obs = 100
+    n_vars = 10  # Adjusted columns to 10 for a bit more width, feel free to change back to 6
+    density = 0.1  # 10% non-zeros (highly sparse)
+
+    rng = np.random.default_rng(42)
+
+    X = sparse.random(n_obs, n_vars, density=density, format="csr", dtype=np.float32, random_state=rng)
+
+    # Optional: Scale values to be integer-like (e.g., 1.0 to 20.0)
+    # instead of small floats between 0 and 1.
+    X.data = np.ceil(X.data * 20)
+
+    obs = pd.DataFrame(index=[f"cell_{i}" for i in range(n_obs)])
+    var = pd.DataFrame(index=[f"gene_{i}" for i in range(n_vars)])
+    adata = ad.AnnData(X=X, obs=obs, var=var)
+
+    filepath = tmp_path / "test_big.h5ad"
     adata.write_h5ad(filepath)
     return str(filepath)
 
@@ -284,9 +309,9 @@ def test_load_simple(test_even_h5ad_file: str):
     assert total_n == len(train_loader)
 
 
-def test_load_multi_epoch_shuffling(test_uneven_h5ad_file: str):
+def test_load_multi_epoch_shuffling(test_big_h5ad_file: str):
     strategy = SequentialShuffleStrategy(
-        [test_uneven_h5ad_file],
+        [test_big_h5ad_file],
         batch_size=2,
         total_workers=1,
         test_size=0.0,
