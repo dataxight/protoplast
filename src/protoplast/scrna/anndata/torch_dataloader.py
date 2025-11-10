@@ -191,7 +191,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         self._init_rank()
-        logger.debug("Counter value: %d", self.counter)
+        logger.debug(f"Counter value: {self.counter}, seed value: {self.random_seed}")
         random.seed(self.random_seed + self.counter)
         for fidx, f in enumerate(self.files):
             self.ad = anndata.read_h5ad(f, backed="r")
@@ -212,6 +212,8 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             mini_batch_per_batch = (
                 self.batches[fidx][0][1] - self.batches[fidx][0][0]
             ) // self.mini_batch_size  # Will be 1 if mini_batch_size is None
+            if mini_batch_per_batch == 0:
+                mini_batch_per_batch = 1  # Handle case when mini_batch_size > batch size
 
             start_mini_batch_gidx = self.global_rank * mini_batch_per_worker  # a.k.a offset
             end_mini_batch_gidx = start_mini_batch_gidx + mini_batch_per_worker  # exclusive
