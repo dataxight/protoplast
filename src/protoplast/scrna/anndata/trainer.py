@@ -43,30 +43,30 @@ logger = logging.getLogger(__name__)
 setup_console_logging()
 
 class DistributedPredictionWriter(BasePredictionWriter):
-    def __init__(self, output_dir: str, rank: int, format: Literal["csv", "parquet", "pt"]):
+    def __init__(self, output_dir: str, rank: int, format: Literal["csv", "parquet"]):
         super().__init__(write_interval="batch")
         self.output_dir = output_dir
         self.rank = rank
         self.format = format
-        fs, path = get_fsspec(self.output_dir, mode="w")
-        fs.makedirs(path, exist_ok=True)
 
     def write_on_batch_end(self, trainer, pl_module, predictions, batch_indices, batch, batch_idx, dataloader_idx):
         base_name = f"preds_rank_{self.rank}_batch_{batch_idx}"
+        if isinstance(predictions, torch.Tensor):
+            preds_numpy = predictions.cpu().numpy()
+        elif isinstance(predictions, list):
+            preds_numpy = torch.cat(predictions, dim=0).cpu().numpy()
+        else:
+            preds_numpy = predictions
         if self.format == "csv":
-            df = pd.DataFrame(predictions)
+            df = pd.DataFrame(preds_numpy)
             output_path = os.path.join(self.output_dir, f"{base_name}.csv")
             with get_fsspec(output_path, "wb") as f:
                 df.to_csv(f, index=False)
         elif self.format == "parquet":
-            df = pd.DataFrame(predictions)
+            df = pd.DataFrame(preds_numpy)
             output_path = os.path.join(self.output_dir, f"{base_name}.parquet")
             with get_fsspec(output_path, "wb") as f:
                 df.to_parquet(f, index=False)
-        else:
-            output_path = os.path.join(self.output_dir, f"{base_name}.csv")
-            with get_fsspec(output_path, "wb") as f:
-                torch.save(predictions, f)
     
 
 
@@ -208,9 +208,7 @@ class RayTrainRunner:
             if config.get("worker_mode") == "inference":
                 logger.debug("Starting inference mode")
                 writer_cb = DistributedPredictionWriter(
-                    output_dir=os.path.join(
-                        os.path.dirname(self.result_storage_path), ctx.get_world_rank()
-                    ), rank=rank, format=config["prediction_format"]
+                    output_dir=self.result_storage_path, rank=rank, format=config["prediction_format"]
                 )
                 trainer.callbacks.append(writer_cb)
                 trainer.predict(model, datamodule=ann_dm, ckpt_path=ckpt_path)
@@ -268,6 +266,7 @@ class RayTrainRunner:
             )
         logger.info(f"Using {num_workers} workers where each worker uses: {resource_per_worker}")
         start = time.time()
+
         shuffle_strategy = self.shuffle_strategy(
             file_paths,
             batch_size,
@@ -328,7 +327,7 @@ class RayTrainRunner:
         random_seed: int | None = 42,
         resource_per_worker: dict | None = None,
         enable_progress_bar: bool = True,
-        prediction_format: Literal["csv", "parquet", "pt"] = "csv",
+        prediction_format: Literal["csv", "parquet"] = "csv",
         **kwargs,
     ):
         """Start the inference

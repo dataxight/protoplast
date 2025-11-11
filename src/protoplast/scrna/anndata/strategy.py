@@ -348,6 +348,7 @@ class SequentialShuffleStrategy(ShuffleStrategy):
         is_shuffled: bool = False,
         pre_fetch_then_batch: int | None = 16,
         drop_last: bool = True,
+        **kwargs,
     ) -> None:
         super().__init__(
             file_paths,
@@ -400,6 +401,7 @@ class RandomShuffleStrategy(ShuffleStrategy):
         metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
         is_shuffled: bool = True,
         drop_last: bool = True,
+        **kwargs,
     ) -> None:
         super().__init__(
             file_paths,
