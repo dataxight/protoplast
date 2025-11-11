@@ -18,9 +18,9 @@ from anndata._core.sparse_dataset import sparse_dataset
 from line_profiler import profile
 from torch.utils.data import get_worker_info
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 
-
-from protoplast.scrna.anndata.data_modules.utils import make_onehot_encoding_map, parse_dataset_config
+from protoplast.scrna.anndata.data_modules.utils import make_onehot_encoding_map, parse_dataset_config, collate_sparse_matrices_torch_direct
 from protoplast.scrna.anndata.torch_dataloader import AnnDataModule, DistributedAnnDataset
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,6 @@ class PerturbationDataset(DistributedAnnDataset):
         *args,
         **kwargs
     ):
-        logger.info(f"Initializing PerturbationDataset with args: {args} and kwargs: {kwargs}")
         super().__init__(*args, **kwargs)
         self.control_label = control_label
         self.target_label = target_label
@@ -411,11 +410,11 @@ class PerturbationDataset(DistributedAnnDataset):
                         X_ctrl_emb = X_ctrl
 
                     hvg_genes = self.adata_vars[file_i].index[self._hvg_mask]
-                    hvg_gene_cos_dis = self.get_hvg_cos_dis(target, hvg_genes)
+                    # hvg_gene_cos_dis = self.get_hvg_cos_dis(target, hvg_genes)
                     # Create sample dictionary
                     sample = {
-                        "pert_cell_g": X_pert.astype(np.float32), # scipy csr matrix [S, G]
-                        "ctrl_cell_g": X_ctrl.astype(np.float32), # scipy csr matrix [S, G]
+                        # "pert_cell_g": X_pert.astype(np.float32), # scipy csr matrix [S, G]
+                        # "ctrl_cell_g": X_ctrl.astype(np.float32), # scipy csr matrix [S, G]
                         "pert_cell_emb": X_pert_emb.astype(np.float32), # tensor [S, E]
                         "ctrl_cell_emb": X_ctrl_emb.astype(np.float32), # tensor [S, E]
                         "pert_emb": pert_emb, # tensor [5102]
@@ -603,7 +602,6 @@ class PerturbationDataModule(AnnDataModule):
             target_split_map = {}
             if target_splits and (dataset_name, cell_type) in target_splits:
                 target_split_map = target_splits[(dataset_name, cell_type)]
-                logger.info(f"File {file} ({dataset_name}.{cell_type}): Using fewshot rules {target_split_map}")
 
             # Create regions that respect target boundaries and minimum block size
             target_counts = adata.obs.groupby(target_label, observed=True).agg({target_label: "count"})
@@ -685,25 +683,7 @@ class PerturbationDataModule(AnnDataModule):
 
             if key in ['pert_cell_g', 'ctrl_cell_g', 'ctrl_cell_emb', 'pert_cell_emb']:
                 # Convert scipy sparse matrices to torch sparse tensors and stack
-                torch_sparse_tensors = []
-                for val in values:
-                    if isinstance(val, np.ndarray):
-                        val = torch.from_numpy(val)
-                    if scipy.sparse.issparse(val):
-                        # Convert to COO format first, as we can't stack csr tensors
-                        # because of the error"Sparse CSR tensors do not have is_contiguous"
-                        coo = val.tocoo()
-                        # Create torch sparse tensor
-                        indices = torch.from_numpy(np.vstack((coo.row, coo.col))).long()
-                        values_tensor = torch.from_numpy(coo.data).to(torch.float16)
-                        sparse_tensor = torch.sparse_coo_tensor(indices, values_tensor, coo.shape)
-                        torch_sparse_tensors.append(sparse_tensor)
-                    else:
-                        # If already tensor, just append
-                        torch_sparse_tensors.append(val)
-
-                # Stack sparse tensors
-                collated[key] = torch.stack(torch_sparse_tensors)
+                collated[key] = collate_sparse_matrices_torch_direct(values)
 
             elif key in ['pert_emb', 'cell_type_onehot', 'batch_onehot']:
                 # Stack regular tensors
@@ -759,13 +739,16 @@ class PerturbationDataModule(AnnDataModule):
 
 if __name__ == "__main__":
     # Test with fewshot config file
-    config_path = "/home/tphan/Softwares/vcc-models/configs/data.toml"
+    config_path = "/home/tphan/Softwares/vcc-models/configs/data-hq.toml"
 
     dm = PerturbationDataModule(
+        num_workers=0,
+        pin_memory=True,
+        prefetch_factor=None,
         config_path=config_path,
         hvg_file="/home/tphan/Softwares/vcc-models/hvg-4000-competition-extended.txt",
         barcodes=True,
-        pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt"
+        pert_embedding_file="/mnt/hdd2/tan/competition_support_set_sorted/ESM2_pert_features.pt"
     )
     dm.setup(stage="fit")
 
@@ -785,16 +768,21 @@ if __name__ == "__main__":
         print(f"Sample test regions: {dm.indices['test_indices'][:3]}")
 
     # Test train dataloader
+
+    dataloader = dm.train_dataloader()
+    # dataloader = DataLoader(dm.train_ds, **dm.loader_config)
+    # dataloader = dm.train_ds
     if dm.indices['train_n_items'] > 0:
         print("\n=== Testing Training Data ===")
         total_cells = 0
-        len_train_ds = len(dm.train_ds)
-        for i, batch in tqdm.tqdm(enumerate(dm.train_ds), total=len_train_ds):
-            total_cells += batch['pert_cell_g'].shape[0]
+        # len_train_ds = len(dm.train_ds)
+        len_train_ds = len(dataloader)
+        print(f"Length of dataloader: {len_train_ds}")
+        for i, batch in tqdm.tqdm(enumerate(dataloader), total=len_train_ds):
+            total_cells += batch['pert_cell_emb'].shape[0] * batch['pert_cell_emb'].shape[1]
             if i > len_train_ds:
                 break
             #print("Batch keys:", batch.keys())
-            print("hvg_gene_emb shape:", batch['hvg_gene_emb'].shape)
             ## print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
             ## print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
             #print("pert_cell_g shape:", batch['pert_cell_g'].shape)

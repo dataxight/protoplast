@@ -35,7 +35,9 @@ def create_protoplast_data_loader(config: BenchmarkConfig):
         pert_embedding_file=config.pert_embedding_file,
         group_size_S=config.group_size_S,
         batch_size=config.batch_size,
-        num_workers=config.num_workers
+        num_workers=config.num_workers,
+        pin_memory=True,
+        prefetch_factor=4,
     )
     dm.setup(stage="fit")
     return dm.train_dataloader()
@@ -188,7 +190,7 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str, default=None,
                         help="Output JSON file path (default: benchmark_results_{data_module}_{timestamp}.json)")
     parser.add_argument("--data-config-path", type=str, 
-                        default="/home/tphan/Softwares/vcc-models/configs/data-hq.toml",
+                        default="/home/tphan/Softwares/vcc-models/configs/data-benchmark.toml",
                         help="Path to data config TOML file")
     parser.add_argument("--pert-embedding-file", type=str,
                         default="/mnt/hdd2/tan/competition_support_set_sorted/ESM2_pert_features.pt",

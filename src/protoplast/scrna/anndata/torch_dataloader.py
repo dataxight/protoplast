@@ -218,6 +218,7 @@ class AnnDataModule(pl.LightningDataModule):
         dataset: DistributedAnnDataset,
         prefetch_factor: int,
         sparse_keys: list[str],
+        pin_memory: bool = False,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
     ):

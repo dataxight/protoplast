@@ -231,6 +231,36 @@ def compute_and_save_target_means(
 
     return data_tensor, addresses
 
+def collate_sparse_matrices_torch_direct(matrices):
+    B, S, G = len(matrices), matrices[0].shape[0], matrices[0].shape[1]
+    total_nnz = sum(mat.nnz for mat in matrices)
+
+    # Pre-allocate torch tensors directly
+    batch_coords = torch.empty(total_nnz, dtype=torch.long)
+    seq_coords = torch.empty(total_nnz, dtype=torch.long)
+    col_coords = torch.empty(total_nnz, dtype=torch.long)
+    values = torch.empty(total_nnz, dtype=torch.float32)
+
+    offset = 0
+    for b_idx, mat in enumerate(matrices):
+        nnz = mat.nnz
+        
+        # Fill using torch tensors directly
+        batch_coords[offset:offset+nnz] = b_idx
+        col_coords[offset:offset+nnz] = torch.from_numpy(mat.indices)
+        values[offset:offset+nnz] = torch.from_numpy(mat.data.astype(np.float32))
+        
+        # Build row indices
+        row_indices = np.repeat(np.arange(mat.shape[0]), np.diff(mat.indptr))
+        seq_coords[offset:offset+nnz] = torch.from_numpy(row_indices)
+        
+        offset += nnz
+
+    # Stack indices
+    indices = torch.stack([batch_coords, seq_coords, col_coords])
+    sparse_tensor = torch.sparse_coo_tensor(indices, values, (B, S, G))
+    return sparse_tensor
+
 if __name__ == "__main__":
     import glob
     files = glob.glob("/mnt/hdd2/tan/competition_support_set_sorted/competition_train.h5")
