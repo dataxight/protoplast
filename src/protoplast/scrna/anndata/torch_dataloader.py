@@ -270,6 +270,33 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         self.counter += 1
 
 
+class DistributedInferenceDataset(DistributedAnnDataset):
+    def __iter__(self):
+        self._init_rank()
+        gidx = 0
+        for fidx, f in enumerate(self.files):
+            self.ad = anndata.read_h5ad(f, backed="r")
+            for start, end in self.batches[fidx]:
+                if not (gidx % self.total_workers) == self.global_rank:
+                    gidx += 1
+                    continue
+                X = self._get_mat_by_range(self.ad, start, end)
+                self.X = X
+                if self.mini_batch_size is None:
+                    # not fetch-then-batch approach, we yield everything
+                    yield self.transform(start, end)
+                else:
+                    # fetch-then-batch approach
+                    for i in range(0, X.shape[0], self.mini_batch_size):
+                        # index on the X coordinates
+                        b_start, b_end = i, min(i + self.mini_batch_size, X.shape[0])
+                        # index on the adata coordinates
+                        global_start, global_end = start + i, min(start + i + self.mini_batch_size, end)
+                        self.X = X[b_start:b_end]
+                        yield self.transform(global_start, global_end)
+                gidx += 1
+    
+
 class DistributedFileSharingAnnDataset(DistributedAnnDataset):
     def __init__(self, file_paths, indices, metadata, sparse_key, max_open_files: int = 3):
         super().__init__(file_paths, indices, metadata, sparse_key)

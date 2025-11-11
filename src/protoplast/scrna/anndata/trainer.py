@@ -55,8 +55,17 @@ class DistributedPredictionWriter(BasePredictionWriter):
             preds_numpy = predictions.cpu().numpy()
         elif isinstance(predictions, list):
             preds_numpy = torch.cat(predictions, dim=0).cpu().numpy()
-        else:
-            preds_numpy = predictions
+        elif isinstance(predictions, dict):
+            preds_numpy = {}
+            for key, value in predictions.items():
+                if isinstance(value, torch.Tensor):
+                    preds_numpy[key] = value.cpu().numpy().tolist()
+                elif isinstance(value, list):
+                    if value and isinstance(value[0], torch.Tensor):
+                        preds_numpy[key] = torch.cat(value, dim=0).cpu().numpy().tolist()
+                else:
+                    # Assume value is already in the desired format (e.g., numpy)
+                    preds_numpy[key] = value
         if self.format == "csv":
             df = pd.DataFrame(preds_numpy)
             output_path = os.path.join(self.output_dir, f"{base_name}.csv")
@@ -311,7 +320,7 @@ class RayTrainRunner:
         file.write(train_config["scratch_content"])
         file.close()
         logger.debug("Spawning Ray worker and initiating distributed training")
-        return par_trainer
+        return par_trainer, indices
 
     @beartype
     def inference(
@@ -361,7 +370,7 @@ class RayTrainRunner:
         Result
             The inference result from RayTrainer
         """
-        par_trainer = self._setup(
+        par_trainer, indices = self._setup(
             file_paths,
             batch_size,
             0.0,
@@ -382,7 +391,44 @@ class RayTrainRunner:
             **kwargs,
         )
         # despite the confusing name we use fit to run inference here
-        return par_trainer.fit()
+        result = par_trainer.fit()
+        # combine the result and order it correctly
+        indices = indices.train_indices
+        # combine per file
+        for f in indices:
+            file_indices = indices[f]
+            rank_to_paths = {}
+            for rank in range(par_trainer.scaling_config.num_workers):
+                rank_to_paths[rank] = []
+            for batch_idx in range(len(file_indices) // batch_size + int(len(file_indices) % batch_size > 0)):
+                rank = batch_idx % par_trainer.scaling_config.num_workers
+                base_name = f"preds_rank_{rank}_batch_{batch_idx}"
+                if prediction_format == "csv":
+                    path = os.path.join(result_storage_path, f"{base_name}.csv")
+                elif prediction_format == "parquet":
+                    path = os.path.join(result_storage_path, f"{base_name}.parquet")
+                rank_to_paths[rank].append(path)
+            dfs = []
+            for rank in range(par_trainer.scaling_config.num_workers):
+                for path in rank_to_paths[rank]:
+                    with get_fsspec(path, "rb") as f:
+                        if prediction_format == "csv":
+                            df = pd.read_csv(f)
+                        elif prediction_format == "parquet":
+                            df = pd.read_parquet(f)
+                        dfs.append(df)
+            combined_df = pd.concat(dfs, axis=0)
+            # reorder according to original indices
+            combined_df.index = file_indices
+            combined_df = combined_df.sort_index()
+            output_path = os.path.join(result_storage_path, f"predictions_{os.path.basename(f)}.{prediction_format}")
+            with get_fsspec(output_path, "wb") as f:
+                if prediction_format == "csv":
+                    combined_df.to_csv(f, index=False)
+                elif prediction_format == "parquet":
+                    combined_df.to_parquet(f, index=False)
+            logger.info(f"Saved predictions to {output_path}")
+        return result
 
     @beartype
     def train(
@@ -446,7 +492,7 @@ class RayTrainRunner:
         Result
             The training result from RayTrainer
         """
-        par_trainer = self._setup(
+        par_trainer, _ = self._setup(
             file_paths,
             batch_size,
             test_size,
