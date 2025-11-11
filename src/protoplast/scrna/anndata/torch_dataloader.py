@@ -399,6 +399,7 @@ class AnnDataModule(pl.LightningDataModule):
         prefetch_factor: int,
         sparse_key: str,
         shuffle_strategy: ShuffleStrategy,
+        pin_memory: bool = True,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         override_thread: int | None = None,
