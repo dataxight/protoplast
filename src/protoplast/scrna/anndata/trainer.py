@@ -237,7 +237,7 @@ class RayTrainRunner:
         resource_per_worker: dict | None,
         is_shuffled: bool,
         enable_progress_bar: bool,
-        worker_mode: str,
+        worker_mode: Literal["train", "inference"],
         **kwargs,
         ):
         self.result_storage_path = os.path.expanduser(result_storage_path)
@@ -291,9 +291,9 @@ class RayTrainRunner:
             "scratch_path": os.path.join(self.result_storage_path, "scratch.plt"),
             "scratch_content": str(uuid.uuid4()),
             "worker_mode": worker_mode,
-            "prediction_format": kwargs["prediction_format"],
-
         }
+        if worker_mode == "inference":
+            train_config["prediction_format"] = kwargs["prediction_format"]
         par_trainer = ray.train.torch.TorchTrainer(
             self._worker_fn(),
             scaling_config=scaling_config,
@@ -319,6 +319,7 @@ class RayTrainRunner:
         self,
         file_paths: list[str],
         ckpt_path: str | None = None,
+        result_storage_path: str = "~/protoplast_results",
         batch_size: int = 2000,
         prefetch_factor: int = 4,
         thread_per_worker: int | None = None,
@@ -370,8 +371,7 @@ class RayTrainRunner:
             1,
             thread_per_worker,
             num_workers,
-            # just a place holder since we don't save anything during inference
-            "~/protoplast_inference_results",
+            result_storage_path,
             ckpt_path,
             is_gpu,
             random_seed,
@@ -463,7 +463,7 @@ class RayTrainRunner:
             resource_per_worker,
             is_shuffled,
             enable_progress_bar,
-            mode="train",
+            worker_mode="train",
             **kwargs,)
         return par_trainer.fit()
 
