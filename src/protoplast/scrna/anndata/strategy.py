@@ -14,13 +14,13 @@
 
 
 import logging
+import math
 import random
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import anndata
-import math
 import torch
 from torch.utils.data._utils.collate import default_collate
 
@@ -439,9 +439,7 @@ class RandomShuffleStrategy(ShuffleStrategy):
             sample = items[0]
 
             # Sparse tensor
-            if isinstance(sample, torch.Tensor) and (
-                sample.is_sparse or sample.is_sparse_csr
-            ):
+            if isinstance(sample, torch.Tensor) and (sample.is_sparse or sample.is_sparse_csr):
                 return torch.stack(items)
 
             # Dense tensor
@@ -454,9 +452,7 @@ class RandomShuffleStrategy(ShuffleStrategy):
 
             # Tuple or list
             elif isinstance(sample, (tuple | list)):
-                return type(sample)(
-                    collate_item([b[i] for b in items]) for i in range(len(sample))
-                )
+                return type(sample)(collate_item([b[i] for b in items]) for i in range(len(sample)))
 
             # Fallback
             else:
