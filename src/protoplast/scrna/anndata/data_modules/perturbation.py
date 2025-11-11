@@ -17,12 +17,18 @@ from scipy.sparse import csr_matrix
 from anndata._core.sparse_dataset import sparse_dataset
 from line_profiler import profile
 from torch.utils.data import get_worker_info
+import torch.nn.functional as F
+
 
 from protoplast.scrna.anndata.data_modules.utils import make_onehot_encoding_map, parse_dataset_config
 from protoplast.scrna.anndata.torch_dataloader import AnnDataModule, DistributedAnnDataset
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler = logging.FileHandler('perturbation.log')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+logger.setLevel(logging.DEBUG)
 
 def slice_csr_rows(A, row_start, row_end):
     row_end = min(row_end, A.shape[0])
@@ -67,6 +73,7 @@ class PerturbationDataset(DistributedAnnDataset):
         *args,
         **kwargs
     ):
+        logger.info(f"Initializing PerturbationDataset with args: {args} and kwargs: {kwargs}")
         super().__init__(*args, **kwargs)
         self.control_label = control_label
         self.target_label = target_label
@@ -97,7 +104,7 @@ class PerturbationDataset(DistributedAnnDataset):
         self._initialize_region_mappings()
         self._initialized_worker_info = False
         self.hvg_only = hvg_only
-
+        logger.info(f"PerturbationDataset initialized with hvg_only: {self.hvg_only}")
 
     @profile
     def _get_mat_by_range(self, h5file: h5py.File, start: int, end: int):
@@ -150,7 +157,7 @@ class PerturbationDataset(DistributedAnnDataset):
 
         # Build onehot mapping for perturbations
         pert_names_flattened = np.concatenate([ad.obs[self.target_label].tolist() for ad in adatas]).flatten()
-        unique_pert_names = np.unique(pert_names_flattened)
+        unique_pert_names = sorted(np.unique(pert_names_flattened))
         self.pert_names_map = {name: i for i, name in enumerate(unique_pert_names)}
         logger.info(f"Total unique perturbation names: {len(self.pert_names_map)}")
 
@@ -211,6 +218,10 @@ class PerturbationDataset(DistributedAnnDataset):
         """Get index for perturbation name."""
         return self.pert_names_map[pert_name]
 
+    def get_n_perts(self):
+        """Get number of perturbations."""
+        return len(self.pert_names_map)
+
     def get_celltype_onehot(self, cell_type: str):
         """Get onehot encoding for cell type."""
         return self.cell_types_onehot_map[cell_type]
@@ -237,7 +248,7 @@ class PerturbationDataset(DistributedAnnDataset):
 
         # Get targets in this region
         targets = adata_obs[self.target_label][start:end].values.tolist()
-        target_counts = pd.Series(targets).value_counts()
+        target_counts = pd.Series(targets).value_counts(sort=False)
         target_cumsum = target_counts.cumsum()
         target_cumsum = np.insert(target_cumsum.values, 0, 0)
         # print(start, end, target_counts, target_cumsum, targets, np.unique(targets))
@@ -302,6 +313,14 @@ class PerturbationDataset(DistributedAnnDataset):
 
         return X, barcodes
 
+    def get_hvg_cos_dis(self, gene, hvg_genes):
+        gene_emb = self._get_pert_embedding(gene)
+        hvg_gene_emb = [self._get_pert_embedding(gene) for gene in hvg_genes]
+        hvg_gene_emb = torch.stack(hvg_gene_emb) # tensor [E, 5120]
+        hvg_gene_cos_sim = F.cosine_similarity(hvg_gene_emb, gene_emb.unsqueeze(0), dim=1) # tensor [E]
+        hvg_gene_cos_dis = 1 - hvg_gene_cos_sim
+        return hvg_gene_cos_dis
+
     def __len__(self):
         return self.n_items
 
@@ -311,6 +330,7 @@ class PerturbationDataset(DistributedAnnDataset):
             self._init_worker_info()
         # Load anndata objects in backed mode
         if self.adata_obs is None:
+            logger.info(f"Loading anndata objects in backed mode")
             self.adata_obs = []
             self.adata_vars = []
             self.loss_weight_dicts = []
@@ -323,10 +343,13 @@ class PerturbationDataset(DistributedAnnDataset):
                 self.loss_weight_dicts.append(pickle.load(open(f'{dirname}/degs/{basename}_loss_weight_dict.pkl', 'rb')))
             if self._hvg_genes is not None:
                 self._hvg_mask = np.where(self.adata_vars[0].index.isin(self._hvg_genes))[0]
+            logger.info(f"Anndata objects loaded")
         if self.h5files is None:
+            logger.info(f"Loading h5 files in swmr mode")
             self.h5files = [h5py.File(f, 'r', libver='latest', swmr=True) for f in self.files]
-        if self.adatas is None:
-            self.adatas = [anndata.read_h5ad(f, backed="r") for f in self.files]
+            logger.info(f"H5 files loaded")
+        # if self.adatas is None:
+            # self.adatas = [anndata.read_h5ad(f, backed="r") for f in self.files]
 
         import random
         random.shuffle(self.batches)
@@ -351,7 +374,7 @@ class PerturbationDataset(DistributedAnnDataset):
 
                     # Get control cells with matching covariates
                     X_ctrl, ctrl_barcodes = self.sampling_control(cell_type, file_i, self.group_size_S)
-                    ctrl_indices = np.where(self.adata_obs[file_i].index.isin(ctrl_barcodes))[0]
+                    # ctrl_indices = np.where(self.adata_obs[file_i].index.isin(ctrl_barcodes))[0]
                     # X_ctrl_emb = self.adatas[file_i].obsm["X_emb"][ctrl_indices]
 
                     # Get embeddings and onehot encodings
@@ -363,7 +386,14 @@ class PerturbationDataset(DistributedAnnDataset):
                     loss_weight_dict = self.loss_weight_dicts[file_i]
                     default_loss_weight = (np.ones(X_pert.shape[1]) / X_pert.shape[1]) ** 2
                     loss_weight = np.array(loss_weight_dict.get(target, default_loss_weight))
-                    loss_weight = np.nan_to_num(loss_weight, nan=0.0) * 100
+                    loss_weight = np.nan_to_num(loss_weight, nan=0.0)
+                    top = np.argsort(-loss_weight)
+                    loss_weight[top[:100]] = 1.0
+                    loss_weight[top[100:]] = 0.0
+
+                    # q90 = np.quantile(loss_weight, 0.999)
+                    # loss_weight[loss_weight < q90] = 0.0
+                    # loss_weight[loss_weight > q90] = 1.0
 
                     # Get barcodes for perturbation cells if needed
                     pert_barcodes = None
@@ -380,6 +410,8 @@ class PerturbationDataset(DistributedAnnDataset):
                         X_pert_emb = X_pert
                         X_ctrl_emb = X_ctrl
 
+                    hvg_genes = self.adata_vars[file_i].index[self._hvg_mask]
+                    hvg_gene_cos_dis = self.get_hvg_cos_dis(target, hvg_genes)
                     # Create sample dictionary
                     sample = {
                         "pert_cell_g": X_pert.astype(np.float32), # scipy csr matrix [S, G]
@@ -394,6 +426,8 @@ class PerturbationDataset(DistributedAnnDataset):
                         "pert_idx": torch.tensor([pert_idx], dtype=torch.long), # tensor [n_pert_names]
                         "loss_weight_emb": torch.tensor(loss_weight_emb), # tensor [E]
                         "loss_weight_gene": torch.tensor(loss_weight), # tensor [G]
+                        # "hvg_mask": torch.tensor(self._hvg_mask), # tensor [G]
+                        # "hvg_gene_cos_dis": hvg_gene_cos_dis, # tensor [E]
                     }
 
                     # Add barcodes if enabled
@@ -729,6 +763,7 @@ if __name__ == "__main__":
 
     dm = PerturbationDataModule(
         config_path=config_path,
+        hvg_file="/home/tphan/Softwares/vcc-models/hvg-4000-competition-extended.txt",
         barcodes=True,
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt"
     )
@@ -759,6 +794,7 @@ if __name__ == "__main__":
             if i > len_train_ds:
                 break
             #print("Batch keys:", batch.keys())
+            print("hvg_gene_emb shape:", batch['hvg_gene_emb'].shape)
             ## print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
             ## print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
             #print("pert_cell_g shape:", batch['pert_cell_g'].shape)
