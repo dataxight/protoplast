@@ -95,6 +95,8 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         self.counter = 0
         if "random_seed" in kwargs:
             self.random_seed = kwargs["random_seed"]
+        else:
+            self.random_seed = None
 
     @classmethod
     def create_distributed_ds(cls, indices: SplitInfo, sparse_key: str, mode: str = "train", **kwargs):
@@ -191,8 +193,9 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         self._init_rank()
-        logger.debug(f"Counter value: {self.counter}, seed value: {self.random_seed}")
-        random.seed(self.random_seed + self.counter)
+        if self.random_seed:
+            logger.debug(f"Counter value: {self.counter}, seed value: {self.random_seed}")
+            random.seed(self.random_seed + self.counter)
         for fidx, f in enumerate(self.files):
             self.ad = anndata.read_h5ad(f, backed="r")
             # ensure each epoch have different data order
@@ -424,7 +427,6 @@ class AnnDataModule(pl.LightningDataModule):
         self.before_dense_cb = before_dense_cb
         self.after_dense_cb = after_dense_cb
         self.kwargs = kwargs
-        self.kwargs["random_seed"] = shuffle_strategy.random_seed
 
     def setup(self, stage):
         # this is not necessary but it is here in case we want to download data to local node in the future

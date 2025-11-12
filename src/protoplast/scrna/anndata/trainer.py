@@ -24,17 +24,18 @@ from typing import Literal
 import anndata
 import fsspec
 import lightning.pytorch as pl
+import pandas as pd
 import ray
 import ray.train
 import ray.train.lightning
 import ray.train.torch
-from pytorch_lightning.callbacks import BasePredictionWriter
 import torch
 from beartype import beartype
 from lightning.pytorch.strategies import Strategy
+from pytorch_lightning.callbacks import BasePredictionWriter
 
 from protoplast.patches.file_handler import get_fsspec
-import pandas as pd
+
 from ...utils import setup_console_logging
 from .strategy import SequentialShuffleStrategy, ShuffleStrategy
 from .torch_dataloader import AnnDataModule, DistributedAnnDataset, cell_line_metadata_cb
@@ -422,9 +423,9 @@ class RayTrainRunner:
         return result
     
     def inference(
-            self, 
-            file_paths: list[str], 
-            result_storage_path: str, 
+            self,
+            file_paths: list[str],
+            result_storage_path: str,
             ckpt_path: str,
             prediction_format: Literal["csv", "parquet"] = "csv",
             enable_progress_bar: bool = True,

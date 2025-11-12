@@ -1,10 +1,10 @@
+import os
 from pathlib import Path  # Import Path
 
 import anndata as ad
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
-import os
 
 
 def _simulate_h5ad(n_cells: int, n_genes: int, output_path: Path, seed: int = 2409):
