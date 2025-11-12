@@ -226,6 +226,7 @@ class RayTrainRunner:
                 shuffle_strategy,
                 self.before_dense_cb,
                 self.after_dense_cb,
+                random_seed=config["random_seed"],
                 **self.kwargs,
             )
             if model_keys:
@@ -327,6 +328,7 @@ class RayTrainRunner:
             "scratch_path": os.path.join(self.result_storage_path, "scratch.plt"),
             "scratch_content": str(uuid.uuid4()),
             "worker_mode": worker_mode,
+            "random_seed": random_seed,
         }
         if worker_mode == "inference":
             train_config["prediction_format"] = kwargs["prediction_format"]
