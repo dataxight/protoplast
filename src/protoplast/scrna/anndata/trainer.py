@@ -42,6 +42,55 @@ from .torch_dataloader import AnnDataModule, DistributedAnnDataset, cell_line_me
 logger = logging.getLogger(__name__)
 setup_console_logging()
 
+def write_predictions_to_file(predictions, output_path: str, format: Literal["csv", "parquet"]):
+    """Write predictions to a file in the specified format.
+
+    Parameters
+    ----------
+    predictions : torch.Tensor | list | dict
+        Predictions to write.
+    output_path : str
+        Path to the output file.
+    format : Literal["csv", "parquet"]
+        Format of the output file.
+    """
+    if isinstance(predictions, torch.Tensor):
+        preds_numpy = predictions.cpu().numpy()
+    elif isinstance(predictions, list):
+        preds_numpy = torch.cat(predictions, dim=0).cpu().numpy()
+    elif isinstance(predictions, dict):
+        preds_numpy = {}
+        for key, value in predictions.items():
+            if isinstance(value, torch.Tensor):
+                preds_numpy[key] = value.cpu().numpy().tolist()
+            elif isinstance(value, list):
+                if value and isinstance(value[0], torch.Tensor):
+                    preds_numpy[key] = torch.cat(value, dim=0).cpu().numpy().tolist()
+            else:
+                # Assume value is already in the desired format (e.g., numpy)
+                preds_numpy[key] = value
+    if format == "csv":
+        df = pd.DataFrame(preds_numpy)
+        with get_fsspec(output_path, "wb") as f:
+            df.to_csv(f, index=False)
+    elif format == "parquet":
+        df = pd.DataFrame(preds_numpy)
+        with get_fsspec(output_path, "wb") as f:
+            df.to_parquet(f, index=False)
+
+class PredictionWriterCallback(BasePredictionWriter):
+    def __init__(self, output_path: str, format: Literal["csv", "parquet"]):
+        super().__init__(write_interval="batch")
+        self.output_path = output_path
+        self.format = format
+
+    def write_on_batch_end(self, trainer, pl_module, predictions, batch_indices, batch, batch_idx, dataloader_idx):
+        write_predictions_to_file(
+            predictions,
+            os.path.join(self.output_path, f"preds_batch_{batch_idx}.{self.format}"),
+            self.format,
+        )
+
 class DistributedPredictionWriter(BasePredictionWriter):
     def __init__(self, output_dir: str, rank: int, format: Literal["csv", "parquet"]):
         super().__init__(write_interval="batch")
@@ -51,32 +100,11 @@ class DistributedPredictionWriter(BasePredictionWriter):
 
     def write_on_batch_end(self, trainer, pl_module, predictions, batch_indices, batch, batch_idx, dataloader_idx):
         base_name = f"preds_rank_{self.rank}_batch_{batch_idx}"
-        if isinstance(predictions, torch.Tensor):
-            preds_numpy = predictions.cpu().numpy()
-        elif isinstance(predictions, list):
-            preds_numpy = torch.cat(predictions, dim=0).cpu().numpy()
-        elif isinstance(predictions, dict):
-            preds_numpy = {}
-            for key, value in predictions.items():
-                if isinstance(value, torch.Tensor):
-                    preds_numpy[key] = value.cpu().numpy().tolist()
-                elif isinstance(value, list):
-                    if value and isinstance(value[0], torch.Tensor):
-                        preds_numpy[key] = torch.cat(value, dim=0).cpu().numpy().tolist()
-                else:
-                    # Assume value is already in the desired format (e.g., numpy)
-                    preds_numpy[key] = value
-        if self.format == "csv":
-            df = pd.DataFrame(preds_numpy)
-            output_path = os.path.join(self.output_dir, f"{base_name}.csv")
-            with get_fsspec(output_path, "wb") as f:
-                df.to_csv(f, index=False)
-        elif self.format == "parquet":
-            df = pd.DataFrame(preds_numpy)
-            output_path = os.path.join(self.output_dir, f"{base_name}.parquet")
-            with get_fsspec(output_path, "wb") as f:
-                df.to_parquet(f, index=False)
-    
+        write_predictions_to_file(
+            predictions,
+            os.path.join(self.output_dir, f"{base_name}.{self.format}"),
+            self.format,
+        )
 
 
 class RayTrainRunner:
@@ -323,7 +351,7 @@ class RayTrainRunner:
         return par_trainer, indices
 
     @beartype
-    def inference(
+    def par_inference(
         self,
         file_paths: list[str],
         ckpt_path: str | None = None,
@@ -333,13 +361,12 @@ class RayTrainRunner:
         thread_per_worker: int | None = None,
         num_workers: int | None = None,
         is_gpu: bool = True,
-        random_seed: int | None = 42,
         resource_per_worker: dict | None = None,
         enable_progress_bar: bool = True,
         prediction_format: Literal["csv", "parquet"] = "csv",
         **kwargs,
     ):
-        """Start the inference
+        """Start parallel inference the order of the result is not guaranteed to be the same as input file
 
         Parameters
         ----------
@@ -355,9 +382,6 @@ class RayTrainRunner:
             Override number of Ray processes default to number of GPU(s) in the cluster, by default None
         is_gpu : bool, optional
             By default True turn this off if your system don't have any GPU, by default True
-        random_seed : int | None, optional
-            Set this to None for real training but for benchmarking and result replication
-            you can adjust the seed here, by default 42
         resource_per_worker : dict | None, optional
             This get pass to Ray you can specify how much CPU or GPU each Ray process get, by default None
         ckpt_path: str | None = None,
@@ -370,7 +394,7 @@ class RayTrainRunner:
         Result
             The inference result from RayTrainer
         """
-        par_trainer, indices = self._setup(
+        par_trainer, _ = self._setup(
             file_paths,
             batch_size,
             0.0,
@@ -382,7 +406,7 @@ class RayTrainRunner:
             result_storage_path,
             ckpt_path,
             is_gpu,
-            random_seed,
+            None,
             resource_per_worker,
             False,
             enable_progress_bar,
@@ -393,42 +417,104 @@ class RayTrainRunner:
         # despite the confusing name we use fit to run inference here
         result = par_trainer.fit()
         # combine the result and order it correctly
-        indices = indices.train_indices
-        # combine per file
-        for f in indices:
-            file_indices = indices[f]
-            rank_to_paths = {}
-            for rank in range(par_trainer.scaling_config.num_workers):
-                rank_to_paths[rank] = []
-            for batch_idx in range(len(file_indices) // batch_size + int(len(file_indices) % batch_size > 0)):
-                rank = batch_idx % par_trainer.scaling_config.num_workers
-                base_name = f"preds_rank_{rank}_batch_{batch_idx}"
-                if prediction_format == "csv":
-                    path = os.path.join(result_storage_path, f"{base_name}.csv")
-                elif prediction_format == "parquet":
-                    path = os.path.join(result_storage_path, f"{base_name}.parquet")
-                rank_to_paths[rank].append(path)
-            dfs = []
-            for rank in range(par_trainer.scaling_config.num_workers):
-                for path in rank_to_paths[rank]:
-                    with get_fsspec(path, "rb") as f:
-                        if prediction_format == "csv":
-                            df = pd.read_csv(f)
-                        elif prediction_format == "parquet":
-                            df = pd.read_parquet(f)
-                        dfs.append(df)
-            combined_df = pd.concat(dfs, axis=0)
-            # reorder according to original indices
-            combined_df.index = file_indices
-            combined_df = combined_df.sort_index()
-            output_path = os.path.join(result_storage_path, f"predictions_{os.path.basename(f)}.{prediction_format}")
-            with get_fsspec(output_path, "wb") as f:
-                if prediction_format == "csv":
-                    combined_df.to_csv(f, index=False)
-                elif prediction_format == "parquet":
-                    combined_df.to_parquet(f, index=False)
-            logger.info(f"Saved predictions to {output_path}")
         return result
+    
+    def inference(
+            self, 
+            file_paths: list[str], 
+            result_storage_path: str, 
+            ckpt_path: str,
+            prediction_format: Literal["csv", "parquet"] = "csv",
+            enable_progress_bar: bool = True,
+            batch_size=2000
+        ):
+        """Start inference in a single process order is guarantee to be the same as input file
+        don't use this in a distributed cluster
+        Parameters
+        ----------
+        file_paths : list[str]
+            List of h5ad AnnData files
+        result_storage_path : str
+            Path to store the prediction result
+        ckpt_path : str
+            Path of the checkpoint to run inference
+        enable_progress_bar : bool, optional
+            Whether to enable Trainer progress bar or not, by default True
+        batch_size : int, optional
+            How much data to fetch from disk, by default to 2000
+        """
+        shuffle_strategy = self.shuffle_strategy(
+            file_paths,
+            batch_size,
+            1,
+            0,
+            0,
+            None,
+            metadata_cb=self.metadata_cb,
+            is_shuffled=False,
+            prediction_format=prediction_format,
+        )
+        indices = shuffle_strategy.split()
+        writer_cb = PredictionWriterCallback(output_path=result_storage_path, format=prediction_format)
+        trainer = pl.Trainer(
+                devices="auto",
+                accelerator=_get_accelerator(),
+                enable_progress_bar=enable_progress_bar,
+            )
+        trainer.callbacks.append(writer_cb)
+        ann_dm = AnnDataModule(
+            indices,
+            self.Ds,
+            4,
+            self.sparse_key,
+            SequentialShuffleStrategy,
+            self.before_dense_cb,
+            self.after_dense_cb,
+            batch_size=batch_size,
+            is_single_thread=True
+        )
+        model_params = indices.metadata
+        if self.model_keys:
+            model_params = {k: v for k, v in model_params.items() if k in self.model_keys}
+        model = self.Model(**model_params)
+        trainer.predict(model, datamodule=ann_dm, ckpt_path=ckpt_path)
+    
+    def combine_result(result_storage_path: str, format: Literal["csv", "parquet"], output_path: str = None) -> pd.DataFrame | None:
+        """Combine the distributed prediction result into a single DataFrame
+        Parameters
+        ----------
+        result_storage_path : str
+            Path where the distributed prediction are stored
+        format : Literal["csv", "parquet"]
+            Format of the prediction files
+        output_path : str, optional
+            If specified the combined DataFrame will be saved to this path, by default None
+        Returns
+        -------
+        pd.DataFrame | None
+            Combined DataFrame if output_path is not specified
+        """
+        files = os.listdir(result_storage_path)
+        pred_dfs = []
+        for f in files:
+            if f.startswith("preds_rank_") and f.endswith(f".{format}"):
+                file_path = os.path.join(result_storage_path, f)
+                with get_fsspec(file_path, "rb") as file:
+                    if format == "csv":
+                        df = pd.read_csv(file)
+                    elif format == "parquet":
+                        df = pd.read_parquet(file)
+                    pred_dfs.append(df)
+        combined_df = pd.concat(pred_dfs, ignore_index=True)
+        if output_path:
+            with get_fsspec(output_path, "wb") as file:
+                if format == "csv":
+                    combined_df.to_csv(file, index=False)
+                elif format == "parquet":
+                    combined_df.to_parquet(file, index=False)
+            return None
+
+
 
     @beartype
     def train(

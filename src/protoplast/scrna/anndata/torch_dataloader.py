@@ -398,19 +398,23 @@ class AnnDataModule(pl.LightningDataModule):
         shuffle_strategy: ShuffleStrategy,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
+        is_single_thread: bool = False,
         **kwargs,
     ):
         super().__init__()
         self.indices = indices
         self.dataset = dataset
-        num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
+        if is_single_thread:
+            num_threads = 1
+        else:
+            num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
         self.loader_config = dict(
             num_workers=num_threads,
         )
         if num_threads > 0:
             self.loader_config["prefetch_factor"] = prefetch_factor
             self.loader_config["persistent_workers"] = True
-        if shuffle_strategy.is_mixer:
+        if shuffle_strategy.is_mixer():
             self.loader_config["batch_size"] = shuffle_strategy.mini_batch_size
             self.loader_config["collate_fn"] = shuffle_strategy.mixer
             self.loader_config["drop_last"] = True

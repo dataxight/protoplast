@@ -286,8 +286,8 @@ class ShuffleStrategy(ABC):
         self.is_shuffled = is_shuffled
         self.rng = random.Random(random_seed) if random_seed else random.Random()
 
-    @property
-    def is_mixer(self):
+    @staticmethod
+    def is_mixer():
         return False
 
     @abstractmethod
@@ -437,9 +437,9 @@ class RandomShuffleStrategy(ShuffleStrategy):
         )
         return SplitInfo(**split_dict)
 
-    @property
-    def is_mixer(self):
-        return True
+    @staticmethod
+    def is_mixer():
+        return False
 
     def mixer(self, batch: list):
         self.rng.shuffle(batch)
