@@ -479,42 +479,6 @@ class RayTrainRunner:
         model = self.Model(**model_params)
         trainer.predict(model, datamodule=ann_dm, ckpt_path=ckpt_path)
     
-    def combine_result(result_storage_path: str, format: Literal["csv", "parquet"], output_path: str = None) -> pd.DataFrame | None:
-        """Combine the distributed prediction result into a single DataFrame
-        Parameters
-        ----------
-        result_storage_path : str
-            Path where the distributed prediction are stored
-        format : Literal["csv", "parquet"]
-            Format of the prediction files
-        output_path : str, optional
-            If specified the combined DataFrame will be saved to this path, by default None
-        Returns
-        -------
-        pd.DataFrame | None
-            Combined DataFrame if output_path is not specified
-        """
-        files = os.listdir(result_storage_path)
-        pred_dfs = []
-        for f in files:
-            if f.startswith("preds_rank_") and f.endswith(f".{format}"):
-                file_path = os.path.join(result_storage_path, f)
-                with get_fsspec(file_path, "rb") as file:
-                    if format == "csv":
-                        df = pd.read_csv(file)
-                    elif format == "parquet":
-                        df = pd.read_parquet(file)
-                    pred_dfs.append(df)
-        combined_df = pd.concat(pred_dfs, ignore_index=True)
-        if output_path:
-            with get_fsspec(output_path, "wb") as file:
-                if format == "csv":
-                    combined_df.to_csv(file, index=False)
-                elif format == "parquet":
-                    combined_df.to_parquet(file, index=False)
-            return None
-
-
 
     @beartype
     def train(
