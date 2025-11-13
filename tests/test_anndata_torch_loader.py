@@ -100,7 +100,7 @@ def test_uneven_h5ad_file(tmp_path: pathlib.Path) -> str:
 @pytest.fixture(scope="function")
 def test_big_h5ad_file(tmp_path: pathlib.Path) -> str:
     # Settings for auto-generation
-    n_obs = 100
+    n_obs = 200
     n_vars = 10  # Adjusted columns to 10 for a bit more width, feel free to change back to 6
     density = 0.1  # 10% non-zeros (highly sparse)
 

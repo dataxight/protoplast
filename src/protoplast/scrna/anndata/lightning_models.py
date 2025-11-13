@@ -33,20 +33,30 @@ class LinearClassifier(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        logits = self.model(x)
+        logits = self.forward(x)
         loss = self.loss_fn(logits, y)
         self.log("train_loss", loss, on_step=True, prog_bar=True, sync_dist=True)
         return loss
+    
+    def forward(self, x):
+        return self.model(x)
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
-        logits = self.model(x)
+        logits = self.forward(x)
         preds = torch.argmax(logits, dim=1)
         correct = (preds == y).sum().item()
         total = y.size(0)
         acc = correct / total
         self.log("val_acc", acc)
         return acc
+    
+    
+    def predict_step(self, batch, batch_idx):
+        x, _ = batch  # labels may not be available during prediction
+        logits = self.forward(x)
+        preds = torch.argmax(logits, dim=1)
+        return preds
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)

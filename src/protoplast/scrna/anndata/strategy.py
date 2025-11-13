@@ -39,7 +39,10 @@ def ann_split_data(
     drop_last: bool = True,
     drop_remainder_warning_pct: float = 0.05,
     prefetch_factor: int = 1,
+    is_disable_balancing: bool = False,
 ):
+    if is_disable_balancing:
+        logger.debug("Disabling balancing of batches across workers")
     # Adjust batch size based on prefetch factor
     prefetch_size = batch_size * prefetch_factor
 
@@ -172,10 +175,10 @@ def ann_split_data(
             f"Length of val_split: {len(val_split)} "
             f"length of test_split: {len(test_split)}, length of train_split: {len(train_split)}"
         )
-
-        val_split = drop_remainder(val_split)
-        test_split = drop_remainder(test_split)
-        train_split = drop_remainder(train_split)
+        if is_disable_balancing:
+            val_split = drop_remainder(val_split)
+            test_split = drop_remainder(test_split)
+            train_split = drop_remainder(train_split)
         logger.info(
             f"Length of after dropping remainder val_split: {len(val_split)}, "
             f"length of test_split: {len(test_split)}, length of train_split: {len(train_split)}"
@@ -283,8 +286,8 @@ class ShuffleStrategy(ABC):
         self.is_shuffled = is_shuffled
         self.rng = random.Random(random_seed) if random_seed else random.Random()
 
-    @property
-    def is_mixer(self):
+    @staticmethod
+    def is_mixer():
         return False
 
     @abstractmethod
@@ -348,6 +351,7 @@ class SequentialShuffleStrategy(ShuffleStrategy):
         is_shuffled: bool = False,
         pre_fetch_then_batch: int | None = 16,
         drop_last: bool = True,
+        **kwargs,
     ) -> None:
         super().__init__(
             file_paths,
@@ -361,6 +365,7 @@ class SequentialShuffleStrategy(ShuffleStrategy):
         )
         self.pre_fetch_then_batch = pre_fetch_then_batch
         self.drop_last = drop_last
+        self.is_disable_balancing = kwargs.get("is_disable_balancing", False)
 
     def split(self) -> SplitInfo:
         split_dict = ann_split_data(
@@ -374,6 +379,7 @@ class SequentialShuffleStrategy(ShuffleStrategy):
             self.is_shuffled,
             self.drop_last,
             prefetch_factor=self.pre_fetch_then_batch,
+            is_disable_balancing=self.is_disable_balancing,
         )
         # this will be passed to the dataset, inorder to know the mini batch size
         if self.pre_fetch_then_batch:
@@ -400,6 +406,7 @@ class RandomShuffleStrategy(ShuffleStrategy):
         metadata_cb: Callable[[anndata.AnnData, dict], None] | None = None,
         is_shuffled: bool = True,
         drop_last: bool = True,
+        **kwargs,
     ) -> None:
         super().__init__(
             file_paths,
@@ -413,6 +420,7 @@ class RandomShuffleStrategy(ShuffleStrategy):
         )
         self.mini_batch_size = mini_batch_size
         self.drop_last = drop_last
+        self.is_disable_balancing = kwargs.get("is_disable_balancing", False)
 
     def split(self) -> SplitInfo:
         split_dict = ann_split_data(
@@ -425,12 +433,13 @@ class RandomShuffleStrategy(ShuffleStrategy):
             self.metadata_cb,
             self.is_shuffled,
             self.drop_last,
+            is_disable_balancing=self.is_disable_balancing
         )
         return SplitInfo(**split_dict)
 
-    @property
-    def is_mixer(self):
-        return True
+    @staticmethod
+    def is_mixer():
+        return False
 
     def mixer(self, batch: list):
         self.rng.shuffle(batch)
