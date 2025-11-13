@@ -112,7 +112,6 @@ class RayTrainRunner:
 
         # Init ray cluster
         DEFAULT_RUNTIME_ENV_CONFIG = {
-            "working_dir": os.getenv("PWD"),  # Allow ray workers to inherit venv at $PWD if there is any
             "LOG_LEVEL": os.getenv("LOG_LEVEL", "INFO"),
         }
         if runtime_env_config is None:
