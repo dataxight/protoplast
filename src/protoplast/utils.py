@@ -20,6 +20,7 @@ from typing import Any
 
 from daft import DataType
 from daft.expressions import Expression, ExpressionVisitor
+from urllib.parse import urlparse
 
 
 class ExpressionVisitorWithRequiredColumns(ExpressionVisitor[None]):
@@ -80,3 +81,27 @@ def setup_console_logging():
     )
 
     logging.info(f"Logging initialized. Current level is: {logging.getLevelName(log_level)}")
+
+
+def resolve_path_or_url(path_or_url: str | None) -> str | None:
+    """
+    Returns the absolute path for local files, 
+    otherwise returns the original URL for remote resources.
+    
+    Args:
+        path_or_url (str): The input path or URL string.
+        
+    Returns:
+        str: The resolved absolute path or the original URL/URI.
+    """
+    if path_or_url is None:
+        return None
+    parsed = urlparse(path_or_url)   
+    # Handle the special case where a scheme exists but netloc doesn't (e.g., 's3:data/file.txt')
+    # If the scheme is NOT 'file' and it's present, treat it as remote.
+    if parsed.scheme and parsed.scheme.lower() != 'file':
+        return path_or_url
+    else:
+        return os.path.abspath(path_or_url)
+
+
