@@ -16,9 +16,9 @@
 import logging
 import math
 import os
+import random
 from collections import Counter
 from collections.abc import Callable
-import random
 
 import anndata
 import lightning.pytorch as pl
@@ -92,11 +92,14 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
         self.metadata = metadata
         self.batches = indices
         self.mini_batch_size = mini_batch_size
+        self.counter = 0
+        if "random_seed" in kwargs:
+            self.random_seed = kwargs["random_seed"]
+        else:
+            self.random_seed = None
 
     @classmethod
-    def create_distributed_ds(
-        cls, indices: SplitInfo, sparse_key: str, mode: str = "train", **kwargs
-    ):
+    def create_distributed_ds(cls, indices: SplitInfo, sparse_key: str, mode: str = "train", **kwargs):
         indices = indices.to_dict() if isinstance(indices, SplitInfo) else indices
         return cls(
             indices["files"],
@@ -140,9 +143,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             )
         return torch.from_numpy(mat).float()
 
-    def _get_mat_by_range(
-        self, ad: anndata.AnnData, start: int, end: int
-    ) -> sp.csr_matrix:
+    def _get_mat_by_range(self, ad: anndata.AnnData, start: int, end: int) -> sp.csr_matrix:
         if self.sparse_key == "X":
             return ad.X[start:end]
         elif "layers" in self.sparse_key:
@@ -186,33 +187,25 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             logging.warning("Not using tdd default to world size 1")
             world_size = 1
         if self.mini_batch_size:
-            total_sample = sum(
-                end - start
-                for i in range(len(self.files))
-                for start, end in self.batches[i]
-            )
+            total_sample = sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
             return math.ceil(total_sample / self.mini_batch_size / world_size)
-        return (
-            sum(1 for i in range(len(self.files)) for _ in self.batches[i]) / world_size
-        )
+        return sum(1 for i in range(len(self.files)) for _ in self.batches[i]) / world_size
 
     def __iter__(self):
         self._init_rank()
-
+        if self.random_seed:
+            logger.debug(f"Counter value: {self.counter}, seed value: {self.random_seed}")
+            random.seed(self.random_seed + self.counter)
         for fidx, f in enumerate(self.files):
             self.ad = anndata.read_h5ad(f, backed="r")
-
+            # ensure each epoch have different data order
+            random.shuffle(self.batches[fidx])
             total_mini_batches = 0
             if self.mini_batch_size is not None:
-                total_mini_batches = sum(
-                    (end - start) // self.mini_batch_size
-                    for start, end in self.batches[fidx]
-                )
+                total_mini_batches = sum((end - start) // self.mini_batch_size for start, end in self.batches[fidx])
             else:
                 # Treat whole batch as one mini-batch
-                self.mini_batch_size = (
-                    self.batches[fidx][0][1] - self.batches[fidx][0][0]
-                )
+                self.mini_batch_size = self.batches[fidx][0][1] - self.batches[fidx][0][0]
                 total_mini_batches = len(self.batches[fidx])
 
             # Find range of the batches assigned to this worker
@@ -222,49 +215,40 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
             mini_batch_per_batch = (
                 self.batches[fidx][0][1] - self.batches[fidx][0][0]
             ) // self.mini_batch_size  # Will be 1 if mini_batch_size is None
+            if mini_batch_per_batch == 0:
+                mini_batch_per_batch = 1  # Handle case when mini_batch_size > batch size
 
-            start_mini_batch_gidx = (
-                self.global_rank * mini_batch_per_worker
-            )  # a.k.a offset
-            end_mini_batch_gidx = (
-                start_mini_batch_gidx + mini_batch_per_worker
-            )  # exclusive
+            start_mini_batch_gidx = self.global_rank * mini_batch_per_worker  # a.k.a offset
+            end_mini_batch_gidx = start_mini_batch_gidx + mini_batch_per_worker  # exclusive
 
             start_batch_gidx = start_mini_batch_gidx // mini_batch_per_batch
             end_batch_gidx = end_mini_batch_gidx // mini_batch_per_batch
 
             # Adjust the index of the first and last mini-batch in the first and last batch respectively
             # Only apply when a batch contains multiple mini-batches
-            current_worker_batches = self.batches[fidx][
-                start_batch_gidx : end_batch_gidx + 1
-            ]
+            current_worker_batches = self.batches[fidx][start_batch_gidx : end_batch_gidx + 1]
             if mini_batch_per_batch != 1:
                 # Offset the index of first mini-batch
                 current_worker_batches[0] = (
                     current_worker_batches[0][0]
-                    + (start_mini_batch_gidx % mini_batch_per_batch)
-                    * self.mini_batch_size,
+                    + (start_mini_batch_gidx % mini_batch_per_batch) * self.mini_batch_size,
                     current_worker_batches[0][1],
                 )
 
                 if len(current_worker_batches) > 1:
                     # Offset the index of last mini-batch
                     total_mini_batches_exclude_last = sum(
-                        (end - start) // self.mini_batch_size
-                        for start, end in current_worker_batches[:-1]
+                        (end - start) // self.mini_batch_size for start, end in current_worker_batches[:-1]
                     )
                     remainder = mini_batch_per_worker - total_mini_batches_exclude_last
                     current_worker_batches[-1] = (
                         current_worker_batches[-1][0],
-                        current_worker_batches[-1][0]
-                        + remainder * self.mini_batch_size,
+                        current_worker_batches[-1][0] + remainder * self.mini_batch_size,
                     )
 
             # NOTE: Black magic to improve read performance during data yielding
             if len(current_worker_batches) > 1:
-                current_worker_batches = (
-                    current_worker_batches[1:] + current_worker_batches[:1]
-                )
+                current_worker_batches = current_worker_batches[1:] + current_worker_batches[:1]
 
             yielded_mini_batches = 0
             for i, (start, end) in enumerate(current_worker_batches):
@@ -275,9 +259,7 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
                     b_start, b_end = i, min(i + self.mini_batch_size, X.shape[0])
 
                     # index on the adata coordinates
-                    global_start, global_end = start + i, min(
-                        start + i + self.mini_batch_size, end
-                    )
+                    global_start, global_end = start + i, min(start + i + self.mini_batch_size, end)
                     self.X = X[b_start:b_end]
 
                     yield self.transform(global_start, global_end)
@@ -288,12 +270,38 @@ class DistributedAnnDataset(torch.utils.data.IterableDataset):
 
                 if yielded_mini_batches >= mini_batch_per_worker:
                     break
+        self.counter += 1
+
+
+class DistributedInferenceDataset(DistributedAnnDataset):
+    def __iter__(self):
+        self._init_rank()
+        gidx = 0
+        for fidx, f in enumerate(self.files):
+            self.ad = anndata.read_h5ad(f, backed="r")
+            for start, end in self.batches[fidx]:
+                if not (gidx % self.total_workers) == self.global_rank:
+                    gidx += 1
+                    continue
+                X = self._get_mat_by_range(self.ad, start, end)
+                self.X = X
+                if self.mini_batch_size is None:
+                    # not fetch-then-batch approach, we yield everything
+                    yield self.transform(start, end)
+                else:
+                    # fetch-then-batch approach
+                    for i in range(0, X.shape[0], self.mini_batch_size):
+                        # index on the X coordinates
+                        b_start, b_end = i, min(i + self.mini_batch_size, X.shape[0])
+                        # index on the adata coordinates
+                        global_start, global_end = start + i, min(start + i + self.mini_batch_size, end)
+                        self.X = X[b_start:b_end]
+                        yield self.transform(global_start, global_end)
+                gidx += 1
 
 
 class DistributedFileSharingAnnDataset(DistributedAnnDataset):
-    def __init__(
-        self, file_paths, indices, metadata, sparse_key, max_open_files: int = 3
-    ):
+    def __init__(self, file_paths, indices, metadata, sparse_key, max_open_files: int = 3):
         super().__init__(file_paths, indices, metadata, sparse_key)
         self.max_open_files = max_open_files
         self.fptr = dict()
@@ -305,11 +313,7 @@ class DistributedFileSharingAnnDataset(DistributedAnnDataset):
         self.current_fp_idx = -1
 
     def __len__(self):
-        return sum(
-            end - start
-            for i in range(len(self.files))
-            for start, end in self.batches[i]
-        )
+        return sum(end - start for i in range(len(self.files)) for start, end in self.batches[i])
 
     @staticmethod
     def _safe_index(obj, idx):
@@ -363,9 +367,7 @@ class DistributedFileSharingAnnDataset(DistributedAnnDataset):
                         # replacing with new file if exist
                         if self.current_fp_idx < len(self.files):
                             new_file = self.files[self.current_fp_idx]
-                            self.fptr[new_file] = anndata.read_h5ad(
-                                new_file, backed="r"
-                            )
+                            self.fptr[new_file] = anndata.read_h5ad(new_file, backed="r")
                             self.current_files.add(new_file)
                             self.current_fp_idx += 1
                             self._init_buffer(new_file)
@@ -399,19 +401,23 @@ class AnnDataModule(pl.LightningDataModule):
         shuffle_strategy: ShuffleStrategy,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
+        override_thread: int | None = None,
         **kwargs,
     ):
         super().__init__()
         self.indices = indices
         self.dataset = dataset
-        num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
+        if override_thread is not None:
+            num_threads = override_thread
+        else:
+            num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
         self.loader_config = dict(
             num_workers=num_threads,
         )
         if num_threads > 0:
             self.loader_config["prefetch_factor"] = prefetch_factor
             self.loader_config["persistent_workers"] = True
-        if shuffle_strategy.is_mixer:
+        if shuffle_strategy.is_mixer():
             self.loader_config["batch_size"] = shuffle_strategy.mini_batch_size
             self.loader_config["collate_fn"] = shuffle_strategy.mixer
             self.loader_config["drop_last"] = True
@@ -425,20 +431,12 @@ class AnnDataModule(pl.LightningDataModule):
     def setup(self, stage):
         # this is not necessary but it is here in case we want to download data to local node in the future
         if stage == "fit":
-            self.train_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_key, **self.kwargs
-            )
-            self.val_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_key, "val", **self.kwargs
-            )
+            self.train_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_key, **self.kwargs)
+            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_key, "val", **self.kwargs)
         if stage == "test":
-            self.val_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_key, "test", **self.kwargs
-            )
+            self.val_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_key, "test", **self.kwargs)
         if stage == "predict":
-            self.predict_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_key, **self.kwargs
-            )
+            self.predict_ds = self.dataset.create_distributed_ds(self.indices, self.sparse_key, **self.kwargs)
 
     def train_dataloader(self):
         return DataLoader(self.train_ds, **self.loader_config)

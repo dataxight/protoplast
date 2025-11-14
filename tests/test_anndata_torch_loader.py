@@ -24,6 +24,7 @@ import pandas as pd
 import pytest
 import torch
 import torch.distributed as dist
+from scipy import sparse
 from scipy.sparse import csr_matrix
 from torch.utils.data import DataLoader
 
@@ -92,6 +93,30 @@ def test_uneven_h5ad_file(tmp_path: pathlib.Path) -> str:
 
     # Write to tmp_path
     filepath = tmp_path / "test_uneven.h5ad"
+    adata.write_h5ad(filepath)
+    return str(filepath)
+
+
+@pytest.fixture(scope="function")
+def test_big_h5ad_file(tmp_path: pathlib.Path) -> str:
+    # Settings for auto-generation
+    n_obs = 200
+    n_vars = 10  # Adjusted columns to 10 for a bit more width, feel free to change back to 6
+    density = 0.1  # 10% non-zeros (highly sparse)
+
+    rng = np.random.default_rng(42)
+
+    X = sparse.random(n_obs, n_vars, density=density, format="csr", dtype=np.float32, random_state=rng)
+
+    # Optional: Scale values to be integer-like (e.g., 1.0 to 20.0)
+    # instead of small floats between 0 and 1.
+    X.data = np.ceil(X.data * 20)
+
+    obs = pd.DataFrame(index=[f"cell_{i}" for i in range(n_obs)])
+    var = pd.DataFrame(index=[f"gene_{i}" for i in range(n_vars)])
+    adata = ad.AnnData(X=X, obs=obs, var=var)
+
+    filepath = tmp_path / "test_big.h5ad"
     adata.write_h5ad(filepath)
     return str(filepath)
 
@@ -198,13 +223,13 @@ def test_same_iteration_per_ray_worker(test_h5ad_plate):
                     assert not data.is_sparse
                     assert not data.is_sparse_csr
                     total_iter += 1
-  
+
         # assert total_iter > 0
         total_iters.append(total_iter)
 
     assert len(np.unique(total_iters)) == 1
     assert total_iters[0] == 18
-    
+
 
 def test_entropy(test_h5ad_plate):
     file1 = test_h5ad_plate(plate_no=1)
@@ -282,6 +307,48 @@ def test_load_simple(test_even_h5ad_file: str):
         assert not data.is_sparse_csr
         total_n += 1
     assert total_n == len(train_loader)
+
+
+def test_load_multi_epoch_shuffling(test_big_h5ad_file: str):
+    strategy = SequentialShuffleStrategy(
+        [test_big_h5ad_file],
+        batch_size=2,
+        total_workers=1,
+        test_size=0.0,
+        validation_size=0.0,
+        pre_fetch_then_batch=1,
+    )
+    indices = strategy.split()
+    data_module = AnnDataModule(
+        indices=indices, dataset=DistributedAnnDataset, prefetch_factor=2, sparse_key="X", shuffle_strategy=strategy
+    )
+    data_module.setup(stage="fit")
+    train_loader = data_module.train_dataloader()
+    loader_len = len(train_loader)
+
+    num_epochs = 3
+    first_batches = []  # To store the first batch of each epoch for comparison
+    for _ in range(num_epochs):
+        total_n_in_epoch = 0
+        for i, data in enumerate(train_loader):
+            data = data_module.on_after_batch_transfer(data, i)
+            # Store the first batch for later comparison
+            if i == 0:
+                # We must .clone() to prevent tensors from being overwritten
+                first_batches.append(data.clone())
+            n, m = data.shape
+            assert n > 0
+            assert m > 0
+            assert isinstance(data, torch.Tensor)
+            assert not data.is_sparse
+            assert not data.is_sparse_csr
+            total_n_in_epoch += 1
+        assert total_n_in_epoch == loader_len
+
+    assert len(first_batches) == num_epochs
+    are_different_1 = not torch.allclose(first_batches[0], first_batches[1])
+    are_different_2 = not torch.allclose(first_batches[1], first_batches[2])
+    assert are_different_1 and are_different_2, "Data was identical between epochs. Shuffling is not working."
 
 
 def test_load_with_tuple(test_even_h5ad_file: str):
