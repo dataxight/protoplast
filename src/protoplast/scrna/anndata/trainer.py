@@ -33,10 +33,11 @@ import torch
 from beartype import beartype
 from lightning.pytorch.strategies import Strategy
 from pytorch_lightning.callbacks import BasePredictionWriter
+import sys
 
 from protoplast.patches.file_handler import get_fsspec
 
-from ...utils import setup_console_logging
+from ...utils import setup_console_logging, resolve_path_or_url
 from .strategy import SequentialShuffleStrategy, ShuffleStrategy
 from .torch_dataloader import AnnDataModule, DistributedAnnDataset, cell_line_metadata_cb
 
@@ -277,7 +278,7 @@ class RayTrainRunner:
         worker_mode: Literal["train", "inference"],
         **kwargs,
         ):
-        self.result_storage_path = os.path.expanduser(result_storage_path)
+        self.result_storage_path = resolve_path_or_url(result_storage_path)
         self.prefetch_factor = prefetch_factor
         self.max_epochs = max_epochs
         self.kwargs = kwargs
@@ -307,7 +308,7 @@ class RayTrainRunner:
         start = time.time()
 
         shuffle_strategy = self.shuffle_strategy(
-            file_paths,
+            [resolve_path_or_url(f) for f in file_paths],
             batch_size,
             num_workers * thread_per_worker,
             test_size,
@@ -323,7 +324,7 @@ class RayTrainRunner:
         logger.debug(f"Data splitting time: {time.time() - start:.2f} seconds")
         train_config = {
             "indices": indices,
-            "ckpt_path": ckpt_path,
+            "ckpt_path": resolve_path_or_url(ckpt_path),
             "shuffle_strategy": shuffle_strategy,
             "enable_progress_bar": self.enable_progress_bar,
             "scratch_path": os.path.join(self.result_storage_path, "scratch.plt"),
@@ -446,10 +447,14 @@ class RayTrainRunner:
         batch_size : int, optional
             How much data to fetch from disk, by default to 2000
         """
+        if sys.platform in ("darwin", "win32"):
+            override_thread = 0
+        else:
+            override_thread = 1
         shuffle_strategy = self.shuffle_strategy(
-            file_paths,
+            [resolve_path_or_url(f) for f in file_paths],
             batch_size,
-            1,
+            override_thread,
             0,
             0,
             None,
@@ -458,13 +463,14 @@ class RayTrainRunner:
             prediction_format=prediction_format,
         )
         indices = shuffle_strategy.split()
-        writer_cb = PredictionWriterCallback(output_path=result_storage_path, format=prediction_format)
+        writer_cb = PredictionWriterCallback(output_path=resolve_path_or_url(result_storage_path), format=prediction_format)
         trainer = pl.Trainer(
                 devices="auto",
                 accelerator=_get_accelerator(),
                 enable_progress_bar=enable_progress_bar,
             )
         trainer.callbacks.append(writer_cb)
+        
         ann_dm = AnnDataModule(
             indices,
             self.Ds,
@@ -474,13 +480,13 @@ class RayTrainRunner:
             self.before_dense_cb,
             self.after_dense_cb,
             batch_size=batch_size,
-            is_single_thread=True
+            override_thread=override_thread
         )
         model_params = indices.metadata
         if self.model_keys:
             model_params = {k: v for k, v in model_params.items() if k in self.model_keys}
         model = self.Model(**model_params)
-        trainer.predict(model, datamodule=ann_dm, ckpt_path=ckpt_path)
+        trainer.predict(model, datamodule=ann_dm, ckpt_path=resolve_path_or_url(ckpt_path))
     
 
     @beartype
