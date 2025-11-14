@@ -37,7 +37,7 @@ class LinearClassifier(pl.LightningModule):
         loss = self.loss_fn(logits, y)
         self.log("train_loss", loss, on_step=True, prog_bar=True, sync_dist=True)
         return loss
-    
+
     def forward(self, x):
         return self.model(x)
 
@@ -50,8 +50,7 @@ class LinearClassifier(pl.LightningModule):
         acc = correct / total
         self.log("val_acc", acc)
         return acc
-    
-    
+
     def predict_step(self, batch, batch_idx):
         x, _ = batch  # labels may not be available during prediction
         logits = self.forward(x)

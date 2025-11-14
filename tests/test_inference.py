@@ -17,6 +17,7 @@ def _simulate_h5ad(n_cells: int, n_genes: int, output_path: Path, seed: int = 24
     adata = ad.AnnData(X=X, obs=obs, var=var)
     adata.write_h5ad(output_path)
 
+
 # The test function now accepts the tmp_path fixture
 def test_inference(tmp_path: Path):
     test_h5ad_path = tmp_path / "test_trainer.h5ad"
@@ -43,7 +44,7 @@ def test_inference(tmp_path: Path):
         file_paths=[str(infer_test_path)],
         ckpt_path=str(checkpoint_path),
         result_storage_path=result_path,
-        prediction_format="csv"
+        prediction_format="csv",
     )
     assert len([f for f in os.listdir(result_path) if f.endswith(".csv")]) > 0
     result_path = str(tmp_path / "inference_par_results")
@@ -60,6 +61,6 @@ def test_inference(tmp_path: Path):
         file_paths=[str(infer_test_path)],
         ckpt_path=str(checkpoint_path),
         result_storage_path=result_path,
-        prediction_format="parquet"
+        prediction_format="parquet",
     )
     assert len([f for f in os.listdir(result_path) if f.endswith(".parquet")]) > 0

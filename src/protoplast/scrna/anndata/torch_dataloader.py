@@ -298,7 +298,7 @@ class DistributedInferenceDataset(DistributedAnnDataset):
                         self.X = X[b_start:b_end]
                         yield self.transform(global_start, global_end)
                 gidx += 1
-    
+
 
 class DistributedFileSharingAnnDataset(DistributedAnnDataset):
     def __init__(self, file_paths, indices, metadata, sparse_key, max_open_files: int = 3):
