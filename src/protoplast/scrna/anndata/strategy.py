@@ -433,7 +433,7 @@ class RandomShuffleStrategy(ShuffleStrategy):
             self.metadata_cb,
             self.is_shuffled,
             self.drop_last,
-            is_disable_balancing=self.is_disable_balancing
+            is_disable_balancing=self.is_disable_balancing,
         )
         return SplitInfo(**split_dict)
 

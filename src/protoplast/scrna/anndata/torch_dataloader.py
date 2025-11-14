@@ -298,7 +298,7 @@ class DistributedInferenceDataset(DistributedAnnDataset):
                         self.X = X[b_start:b_end]
                         yield self.transform(global_start, global_end)
                 gidx += 1
-    
+
 
 class DistributedFileSharingAnnDataset(DistributedAnnDataset):
     def __init__(self, file_paths, indices, metadata, sparse_key, max_open_files: int = 3):
@@ -401,14 +401,14 @@ class AnnDataModule(pl.LightningDataModule):
         shuffle_strategy: ShuffleStrategy,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
-        is_single_thread: bool = False,
+        override_thread: int | None = None,
         **kwargs,
     ):
         super().__init__()
         self.indices = indices
         self.dataset = dataset
-        if is_single_thread:
-            num_threads = 1
+        if override_thread is not None:
+            num_threads = override_thread
         else:
             num_threads = int(os.environ.get("OMP_NUM_THREADS", os.cpu_count()))
         self.loader_config = dict(
