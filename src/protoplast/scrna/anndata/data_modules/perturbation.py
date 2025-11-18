@@ -2,6 +2,7 @@ import torch
 from torch.utils.data import Dataset, IterableDataset, get_worker_info
 import anndata
 import numpy as np
+import pandas as pd
 from collections import defaultdict
 import logging
 from typing import Optional, Sequence, Union, Dict, List, Tuple
@@ -22,34 +23,6 @@ stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
 
 
-def expand_target_regions_to_blocks(target_regions: List[Tuple], block_size: int) -> List[Tuple]:
-    """
-    Expand target_regions into smaller consecutive regions with max size block_size.
-    
-    Args:
-        target_regions: List of (file_i, target_i, start_i, end_i) tuples
-        block_size: Maximum block size
-        
-    Returns:
-        List of expanded regions with max size block_size
-    """
-    expanded_regions = []
-    
-    for file_i, target_i, start_i, end_i in target_regions:
-        region_size = end_i - start_i
-        
-        if region_size <= block_size:
-            # Region is smaller than or equal to block size, keep as is
-            expanded_regions.append((file_i, target_i, start_i, end_i))
-        else:
-            # Split region into blocks of size block_size
-            current_start = start_i
-            while current_start < end_i:
-                current_end = min(current_start + block_size, end_i)
-                expanded_regions.append((file_i, target_i, current_start, current_end))
-                current_start = current_end
-                
-    return expanded_regions
 
 
 class PerturbationDataset(DistributedAnnDataset):
@@ -77,8 +50,9 @@ class PerturbationDataset(DistributedAnnDataset):
         control_label: str = "non-targeting",
         batch_label: str = "batch_var", 
         use_batches: bool = True,
-        group_size_S: int = 30,
+        group_size_S: int = 32,
         barcodes: bool = False,
+        n_items: int = None,
         *args,
         **kwargs
     ):
@@ -91,13 +65,12 @@ class PerturbationDataset(DistributedAnnDataset):
         self.pert_embedding_file = pert_embedding_file
         self.group_size_S = group_size_S
         self.barcodes = barcodes
+        self.n_items = n_items
 
         self.pert_embedding = torch.load(pert_embedding_file)
 
-        # Initialize region tracking dictionaries
-        self.target_gene_regions = defaultdict(list)  # {target_gene: [(file_i, start, end), ...]}
-        self.cell_type_regions = defaultdict(list)    # {cell_type: [(file_i, start, end), ...]}
-        self.cell_type_ctrl_regions = defaultdict(list)  # {cell_type: [(start, end), ...]} per file
+        # Initialize control region tracking per cell type
+        self.cell_type_ctrl_regions = {}  # {cell_type: (start, end)} per file
         
         self._initialize_region_mappings()
         self._initialized_worker_info = False
@@ -135,7 +108,7 @@ class PerturbationDataset(DistributedAnnDataset):
             self.ray_size = 1
 
     def _initialize_region_mappings(self):
-        """Initialize region mappings for target genes, cell types, and controls."""
+        """Initialize region mappings and control regions per cell type."""
         # Load adatas to analyze structure
         adatas = [anndata.read_h5ad(f, backed="r") for f in self.files]
         
@@ -151,65 +124,41 @@ class PerturbationDataset(DistributedAnnDataset):
         self.batches_onehot_map = make_onehot_encoding_map(np.unique(batches_flattened))
         logger.info(f"Total unique batches: {len(self.batches_onehot_map)}")
         
-        # Build region mappings from batches (assuming indices structure)
-        for region in self.batches:  # batches contains the region information
-            file_i, target, start, end = region
+        # Track control regions for each cell type (each file has one cell type)
+        for file_i, adata in enumerate(adatas):
+            cell_type = adata.obs[self.cell_type_label].iloc[0]
             
-            # Get cell type for this file (each file is one cell type only)
-            cell_type = adatas[file_i].obs[self.cell_type_label].iloc[0]
-            
-            # Track target gene regions
-            self.target_gene_regions[target].append((file_i, start, end))
-            
-            # Track cell type regions
-            self.cell_type_regions[cell_type].append((file_i, start, end))
-            
-            # Track control regions for each cell type
-            if target == self.control_label:
-                if len(self.cell_type_ctrl_regions[cell_type]) <= file_i:
-                    self.cell_type_ctrl_regions[cell_type].extend([(0, 0)] * (file_i + 1 - len(self.cell_type_ctrl_regions[cell_type])))
+            # Find control regions in this file
+            ctrl_mask = adata.obs[self.target_label] == self.control_label
+            if ctrl_mask.any():
+                ctrl_indices = np.where(ctrl_mask)[0]
+                ctrl_start, ctrl_end = ctrl_indices[0], ctrl_indices[-1] + 1
                 
-                # Update or set the control region for this file
-                current_start, current_end = self.cell_type_ctrl_regions[cell_type][file_i]
-                if current_start == 0 and current_end == 0:
-                    self.cell_type_ctrl_regions[cell_type][file_i] = (start, end)
-                else:
-                    # Extend the region if needed
-                    new_start = min(current_start, start)
-                    new_end = max(current_end, end)
-                    self.cell_type_ctrl_regions[cell_type][file_i] = (new_start, new_end)
+                if cell_type not in self.cell_type_ctrl_regions:
+                    self.cell_type_ctrl_regions[cell_type] = {}
+                self.cell_type_ctrl_regions[cell_type][file_i] = (ctrl_start, ctrl_end)
         
-        # Get all cell barcodes if needed
-        if self.barcodes:
-            self.cell_barcodes_flattened = np.concatenate([ad.obs_names.tolist() for ad in adatas]).flatten()
+        logger.info(f"Control regions per cell type: {dict(self.cell_type_ctrl_regions)}")
 
     @classmethod
     def create_distributed_ds(cls, indices: dict, sparse_keys: list[str], mode: str = "train", **kwargs):
         """
-        Create distributed dataset with expanded target regions.
+        Create distributed dataset with target regions.
         
         indices format:
         {
             "files": [list of file paths],
-            "train_indices": [...target_regions],  # List of (file_i, target_i, start_i, end_i)
+            "train_indices": [...target_regions],  # List of (file_i, start_i, end_i)
             "metadata": {},
             "sparse_keys": ["X"]
         }
         """
-        # Get block size from kwargs, default to 64
-        block_size = kwargs.pop('block_size', 64)
-        
-        # Expand target regions into blocks
         target_regions = indices[f"{mode}_indices"]
-        expanded_regions = expand_target_regions_to_blocks(target_regions, block_size)
-        
-        # Update indices with expanded regions
-        updated_indices = indices.copy()
-        updated_indices[f"{mode}_indices"] = expanded_regions
         
         return cls(file_paths=indices["files"], 
-                    indices=updated_indices[f"{mode}_indices"],
-                    metadata=updated_indices["metadata"],
+                    indices=target_regions,
+                    metadata=indices["metadata"],
+                    n_items=indices[f"{mode}_n_items"],
                     sparse_keys=sparse_keys, **kwargs)
 
     def _get_pert_embedding(self, pert_id: str):
@@ -227,44 +176,52 @@ class PerturbationDataset(DistributedAnnDataset):
         """Get onehot encoding for batch."""
         return self.batches_onehot_map[batch]
     
-    def _sample_cells(self, X: scipy.sparse.csr_matrix, target_number: int, barcodes: np.ndarray = None):
+    def _produce_data(self, file_i: int, start: int, end: int):
         """
-        Helper function to sample cells to target number.
+        Produce perturbation data from a region by splitting into target-specific groups.
         
         Args:
-            X: Input sparse matrix (csr)
-            target_number: Target number of cells
-            barcodes: Optional barcodes array
+            file_i: File index
+            start: Region start index
+            end: Region end index
             
-        Returns:
-            Tuple of (sampled_X, sampled_barcodes)
+        Yields:
+            Tuple of (X_pert, cell_indices) for each target group
         """
-        if X.shape[0] < target_number:
-            # Sampling with replacement to pad
-            indices = np.random.choice(X.shape[0], target_number, replace=True)
-            X_sampled = X[indices]
-            barcodes_sampled = barcodes[indices] if barcodes is not None else None
-                
-        elif X.shape[0] > target_number:
-            # Random slicing
-            start_pos = np.random.randint(0, X.shape[0] - target_number + 1)
-            end_pos = start_pos + target_number
-            X_sampled = X[start_pos:end_pos]
-            barcodes_sampled = barcodes[start_pos:end_pos] if barcodes is not None else None
-        else:
-            # Perfect match
-            X_sampled = X
-            barcodes_sampled = barcodes if barcodes is not None else None
-                
-        return X_sampled, barcodes_sampled
+        adata = self.adatas[file_i]
+        X = self._get_mat_by_range(adata, start, end)
+        
+        # Get targets in this region
+        targets = adata.obs[self.target_label][start:end].values
+        target_counts = pd.Series(targets).value_counts()
+        target_cumsum = target_counts.cumsum()
+        target_cumsum = np.insert(target_cumsum.values, 0, 0)
+        
+        for i in range(1, len(target_counts) + 1):
+            start_i, end_i = target_cumsum[i-1], target_cumsum[i]
+            target = target_counts.index[i-1]
+            
+            X_pert = X[start_i:end_i]
+            original_cell_indices = np.arange(start + start_i, start + end_i)
+
+            for j in range(0, X_pert.shape[0], self.group_size_S):
+                X_pert_group = X_pert[j:j+self.group_size_S]
+                cell_indices_group = original_cell_indices[j:j+self.group_size_S]
+
+                if X_pert_group.shape[0] < self.group_size_S:
+                    # Sample with replacement
+                    sample_indices = np.random.choice(X_pert_group.shape[0], self.group_size_S, replace=True)
+                    X_pert_group = X_pert_group[sample_indices]
+                    cell_indices_group = cell_indices_group[sample_indices]
+
+                yield X_pert_group, cell_indices_group, target
     
-    def sampling_control(self, cell_type: str, batch: str, file_i: int, target_number: int):
+    def sampling_control(self, cell_type: str, file_i: int, target_number: int):
         """
         Sample control cells matching covariate cell type and batch.
         
         Args:
             cell_type: Cell type to match
-            batch: Batch to match 
             file_i: File index
             target_number: Number of cells to sample
             
@@ -274,85 +231,33 @@ class PerturbationDataset(DistributedAnnDataset):
         if cell_type not in self.cell_type_ctrl_regions:
             raise ValueError(f"No control regions found for cell type: {cell_type}")
             
-        region_of_files = self.cell_type_ctrl_regions[cell_type]
-        if file_i >= len(region_of_files):
+        if file_i not in self.cell_type_ctrl_regions[cell_type]:
             raise ValueError(f"File index {file_i} not found in control regions for cell type {cell_type}")
             
-        start, end = region_of_files[file_i]
-        if start == 0 and end == 0:
-            raise ValueError(f"No control region found for file {file_i} and cell type {cell_type}")
-            
-        # Get batches in the control region
-        batches = self.adatas[file_i].obs[self.batch_label][start:end].values
-        batch_mask = batches == batch
-        batch_indices = np.where(batch_mask)[0]
+        start, end = self.cell_type_ctrl_regions[cell_type][file_i]
         
-        if len(batch_indices) == 0:
-            # If no exact batch match, use all control cells from this cell type
-            batch_indices = np.arange(end - start)
-            
-        # Adjust indices to global range
-        global_indices = batch_indices + start
-        b_start, b_end = global_indices[0], global_indices[-1] + 1
-        
-        X = self._get_mat_by_range(self.adatas[file_i], b_start, b_end)
-        
-        # Get barcodes if needed
-        barcodes = None
-        if self.barcodes:
-            barcodes = self.adatas[file_i].obs_names[b_start:b_end].values
-            
-        # Sample cells using helper function
-        X_sampled, ctrl_barcodes = self._sample_cells(X, target_number, barcodes)
-                
-        return X_sampled, ctrl_barcodes
+        if (end - start) > target_number:
+            start_pos = np.random.randint(0, end - start - target_number + 1)
+            end_pos = start_pos + target_number
+            X = self._get_mat_by_range(self.adatas[file_i], start_pos, end_pos)
+            barcodes = self.adatas[file_i].obs_names[start_pos:end_pos].values
+        else:
+            X = self._get_mat_by_range(self.adatas[file_i], start, end)
+            barcodes = self.adatas[file_i].obs_names[start:end].values
 
-    def transform(self, file_i: int, target: str, start: int, end: int):
-        """
-        Transform a region of cells from perturbation data.
-        
-        Args:
-            file_i: File index
-            target: Target gene
-            start: Start index
-            end: End index
-            
-        Returns:
-            Tuple of (X_pert, batch, pert_barcodes)
-        """
-        # Get batches in this region
-        batches = self.adatas[file_i].obs[self.batch_label][start:end].values
-        
-        # Find most represented batch
-        unique_batches, counts = np.unique(batches, return_counts=True)
-        most_common_batch = unique_batches[np.argmax(counts)]
-        
-        # Get cells from the most common batch
-        batch_mask = batches == most_common_batch
-        batch_indices = np.where(batch_mask)[0]
-        
-        # Adjust indices to global range
-        global_indices = batch_indices + start
-        b_start, b_end = global_indices[0], global_indices[-1] + 1
-        
-        X = self._get_mat_by_range(self.adatas[file_i], b_start, b_end)
-        
-        # Get barcodes if needed
-        barcodes = None
-        if self.barcodes:
-            barcodes = self.adatas[file_i].obs_names[b_start:b_end].values
-            
-        # Sample cells using helper function
-        X_sampled, pert_barcodes = self._sample_cells(X, self.group_size_S, barcodes)
-                
-        return X_sampled, most_common_batch, pert_barcodes
+        # if not enough cells, sample with replacement
+        if X.shape[0] < target_number:
+            indices = np.random.choice(X.shape[0], target_number, replace=True)
+            X = X[indices]
+            barcodes = barcodes[indices]
+
+        return X, barcodes
 
     def __len__(self):
-        return len(self.batches)
+        return self.n_items
 
     def __iter__(self):
         """Iterate over perturbation samples."""
-        gidx = 0
         if not self._initialized_worker_info:
             self._init_worker_info()
         # Load anndata objects in backed mode
@@ -360,51 +265,56 @@ class PerturbationDataset(DistributedAnnDataset):
             self.adatas = [anndata.read_h5ad(f, backed="r") for f in self.files]
             
         for region_idx, region in enumerate(self.batches):
-            file_id, target, start, end = region
+            file_i, start, end = region
 
-            # print("I'm in worker", self.wid, self.ray_rank, self.ray_size, self.nworkers) 
-            # Skip control samples and worker/rank filtering
-            if target == self.control_label or not (gidx % self.ray_size == self.ray_rank and gidx % self.nworkers == self.wid):
-                gidx += 1
+            # Worker/rank filtering
+            if not (region_idx % self.ray_size == self.ray_rank and region_idx % self.nworkers == self.wid):
                 continue
 
             try:
-                # Get perturbation cells
-                X_pert, batch, pert_barcodes = self.transform(file_id, target, start, end)
-                
                 # Get cell type (each file is one cell type only)
-                cell_type = self.adatas[file_id].obs[self.cell_type_label].iloc[0]
+                cell_type = self.adatas[file_i].obs[self.cell_type_label].iloc[0]
                 
-                # Get control cells with matching covariates
-                X_ctrl, ctrl_barcodes = self.sampling_control(cell_type, batch, file_id, self.group_size_S)
-                
-                # Get embeddings and onehot encodings
-                pert_emb = self._get_pert_embedding(target)
-                cell_type_onehot = self.get_celltype_onehot(cell_type)
-                batch_onehot = self.get_batch_onehot(batch)
-                
-                # Create sample dictionary
-                sample = {
-                    "pert_cell_emb": X_pert, # scipy csr matrix [S, G]
-                    "ctrl_cell_emb": X_ctrl, # scipy csr matrix [S, G]
-                    "pert_emb": pert_emb, # tensor [5102]
-                    "pert_name": np.array([target]), 
-                    "cell_type_onehot": cell_type_onehot, # tensor [n_cell_type]
-                    "batch_onehot": batch_onehot, # tensor [n_batches]
-                }
-                
-                # Add barcodes if enabled
-                if self.barcodes:
-                    sample["pert_cell_barcode"] = pert_barcodes # np.ndarray [S]
-                    sample["ctrl_cell_barcode"] = ctrl_barcodes # np.ndarray [S]
+                # Process each target in this region
+                for X_pert, cell_indices, target in self._produce_data(file_i, start, end):
                     
-                yield sample
+                    # Get batches for perturbation cells
+                    batches = self.adatas[file_i].obs[self.batch_label].iloc[cell_indices].values
+                    
+                    # Get control cells with matching covariates
+                    X_ctrl, ctrl_barcodes = self.sampling_control(cell_type, file_i, self.group_size_S)
+                    
+                    # Get embeddings and onehot encodings
+                    pert_emb = self._get_pert_embedding(target)
+                    cell_type_onehot = self.get_celltype_onehot(cell_type)
+                    batch_onehots = [self.get_batch_onehot(batch) for batch in batches]
+                    
+                    # Get barcodes for perturbation cells if needed
+                    pert_barcodes = None
+                    if self.barcodes:
+                        pert_barcodes = self.adatas[file_i].obs_names[cell_indices].values
+                    
+                    # Create sample dictionary
+                    sample = {
+                        "pert_cell_emb": X_pert, # scipy csr matrix [S, G]
+                        "ctrl_cell_emb": X_ctrl, # scipy csr matrix [S, G]
+                        "pert_emb": pert_emb, # tensor [5102]
+                        "pert_name": np.array([target]), 
+                        "cell_type": np.array([cell_type]), # str
+                        "cell_type_onehot": torch.stack([cell_type_onehot] * self.group_size_S), # tensor [S, n_cell_type]
+                        "batch_onehot": torch.stack(batch_onehots), # tensor [S, n_batches]
+                    }
+                    
+                    # Add barcodes if enabled
+                    if self.barcodes:
+                        sample["pert_cell_barcode"] = pert_barcodes # np.ndarray [S]
+                        sample["ctrl_cell_barcode"] = ctrl_barcodes # np.ndarray [S]
+                        
+                    yield sample
                 
             except Exception as e:
                 logger.warning(f"Error processing region {region}: {e}")
                 
-            gidx += 1
-
 
 class PerturbationDataModule(AnnDataModule):
     """
@@ -425,13 +335,13 @@ class PerturbationDataModule(AnnDataModule):
         use_batches: bool = True,
         group_size_S: int = 32,
         barcodes: bool = False,
-        block_size: int = 64,
+        block_size: int = 2048,
         **kwargs
     ):
         if not kwargs.get("sparse_keys", None):
             kwargs["sparse_keys"] = ["X"]
 
-        indices = self.build_indices(files)
+        indices = self.build_indices(files, target_label, control_label, block_size)
         # Initialize parent with PerturbationDataset
         super().__init__(
             indices=indices,
@@ -452,10 +362,13 @@ class PerturbationDataModule(AnnDataModule):
         self.use_batches = use_batches
         self.group_size_S = group_size_S
         self.barcodes = barcodes
-        self.block_size = block_size
 
     @staticmethod
-    def build_indices(files: list[str], target_label: str = "target_gene"):
+    def build_indices(files: list[str], 
+                      target_label: str = "target_gene", 
+                      control_label: str = "non-targeting", 
+                      block_size: int = 2048,
+                      group_size_S: int = 32):
         """Build indices for perturbation dataset."""
         indices = {
             "files": files,
@@ -464,18 +377,43 @@ class PerturbationDataModule(AnnDataModule):
             "test_indices": [],
             "metadata": {},
         }
+        n_items = 0
         # more split logic will go here, but only train for now
         for file_i, file in enumerate(files):
-            # we count the number of cells per each target gene then build the index tuple (file_i, target_i, start_i, end_i)
             adata = anndata.read_h5ad(file, backed="r")
+            
+            # Create regions that respect target boundaries and minimum block size
             target_counts = adata.obs.groupby(target_label, observed=True).agg({target_label: "count"})
+            # each target will be yieled at least one item, but each target has more than group_size_S items, n items = n cells // group_size_S
+            non_control_targets = target_counts[target_counts.index != control_label]
+            items = np.array(non_control_targets[target_label]) // group_size_S
+            items[items == 0] = 1
+            n_items += np.sum(items)
+
             cumsum = np.cumsum(target_counts[target_label])
-            # prepend 0
             cumsum = np.insert(cumsum, 0, 0)
+            
+            # Group consecutive targets into blocks of minimum size
+            current_start = 0
             for i in range(1, len(target_counts) + 1):
-                start, end = cumsum[i-1], cumsum[i]
-                target = target_counts.index[i-1]
-                indices["train_indices"].append((file_i, target, start, end))
+                target_end = cumsum[i]
+                current_target = target_counts.index[i-1]
+
+                if current_target == control_label:
+                    # check if we have a lagging region , then close it
+                    if current_start != indices["train_indices"][-1][2]:
+                        indices["train_indices"].append((file_i, current_start, cumsum[i-1]))
+                    # start new region
+                    current_start = target_end
+                    continue
+
+                # If we've reached block size or it's the last target, create a region
+                if target_end - current_start >= block_size or i == len(target_counts):
+                    indices["train_indices"].append((file_i, current_start, target_end))
+                    current_start = target_end
+        indices["train_n_items"] = n_items
+        indices["val_n_items"] = 0  
+        indices["test_n_items"] = 0
         return indices
 
     @profile
@@ -545,8 +483,7 @@ class PerturbationDataModule(AnnDataModule):
             'batch_label': self.batch_label,
             'use_batches': self.use_batches,
             'group_size_S': self.group_size_S,
-            'barcodes': self.barcodes,
-            'block_size': self.block_size
+            'barcodes': self.barcodes
         }
         
         if stage == "fit":
@@ -569,17 +506,26 @@ if __name__ == "__main__":
     import glob
     files = glob.glob("/mnt/hdd2/tan/competition_support_set_sorted/*.h5")
     dm = PerturbationDataModule(
+        files=files,
+        barcodes=True,
         pert_embedding_file="/mnt/hdd2/tan/competition_support_set/ESM2_pert_features.pt"
     )
     dm.setup(stage="fit")
     dataloader = DataLoader(dm.train_ds, batch_size=16, collate_fn=PerturbationDataModule.collate_fn, num_workers=8, pin_memory=True, persistent_workers=False)
     iter = 0
-    for batch in dataloader:
+    for batch in dm.train_ds:
         print("Batch keys:", batch.keys())
         print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
+        print(batch['pert_cell_emb'])
         print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
+        print(batch['ctrl_cell_emb'])
+        print("cell_type_onehot shape:", batch['cell_type_onehot'].shape)
+        print("batch_onehot shape:", batch['batch_onehot'].shape)
         print("pert_emb shape:", batch['pert_emb'].shape)
         print("pert_name:", batch['pert_name'])
-        iter += 1
-        if iter >= 10:
-            break
+        print("pert_cell_barcode shape:", batch['pert_cell_barcode'].shape)
+        print(batch['pert_cell_barcode'])
+        print("ctrl_cell_barcode shape:", batch['ctrl_cell_barcode'].shape)
+        print(batch['ctrl_cell_barcode'])
+        print("cell_type:", batch['cell_type'])
+        break
