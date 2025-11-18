@@ -58,7 +58,7 @@ class PerturbationDataset(DistributedAnnDataset):
     def __init__(
         self,
         pert_embedding_file: str,
-        hvg_file: str,
+        hvg_file: str = None,
         cell_type_label: str = "cell_type",
         target_label: str = "target_gene",
         control_label: str = "non-targeting",
@@ -69,7 +69,6 @@ class PerturbationDataset(DistributedAnnDataset):
         n_items: int = None,
         cell_noise: float = 0.3,
         gene_noise: float = 0.3,
-        hvg_only: bool = True,
         *args,
         **kwargs
     ):
@@ -89,12 +88,7 @@ class PerturbationDataset(DistributedAnnDataset):
         self.cell_noise = cell_noise
         self.gene_noise = gene_noise
         self.adatas = None
-        self.loss_weight_dicts = None
         self.pert_embedding = torch.load(pert_embedding_file)
-        if hvg_file is not None:
-            self._hvg_genes = open(hvg_file, "r").read().splitlines()
-        else:
-            self._hvg_genes = None
 
         # Initialize control region tracking per cell type
         self.cell_type_ctrl_regions = {}  # {cell_type: (start, end)} per file
@@ -102,8 +96,6 @@ class PerturbationDataset(DistributedAnnDataset):
 
         self._initialize_region_mappings()
         self._initialized_worker_info = False
-        self.hvg_only = hvg_only
-        logger.info(f"PerturbationDataset initialized with hvg_only: {self.hvg_only}")
 
     @profile
     def _get_mat_by_range(self, h5file: h5py.File, start: int, end: int):
@@ -332,14 +324,10 @@ class PerturbationDataset(DistributedAnnDataset):
             logger.info(f"Loading anndata objects in backed mode")
             self.adata_obs = []
             self.adata_vars = []
-            self.loss_weight_dicts = []
             for f in self.files:
                 adata = anndata.read_h5ad(f, backed="r")
                 self.adata_obs.append(deepcopy(adata.obs))
                 self.adata_vars.append(deepcopy(adata.var))
-                basename = os.path.basename(f)
-                dirname = os.path.dirname(f)
-                self.loss_weight_dicts.append(pickle.load(open(f'{dirname}/degs/{basename}_loss_weight_dict.pkl', 'rb')))
             if self._hvg_genes is not None:
                 self._hvg_mask = np.where(self.adata_vars[0].index.isin(self._hvg_genes))[0]
             logger.info(f"Anndata objects loaded")
@@ -347,8 +335,6 @@ class PerturbationDataset(DistributedAnnDataset):
             logger.info(f"Loading h5 files in swmr mode")
             self.h5files = [h5py.File(f, 'r', libver='latest', swmr=True) for f in self.files]
             logger.info(f"H5 files loaded")
-        # if self.adatas is None:
-            # self.adatas = [anndata.read_h5ad(f, backed="r") for f in self.files]
 
         import random
         random.shuffle(self.batches)
@@ -382,18 +368,6 @@ class PerturbationDataset(DistributedAnnDataset):
                     batch_onehots = [self.get_batch_onehot(batch) for batch in batches]
                     pert_idx = self.get_pert_name_idx(target)
 
-                    loss_weight_dict = self.loss_weight_dicts[file_i]
-                    default_loss_weight = (np.ones(X_pert.shape[1]) / X_pert.shape[1]) ** 2
-                    loss_weight = np.array(loss_weight_dict.get(target, default_loss_weight))
-                    loss_weight = np.nan_to_num(loss_weight, nan=0.0)
-                    top = np.argsort(-loss_weight)
-                    loss_weight[top[:100]] = 1.0
-                    loss_weight[top[100:]] = 0.0
-
-                    # q90 = np.quantile(loss_weight, 0.999)
-                    # loss_weight[loss_weight < q90] = 0.0
-                    # loss_weight[loss_weight > q90] = 1.0
-
                     # Get barcodes for perturbation cells if needed
                     pert_barcodes = None
                     if self.barcodes:
@@ -401,11 +375,9 @@ class PerturbationDataset(DistributedAnnDataset):
 
                     if self.hvg_only:
                         # hvg_mask = np.where(np.array(self.adata_vars[file_i]["highly_variable"]))[0]
-                        loss_weight_emb = loss_weight[self._hvg_mask]
                         X_pert_emb = X_pert[:, self._hvg_mask]
                         X_ctrl_emb = X_ctrl[:, self._hvg_mask]
                     else:
-                        loss_weight_emb = loss_weight
                         X_pert_emb = X_pert
                         X_ctrl_emb = X_ctrl
 
@@ -423,10 +395,6 @@ class PerturbationDataset(DistributedAnnDataset):
                         "cell_type_onehot": torch.stack([cell_type_onehot] * self.group_size_S), # [S, n_cell_type]
                         "batch_onehot": torch.stack(batch_onehots), # tensor [S, n_batches]
                         "pert_idx": torch.tensor([pert_idx], dtype=torch.long), # tensor [n_pert_names]
-                        "loss_weight_emb": torch.tensor(loss_weight_emb), # tensor [E]
-                        "loss_weight_gene": torch.tensor(loss_weight), # tensor [G]
-                        # "hvg_mask": torch.tensor(self._hvg_mask), # tensor [G]
-                        # "hvg_gene_cos_dis": hvg_gene_cos_dis, # tensor [E]
                     }
 
                     # Add barcodes if enabled
@@ -736,81 +704,3 @@ class PerturbationDataModule(AnnDataModule):
             self.predict_ds = self.dataset.create_distributed_ds(
                 self.indices, self.sparse_keys, "train", **dataset_kwargs
             )
-
-if __name__ == "__main__":
-    # Test with fewshot config file
-    config_path = "/home/tphan/Softwares/vcc-models/configs/data-hq.toml"
-
-    dm = PerturbationDataModule(
-        num_workers=0,
-        pin_memory=True,
-        prefetch_factor=None,
-        config_path=config_path,
-        hvg_file="/home/tphan/Softwares/vcc-models/hvg-4000-competition-extended.txt",
-        barcodes=True,
-        pert_embedding_file="/mnt/hdd2/tan/competition_support_set_sorted/ESM2_pert_features.pt"
-    )
-    dm.setup(stage="fit")
-
-    print(f"Training samples: {dm.indices['train_n_items']}")
-    print(f"Validation samples: {dm.indices['val_n_items']}")
-    print(f"Test samples: {dm.indices['test_n_items']}")
-    print(f"Training regions: {len(dm.indices['train_indices'])}")
-    print(f"Validation regions: {len(dm.indices['val_indices'])}")
-    print(f"Test regions: {len(dm.indices['test_indices'])}")
-
-    # Show some sample regions
-    if dm.indices['train_indices']:
-        print(f"Sample train regions: {dm.indices['train_indices'][:3]}")
-    if dm.indices['val_indices']:
-        print(f"Sample val regions: {dm.indices['val_indices'][:3]}")
-    if dm.indices['test_indices']:
-        print(f"Sample test regions: {dm.indices['test_indices'][:3]}")
-
-    # Test train dataloader
-
-    dataloader = dm.train_dataloader()
-    # dataloader = DataLoader(dm.train_ds, **dm.loader_config)
-    # dataloader = dm.train_ds
-    if dm.indices['train_n_items'] > 0:
-        print("\n=== Testing Training Data ===")
-        total_cells = 0
-        # len_train_ds = len(dm.train_ds)
-        len_train_ds = len(dataloader)
-        print(f"Length of dataloader: {len_train_ds}")
-        for i, batch in tqdm.tqdm(enumerate(dataloader), total=len_train_ds):
-            total_cells += batch['pert_cell_emb'].shape[0] * batch['pert_cell_emb'].shape[1]
-            if i > len_train_ds:
-                break
-            #print("Batch keys:", batch.keys())
-            ## print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
-            ## print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
-            #print("pert_cell_g shape:", batch['pert_cell_g'].shape)
-            #print(batch["pert_cell_g"][0])
-            #print("pert_cell_emb shape:", batch['pert_cell_emb'].shape)
-            #print(batch["pert_cell_emb"][0])
-            #print("ctrl_cell_g shape:", batch['ctrl_cell_g'].shape)
-            #print(batch["ctrl_cell_g"][0])
-            #print("ctrl_cell_emb shape:", batch['ctrl_cell_emb'].shape)
-            #print(batch["ctrl_cell_emb"][0])
-            #print("cell_type_onehot shape:", batch['cell_type_onehot'].shape)
-            #print("batch_onehot shape:", batch['batch_onehot'].shape)
-            #print("pert_emb shape:", batch['pert_emb'].shape)
-            #print("pert_name:", batch['pert_name'])
-            #print("cell_type:", batch['cell_type'])
-            ## print("loss_weight_emb shape:", batch['loss_weight_emb'].shape)
-            ## print(batch["loss_weight_emb"][0])
-            ## print("loss_weight_gene shape:", batch['loss_weight_gene'].shape)
-            ## print(batch["loss_weight_gene"][0])
-            ## barcodes
-            #print("pert_cell_barcode shape:", batch['pert_cell_barcode'])
-            #print("ctrl_cell_barcode shape:", batch['ctrl_cell_barcode'])
-            #break
-        print(f"Total train cells: {total_cells}")
-        # total_cells = 0
-        # len_val_ds = len(dm.val_ds)
-        # for i, batch in tqdm.tqdm(enumerate(dm.val_ds), total=len_val_ds):
-            # if i > len_val_ds:
-                # break
-            # total_cells += batch['pert_cell_g'].shape[0]
-        # print(f"Total val cells: {total_cells}")
