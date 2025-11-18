@@ -53,7 +53,6 @@ def benchmark(loader, n_samples, batch_size, max_iteration=None, warmup_iteratio
     batch_time = time.time()
     # we warmup for the first warmup_iteration iterations, then we run for max_iteration iterations
     max_iteration += warmup_iteration
-    max_iteration = min(max_iteration, len(loader) + warmup_iteration)
     for i, _batch in tqdm(enumerate(loader_iter), total=max_iteration):
         if i < warmup_iteration:
             batch_time = time.time()
@@ -142,7 +141,7 @@ def main():
     samples_per_sec, time_per_sample, batch_times, peak_memory = benchmark(
         dataloader,
         n_cells,
-        args.batch_size * 16,
+        args.batch_size,
         max_iteration=args.max_iteration,
         warmup_iteration=args.warmup_iteration,
         sampling_memory_step=args.sampling_memory_step,
