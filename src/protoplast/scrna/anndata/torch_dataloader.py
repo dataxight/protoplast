@@ -384,7 +384,7 @@ class DistributedCellLineAnnDataset(DistributedAnnDataset):
     metadata_cb correctly
     """
 
-    def transform(self, start: int, end: int):
+    def transform(self, ad: anndata.AnnData, start: int, end: int):
         X = super().transform(start, end)
         line_ids = self.ad.obs["cell_line"].iloc[start:end]
         line_idx = np.searchsorted(self.cell_lines, line_ids)
