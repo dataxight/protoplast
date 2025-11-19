@@ -15,6 +15,10 @@
         <link rel="canonical" href="https://protoplast.dataxight.com/readme/">
       
       
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../installation/">
       
       
       <link rel="icon" href="../assets/images/favicon.png">
@@ -74,6 +78,11 @@
     <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
+      
+        
+        <a href="#protoplast" class="md-skip">
+          Skip to content
+        </a>
       
     </div>
     <div data-md-component="announce">
@@ -272,6 +281,88 @@
       
   
   
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Readme
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    Readme
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#features" class="md-nav__link">
+    <span class="md-ellipsis">
+      Features
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-started" class="md-nav__link">
+    <span class="md-ellipsis">
+      Getting started
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
   
   
     <li class="md-nav__item">
@@ -395,6 +486,34 @@
   
   
   
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#features" class="md-nav__link">
+    <span class="md-ellipsis">
+      Features
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-started" class="md-nav__link">
+    <span class="md-ellipsis">
+      Getting started
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -413,9 +532,35 @@
   
 
 
-  <h1>Readme</h1>
-
-
+<h1 id="protoplast">PROTOplast<a class="headerlink" href="#protoplast" title="Permanent link">&para;</a></h1>
+<p><img alt="PyPI version" src="https://img.shields.io/pypi/v/protoplast.svg" />
+<a href="https://protoplast.readthedocs.io/en/latest/?version=latest"><img alt="Documentation Status" src="https://readthedocs.org/projects/protoplast/badge/?version=latest" /></a></p>
+<p>Early developer preview of PROTOplast targets acceleration of ML model training workflows</p>
+<ul>
+<li>PyPI package: https://pypi.org/project/protoplast/</li>
+</ul>
+<h2 id="features">Features<a class="headerlink" href="#features" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Stream directly from remote/cloud storage (via runtime patching of anndata to use fsspec)</li>
+<li>Accelerated training of your ML models (14.5minutes on an A100 instance with 4 GPUs). Scale to multi-node clusters with zero code changes (with native Ray integration)</li>
+<li>Drop-in replacement of your custom ML training (by subclassing Lightning's LightningModule)</li>
+</ul>
+<h2 id="getting-started">Getting started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h2>
+<p>It's easy to get started with PROTOplast</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">protoplast</span><span class="w"> </span><span class="kn">import</span> <span class="n">RayTrainRunner</span><span class="p">,</span> <span class="n">DistributedCellLineAnnDataset</span><span class="p">,</span> <span class="n">LinearClassifier</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">glob</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">files</span> <span class="o">=</span> <span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;/data/tahoe100/*.h5ad&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">trainer</span> <span class="o">=</span> <span class="n">RayTrainRunner</span><span class="p">(</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>   <span class="n">LinearClassifier</span><span class="p">,</span>  <span class="c1"># replace with your own model</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>   <span class="n">DistributedCellLineAnnDataset</span><span class="p">,</span>  <span class="c1"># replace with your own Dataset</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>   <span class="p">[</span><span class="s2">&quot;num_genes&quot;</span><span class="p">,</span> <span class="s2">&quot;num_classes&quot;</span><span class="p">],</span>  <span class="c1"># change according to what you need for your model</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="p">)</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="n">trainer</span><span class="o">.</span><span class="n">train</span><span class="p">(</span><span class="n">file_paths</span><span class="o">=</span><span class="n">files</span><span class="p">)</span>
+</code></pre></div>
+<p>Additional tutorials are available at https://protoplast.dataxight.com/tutorials</p>
+<p>Full documentation at https://protoplast.dataxight.com</p>
 
 
 
