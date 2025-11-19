@@ -22,6 +22,7 @@ from torch.utils.data import DataLoader
 
 from protoplast.scrna.anndata.data_modules.utils import make_onehot_encoding_map, parse_dataset_config, collate_sparse_matrices_torch_direct
 from protoplast.scrna.anndata.torch_dataloader import AnnDataModule, DistributedAnnDataset
+from protoplast.scrna.anndata.strategy import SequentialShuffleStrategy
 
 logger = logging.getLogger(__name__)
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -89,6 +90,7 @@ class PerturbationDataset(DistributedAnnDataset):
         self.gene_noise = gene_noise
         self.adatas = None
         self.pert_embedding = torch.load(pert_embedding_file)
+        self._hvg_genes = None
 
         # Initialize control region tracking per cell type
         self.cell_type_ctrl_regions = {}  # {cell_type: (start, end)} per file
@@ -100,15 +102,11 @@ class PerturbationDataset(DistributedAnnDataset):
     @profile
     def _get_mat_by_range(self, h5file: h5py.File, start: int, end: int):
         """Get matrix by range."""
-        if len(self.sparse_keys) == 1:
-            # mat = getattr(adata, self.sparse_keys[0])[start:end]
-            mat = sparse_dataset(h5file[self.sparse_keys[0]])
-            mat = mat[start:end]
-            if not scipy.sparse.issparse(mat):
-                mat = scipy.sparse.csr_matrix(mat)
-            return mat
-        else:
-            raise ValueError(f"Multiple sparse keys are not supported for perturbation dataset: {self.sparse_keys}")
+        mat = sparse_dataset(h5file[self.sparse_key])
+        mat = mat[start:end]
+        if not scipy.sparse.issparse(mat):
+            mat = scipy.sparse.csr_matrix(mat)
+        return mat
 
     def _init_worker_info(self):
         self._initialized_worker_info = True
@@ -178,7 +176,7 @@ class PerturbationDataset(DistributedAnnDataset):
         logger.info(f"Control regions per cell type: {dict(self.cell_type_ctrl_regions)}")
 
     @classmethod
-    def create_distributed_ds(cls, indices: dict, sparse_keys: list[str], mode: str = "train", **kwargs):
+    def create_distributed_ds(cls, indices: dict, sparse_key: str, mode: str = "train", **kwargs):
         """
         Create distributed dataset with target regions.
 
@@ -187,7 +185,7 @@ class PerturbationDataset(DistributedAnnDataset):
             "files": [list of file paths],
             "train_indices": [...target_regions],  # List of (file_i, start_i, end_i)
             "metadata": {},
-            "sparse_keys": ["X"]
+            "sparse_key": "X"
         }
         """
         target_regions = indices[f"{mode}_indices"]
@@ -196,7 +194,7 @@ class PerturbationDataset(DistributedAnnDataset):
                     indices=target_regions,
                     metadata=indices["metadata"],
                     n_items=indices[f"{mode}_n_items"],
-                    sparse_keys=sparse_keys, **kwargs)
+                    sparse_key=sparse_key, **kwargs)
 
     def _get_pert_embedding(self, pert_id: str):
         """Get perturbation embedding, create zero embedding if not found."""
@@ -373,7 +371,7 @@ class PerturbationDataset(DistributedAnnDataset):
                     if self.barcodes:
                         pert_barcodes = self.adata_obs[file_i].index[cell_indices].values
 
-                    if self.hvg_only:
+                    if self._hvg_genes:
                         # hvg_mask = np.where(np.array(self.adata_vars[file_i]["highly_variable"]))[0]
                         X_pert_emb = X_pert[:, self._hvg_mask]
                         X_ctrl_emb = X_ctrl[:, self._hvg_mask]
@@ -381,7 +379,6 @@ class PerturbationDataset(DistributedAnnDataset):
                         X_pert_emb = X_pert
                         X_ctrl_emb = X_ctrl
 
-                    hvg_genes = self.adata_vars[file_i].index[self._hvg_mask]
                     # hvg_gene_cos_dis = self.get_hvg_cos_dis(target, hvg_genes)
                     # Create sample dictionary
                     sample = {
@@ -495,8 +492,13 @@ class PerturbationDataModule(AnnDataModule):
             file_splits = None
             target_splits = None
 
-        if not kwargs.get("sparse_keys", None):
-            kwargs["sparse_keys"] = ["X"]
+        if not kwargs.get("sparse_key", None):
+            kwargs["sparse_key"] = "X"
+        shuffle_strategy = SequentialShuffleStrategy(
+            files,
+            batch_size=batch_size,
+            total_workers=num_workers, test_size=0.0, validation_size=0.0, pre_fetch_then_batch=prefetch_factor)
+        kwargs["shuffle_strategy"] = shuffle_strategy
 
         indices = self.build_indices(files,
                                     target_label,
@@ -691,16 +693,16 @@ class PerturbationDataModule(AnnDataModule):
 
         if stage == "fit":
             self.train_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_keys, "train", **dataset_kwargs
+                self.indices, self.sparse_key, "train", **dataset_kwargs
             )
             self.val_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_keys, "val", **dataset_kwargs
+                self.indices, self.sparse_key, "val", **dataset_kwargs
             )
         if stage == "test":
             self.val_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_keys, "test", **dataset_kwargs
+                self.indices, self.sparse_key, "test", **dataset_kwargs
             )
         if stage == "predict":
             self.predict_ds = self.dataset.create_distributed_ds(
-                self.indices, self.sparse_keys, "train", **dataset_kwargs
+                self.indices, self.sparse_key, "train", **dataset_kwargs
             )
