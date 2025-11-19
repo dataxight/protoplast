@@ -9,6 +9,7 @@ copyright: Maintained by <a href="https://dataxight.com">dataxight</a>.
 
 nav:
   - Home: index.md
+  - Readme: readme.md
   - Installation: installation.md
   - Tutorials: tutorials/index.md
   - API: apis/index.md
