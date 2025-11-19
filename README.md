@@ -1,4 +1,4 @@
-# protoplast
+# PROTOplast
 
 ![PyPI version](https://img.shields.io/pypi/v/protoplast.svg)
 [![Documentation Status](https://readthedocs.org/projects/protoplast/badge/?version=latest)](https://protoplast.readthedocs.io/en/latest/?version=latest)
