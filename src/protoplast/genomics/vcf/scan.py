@@ -48,7 +48,7 @@ def _vcf_table_factory_function(
     required_columns: list[str] | None = None,
     arrow_filters: pyarrow.compute.Expression | None = None,
     info_fields: list[str] | None = None,
-    samples: list[str] | None = [],
+    samples: list[str] | None = None,
     genotype_fields: list[str] | None = None,
     regions: list[str] | None = None,
     batch_size: int = 131072,
@@ -57,7 +57,7 @@ def _vcf_table_factory_function(
     and returns an iterator of Daft RecordBatches."""
 
     # Create VcfFile with appropriate parameters
-    vcf_kwargs = {"batch_size": batch_size}
+    vcf_kwargs = {"batch_size": batch_size, "samples": []}
 
     if info_fields is not None:
         vcf_kwargs["info_fields"] = info_fields
@@ -122,7 +122,7 @@ class VCFScanOperator(ScanOperator):
         self,
         path: str,
         info_fields: list[str] | None = None,
-        samples: list[str] | None = [],
+        samples: list[str] | None = None,
         genotype_fields: list[str] | None = None,
         regions: list[str] | None = None,
         batch_size: int = 131072,
@@ -130,7 +130,7 @@ class VCFScanOperator(ScanOperator):
         super().__init__()
         self._path = path
         self._info_fields = info_fields
-        self._samples = samples
+        self._samples = [] if samples is None else samples
         self._genotype_fields = genotype_fields
         self._regions = regions
         self._batch_size = batch_size
