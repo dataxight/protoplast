@@ -52,11 +52,14 @@ def _vcf_table_factory_function(
     genotype_fields: list[str] | None = None,
     regions: list[str] | None = None,
     batch_size: int = 131072,
+    limit: int | None = None,
 ) -> Iterator[PyRecordBatch]:
     """A factory function that reads a VCF file using oxbow,
     and returns an iterator of Daft RecordBatches."""
-
     # Create VcfFile with appropriate parameters
+
+    if limit is not None and limit < batch_size:
+        batch_size = limit
     vcf_kwargs = {"batch_size": batch_size}
 
     if info_fields is not None:
@@ -226,6 +229,7 @@ class VCFScanOperator(ScanOperator):
                 self._genotype_fields,
                 self._regions,
                 self._batch_size,
+                pushdowns.limit
             ),
             schema=self._schema._schema,
             num_rows=None,
