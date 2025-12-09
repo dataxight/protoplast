@@ -58,7 +58,7 @@ def _vcf_table_factory_function(
     and returns an iterator of Daft RecordBatches."""
     # Create VcfFile with appropriate parameters
 
-    if limit < batch_size:
+    if limit is not None and limit < batch_size:
         batch_size = limit
     vcf_kwargs = {"batch_size": batch_size}
 
