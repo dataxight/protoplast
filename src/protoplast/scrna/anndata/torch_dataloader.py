@@ -384,7 +384,7 @@ class DistributedCellLineAnnDataset(DistributedAnnDataset):
     metadata_cb correctly
     """
 
-    def transform(self, start: int, end: int):
+    def transform(self, ad: anndata.AnnData, start: int, end: int):
         X = super().transform(start, end)
         line_ids = self.ad.obs["cell_line"].iloc[start:end]
         line_idx = np.searchsorted(self.cell_lines, line_ids)
@@ -399,6 +399,7 @@ class AnnDataModule(pl.LightningDataModule):
         prefetch_factor: int,
         sparse_key: str,
         shuffle_strategy: ShuffleStrategy,
+        pin_memory: bool = True,
         before_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         after_dense_cb: Callable[[torch.Tensor, str | int], torch.Tensor] = None,
         override_thread: int | None = None,

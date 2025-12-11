@@ -136,6 +136,8 @@ def main():
         pin_memory=False,
         persistent_workers=False,
     )
+
+
     samples_per_sec, time_per_sample, batch_times, peak_memory = benchmark(
         dataloader,
         n_cells,

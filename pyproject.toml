@@ -37,6 +37,7 @@ dependencies = [
   "scikit-learn>=1.7.1",
   "torchvision>=0.23.0",
   "s3fs>=2025.7.0",
+  "braceexpand"
 ]
 requires-python = ">= 3.10"
 
@@ -85,6 +86,8 @@ select = [
     "UP",  # pyupgrade
 ]
 ignore = ["W293"]
+
+ignore = ["W293", "W291"]
 
 [tool.uv]
 package = true
